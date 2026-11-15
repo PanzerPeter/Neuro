@@ -34,12 +34,21 @@ impl Parser {
         }
     }
 
-    /// Parse `PATTERN = value else |binding|? { ... }`. The `val` keyword is already
-    /// consumed; `start_span` is its span.
+    /// Parse `PATTERN (: TYPE)? = value else |binding|? { ... }`. The `val` keyword is
+    /// already consumed; `start_span` is its span.
     pub(super) fn parse_val_else(&mut self, start_span: Span) -> ParseResult<Stmt> {
         let pattern = self.parse_pattern()?;
 
         self.skip_newlines();
+        let ty = if self.check(&TokenKind::Colon) {
+            self.advance(); // consume ':'
+            self.skip_newlines();
+            let ty = self.parse_type()?;
+            self.skip_newlines();
+            Some(ty)
+        } else {
+            None
+        };
         self.consume(TokenKind::Equal, "'=' after a `val-else` pattern")?;
         self.skip_newlines();
 
@@ -58,6 +67,7 @@ impl Parser {
         let span = start_span.merge(value.span());
         Ok(Stmt::ValElse {
             pattern,
+            ty,
             value,
             else_binding,
             else_block,

@@ -294,6 +294,14 @@ pub enum TypeError {
     UnknownTensorConstructor { ctor: String, span: Span },
 
     #[error(
+        "the tensor type `file.tensor(...)` reads cannot be inferred here; annotate what it is bound to: `val w: Tensor<f32, [2, 3]> = file.tensor(\"w\")?`"
+    )]
+    TensorReadNeedsType { span: Span },
+
+    #[error("`add` takes a borrowed tensor, `&t`; found {found}")]
+    TensorWriteNeedsBorrow { found: Type, span: Span },
+
+    #[error(
         "`{op}` is not defined on a tensor of {element}: it requires an element type with arithmetic, so use an integer or a float tensor"
     )]
     TensorElementNotArithmetic {
@@ -1649,6 +1657,8 @@ impl TypeError {
             | Self::TensorScalarNeedsConstructor { span, .. }
             | Self::TensorTypeNotInferable { span, .. }
             | Self::UnknownTensorConstructor { span, .. }
+            | Self::TensorReadNeedsType { span }
+            | Self::TensorWriteNeedsBorrow { span, .. }
             | Self::TensorElementNotArithmetic { span, .. }
             | Self::TensorBroadcastMismatch { span, .. }
             | Self::TensorMatMulMismatch { span, .. }

@@ -64,6 +64,24 @@ fn parses_a_tuple_variant_pattern_with_an_else_binding() {
 }
 
 #[test]
+fn an_annotation_after_the_pattern_types_the_scrutinee() {
+    let stmt = only_val_else(
+        r#"
+        func test() {
+            val Ok(w): Result<Tensor<f32, [2]>, IoError> = file.tensor("w") else |e| { return 1 }
+        }
+    "#,
+    );
+    let Stmt::ValElse { ty, .. } = stmt else {
+        panic!("expected a val-else");
+    };
+    assert!(
+        matches!(ty, Some(syntax_parsing::Type::Generic { ref name, .. }) if name.name == "Result"),
+        "annotation: {ty:?}"
+    );
+}
+
+#[test]
 fn parses_without_an_else_binding() {
     let stmt = only_val_else(
         r#"

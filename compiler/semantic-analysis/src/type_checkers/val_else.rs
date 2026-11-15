@@ -31,12 +31,24 @@ impl TypeChecker {
     pub(crate) fn check_val_else(
         &mut self,
         pattern: &Pattern,
+        annotation: Option<&ast_types::Type>,
         value: &Expr,
         else_binding: Option<&Identifier>,
         else_block: &[Stmt],
         span: Span,
     ) -> Option<()> {
-        let scrut_ty = self.check_expr(value, None).unwrap_or(Type::Unknown);
+        // An annotation types the scrutinee, as `let PAT: T = ... else` does in Rust, so a
+        // value typed by its context (`file.tensor(name)`) can be bound this way too.
+        let declared = annotation.and_then(|ty| self.resolve_type(ty));
+        let mut scrut_ty = self
+            .check_expr(value, declared.as_ref())
+            .unwrap_or(Type::Unknown);
+        if let Some(declared) = declared {
+            if !self.assignable(&scrut_ty, &declared) {
+                self.record_type_mismatch(&declared, scrut_ty, value.span());
+            }
+            scrut_ty = declared;
+        }
 
         let mut bindings: Vec<(String, Type, Span)> = Vec::new();
         self.check_pattern(pattern, &scrut_ty, &mut bindings);

@@ -12,6 +12,7 @@ mod interpolation;
 mod lending;
 mod operators;
 mod places;
+mod safetensors;
 mod sequences;
 mod struct_exprs;
 mod try_expr;
@@ -432,7 +433,7 @@ impl TypeChecker {
                 span,
             } => Some(self.check_match(scrutinee, arms, *span, expected)),
 
-            Expr::Try { operand, span } => self.check_try_expr(operand, *span),
+            Expr::Try { operand, span } => self.check_try_expr(operand, expected, *span),
 
             Expr::Closure {
                 params,

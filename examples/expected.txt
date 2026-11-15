@@ -80,6 +80,7 @@ strings/triple_quoted.nr         6
 # --- system: files, the command line, the environment, stdin, time ----------
 system/command_line.nr           0
 system/files.nr                  0
+system/weights.nr                0
 
 # --- tensors: Tensor<T, [dims]>: construction, shapes, operators, reductions -
 tensors/tensor_construction.nr        6
@@ -181,6 +182,7 @@ showcase/borrow_discipline.nr        48
 showcase/borrowed_records.nr         48
 showcase/borrowed_text.nr            34
 showcase/buffered_report.nr          40
+showcase/checkpoint_resume.nr        5
 showcase/closures.nr                 236
 showcase/composed_loss.nr            13
 showcase/config_manifest.nr          80

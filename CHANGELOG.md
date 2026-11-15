@@ -10,6 +10,27 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.49.0] - 2026-11-15
+
+### Added
+
+- `std::safetensors` reads and writes `.safetensors` weights, the format PyTorch, JAX and the
+  Hugging Face tools share. `open(path)` checks the whole header first (length, JSON, dtypes, and
+  byte ranges that match each tensor and cover the data exactly) and fails with `InvalidData`
+  naming the first problem. `file.tensor(name)` copies one tensor out, typed by what it is bound
+  to through `?`, `??` or an annotated `val ... else`; a stored dtype or shape that differs from
+  that type is an `Err` naming both. `Writer::new()`, `out.add(name, &tensor)` for any element
+  type and static shape (a GPU tensor is read back first), `out.add_metadata(key, value)` and
+  `out.save(path)` write a file Python loads. `file.metadata(key)` reads the header's metadata.
+- `val PATTERN: TYPE = value else ...`: an annotation on a `val-else` types the scrutinee, as on
+  an ordinary `val`.
+
+### Changed
+
+- A program no longer carries prelude methods instantiated over a standard-library type it never
+  calls (`Result<std::fs::..., IoError>::is_ok` and the like); they are pruned with the library's
+  own unused functions.
+
 ## [5.48.0] - 2026-11-15
 
 ### Added

@@ -280,7 +280,9 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `val Shape::Circle { r } = s else { ... }` parses as a `val-else`. A `val Name {` stays a struct
   destructure and a payload-less `val None = ...` stays a binding, both because a bare `None`
   pattern is ambiguous until module resolution. The `|name|` after `else` is a dedicated
-  production, not a closure literal. `val [first, ..] = s else { ... }` opens as a destructure;
+  production, not a closure literal. An optional `: TYPE` between the pattern and `=` is the
+  scrutinee's annotation (`ValElse.ty`), and the alias rewrite expands it like any annotation.
+  `val [first, ..] = s else { ... }` opens as a destructure;
   `parse_destructure_bind` reparses it from the pattern as a `val-else` when an `else` follows.
 - **`.enumerate()` in a `for` head is grammar, not a method call.** `parse_for_stmt` reads the
   head as one loop variable or the pair `(index, value)`, then strips a trailing `.enumerate()`

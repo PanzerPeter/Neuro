@@ -395,10 +395,14 @@ impl Walker<'_> {
             Stmt::Continue { .. } => Ok(()),
             Stmt::ValElse {
                 pattern,
+                ty,
                 value,
                 else_block,
                 ..
             } => {
+                if let Some(ty) = ty {
+                    self.ty(ty)?;
+                }
                 // The pattern's bindings reach the rest of the block, but neither the
                 // scrutinee nor the `else` arm, so both are walked before them.
                 self.expr(value)?;

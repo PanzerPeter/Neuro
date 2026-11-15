@@ -1,0 +1,2 @@
+layer.w sums to 2.75 after 120 steps (fit on 6 samples)
+InvalidData: cannot read the tensor `layer.w` from neuro_example_weights.safetensors: it is F32 [2, 3], and the read expects F32 [3, 2]

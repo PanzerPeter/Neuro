@@ -29,9 +29,11 @@ impl Lowerer {
         &mut self,
         left: &Expr,
         right: &Expr,
+        expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
-        let scrutinee = self.lower_expr(left, None)?;
+        let expected = expected.filter(|_| crate::safetensors::reads_tensor_by_context(left));
+        let scrutinee = self.lower_expr(left, expected)?;
         let (tag, payload) = self.success_variant(&scrutinee.ty)?;
 
         let binding = format!("__coalesce_{}", self.coalesce_counter);

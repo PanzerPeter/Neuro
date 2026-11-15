@@ -757,6 +757,17 @@ func drain() -> i32 {
 }
 ```
 
+### Annotating the Scrutinee
+
+`val PATTERN: TYPE = value else ...` checks `value` against `TYPE`, as an annotated `val` does. The
+annotation names the whole value being matched, not a binding, so it is how a value that takes its
+type from context reaches a `val-else`:
+
+```neuro
+val Some(small): Option<u8> = Option::Some(200) else { return 1 }
+val Ok(w): Result<Tensor<f32, [2, 3]>, IoError> = file.tensor("w") else |e| { return 1 }
+```
+
 Runnable program: [`examples/control_flow/val_else.nr`](../../examples/control_flow/val_else.nr).
 
 ## `if val` and `while val`

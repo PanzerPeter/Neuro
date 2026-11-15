@@ -344,11 +344,19 @@ impl Lowerer {
 
             Stmt::ValElse {
                 pattern,
+                ty,
                 value,
                 else_binding,
                 else_block,
                 span,
-            } => self.lower_val_else(pattern, value, else_binding.as_ref(), else_block, *span),
+            } => self.lower_val_else(
+                pattern,
+                ty.as_ref(),
+                value,
+                else_binding.as_ref(),
+                else_block,
+                *span,
+            ),
 
             Stmt::Const {
                 name,

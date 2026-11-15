@@ -24,12 +24,15 @@ impl Lowerer {
     pub(crate) fn lower_val_else(
         &mut self,
         pattern: &Pattern,
+        annotation: Option<&ast_types::Type>,
         value: &Expr,
         else_binding: Option<&Identifier>,
         else_block: &[Stmt],
         span: Span,
     ) -> Result<HirStmt, LoweringError> {
-        let scrutinee = self.lower_expr(value, None)?;
+        // The annotation types the scrutinee, as the checker reads it.
+        let declared = annotation.map(|ty| self.resolve_type(ty)).transpose()?;
+        let scrutinee = self.lower_expr(value, declared.as_ref())?;
         let scrut_ty = scrutinee.ty.clone();
 
         let (test, bindings) = self.lower_pattern(pattern, &scrut_ty)?;

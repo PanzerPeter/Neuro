@@ -130,6 +130,7 @@ mod reading_through_borrows;
 mod reference_bounds;
 mod return_paths;
 mod returned_reference;
+mod safetensors;
 mod self_type;
 mod shape_generics;
 mod short_circuit_runtime;

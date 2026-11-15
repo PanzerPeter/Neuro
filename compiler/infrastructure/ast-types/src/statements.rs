@@ -292,9 +292,12 @@ pub enum Stmt {
     /// the optional `|name|` after `else`; what it names depends on the scrutinee's
     /// type: a `Result`'s `Err` payload, nothing for an `Option` (only `_` is
     /// accepted), and the whole scrutinee for any other enum. `else_block` must
-    /// diverge; semantic analysis rejects one that can fall through.
+    /// diverge; semantic analysis rejects one that can fall through. `ty` is the
+    /// optional annotation `val PATTERN: TYPE = ...`, which types the scrutinee, not
+    /// a binding.
     ValElse {
         pattern: Pattern,
+        ty: Option<Type>,
         value: Expr,
         else_binding: Option<Identifier>,
         else_block: Vec<Stmt>,

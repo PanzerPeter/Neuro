@@ -43,6 +43,7 @@ mod loop_adapters;
 mod operator_traits;
 mod os_intrinsics;
 mod range_values;
+mod safetensors;
 mod statements;
 mod tensor_apply;
 mod tensor_einsum;

@@ -546,10 +546,14 @@ fn rewrite_stmt(stmt: &mut Stmt, resolved: &HashMap<String, Type>) {
         }
         Stmt::ValElse {
             pattern,
+            ty,
             value,
             else_block,
             ..
         } => {
+            if let Some(ty) = ty {
+                rewrite_type(ty, resolved);
+            }
             rename_self_in_pattern(pattern, resolved);
             rewrite_expr(value, resolved);
             rewrite_block(else_block, resolved);

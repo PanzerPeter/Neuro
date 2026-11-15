@@ -144,10 +144,11 @@ module carries the linked MLIR bodies exactly as an executable does.
 embedded with `include_str!` so a compiler binary needs no library tree beside it. Each is added
 to the source map as `<std>/<name>.nr` and parsed at its base, so a panic in a library body names
 that module. Today the table holds `prelude`; `testing`, whose `is_close` and `assert_close`
-compare floats within a tolerance for `@test` functions; and `fs`, `io`, `env` and `time`, written
-against the runtime intrinsics only a library body may call (see `semantic-analysis`). The backend
-deletes the library functions a program never calls, so those four cost a program nothing unless it
-uses them. The result is a
+compare floats within a tolerance for `@test` functions; `fs`, `io`, `env` and `time`, written
+against the runtime intrinsics only a library body may call (see `semantic-analysis`); and
+`safetensors`, which parses and checks a header in Neuro over `std::fs::read_bytes` and whose
+`file.tensor` and `out.add` the checker and lowering supply. The backend deletes the library
+functions a program never calls, so these cost a program nothing unless it uses them. The result is a
 `module_resolution::StandardLibrary`, handed to `resolve_program`, which loads the modules as
 `std::<name>` and returns them in the item list ahead of the program's own. The driver prepends
 nothing and drops nothing: a program's own `Option` lives beside the library's (module resolution

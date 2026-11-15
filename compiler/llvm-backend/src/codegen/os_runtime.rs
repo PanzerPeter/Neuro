@@ -26,9 +26,10 @@ use crate::types::{CollectionKind, Type};
 
 const OS_RUNTIME_IR: &str = include_str!("os_runtime.ll");
 
-/// The prefix of every standard-library function except the prelude's, whose names stay
-/// bare. Only these are pruned: a prelude function can be named by a vtable the program
-/// never builds a value for, and is small.
+/// What every standard-library function's name holds except the prelude's, whose names stay
+/// bare: the prefix of a library function, and part of a prelude method instantiated over a
+/// library type (`Result$g_..std::fs::..__is_ok`). Only these are pruned: a prelude function
+/// can be named by a vtable the program never builds a value for, and is small.
 const LIBRARY_PREFIX: &str = "std::";
 
 /// The intrinsics, by the name a library body calls them with, and the runtime entry each
@@ -294,7 +295,7 @@ impl<'ctx> CodegenContext<'ctx> {
                     function
                         .get_name()
                         .to_str()
-                        .is_ok_and(|name| name.starts_with(LIBRARY_PREFIX))
+                        .is_ok_and(|name| name.contains(LIBRARY_PREFIX))
                 })
                 .filter(|function| !is_used(*function))
                 .collect();

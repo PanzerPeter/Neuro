@@ -188,14 +188,22 @@ after the link: `__neuro_errno_location` (`__errno_location`, `__error` or `_err
 `QueryPerformanceFrequency`.
 
 Every library function is emitted, so after the bodies `prune_unused_library_functions` deletes
-each `std::`-named function nothing uses, to a fixpoint, and then the runtime declarations only
-they called. `requires_os_runtime` then asks whether any entry is still used, and only then is the
+each function nothing uses whose name holds `std::` (a library function, or a prelude method
+instantiated over a library type such as `Result<std::safetensors::File, IoError>`), to a
+fixpoint, and then the runtime declarations only they called. `requires_os_runtime` then asks whether any entry is still used, and only then is the
 runtime linked. `store_program_arguments` runs when `__neuro_arg_count` or `__neuro_arg` is used: a
 test entry (`main(argc, argv)`) stores both into `__neuro_argc` / `__neuro_argv` first; otherwise
 `main` is renamed `neuro.program_main` and a new `main(argc, argv)` stores them and returns its
 result. On Windows the stored pair comes from `__p___argc` / `__p___argv`, because a link that names
 `main` as the image entry passes it no arguments. A program that does no I/O keeps its `main`
 untouched and links nothing.
+
+**Tensor bytes.** `codegen/expressions/tensor_bytes.rs` lowers the two intrinsics lowering emits
+for `std::safetensors`: `__tensor_from_bytes(&[u8])` allocates the call's result tensor and
+`memcpy`s the slice into it, and `__tensor_bytes(&Tensor)` `malloc`s a buffer of the tensor's size,
+copies the elements in (a device tensor through `device_download`, chosen by `split_on_home`) and
+returns it as a `Vec<u8>`. The library has checked the length, and every target is little-endian
+as the format is.
 
 **The GPU runtime.** A module that defines `__neuro_gpu_panic` links `codegen/gpu_runtime.ll`
 for `GpuVendor::Nvidia` or `codegen/gpu_runtime_hip.ll` for `GpuVendor::Amd`

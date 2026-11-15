@@ -61,10 +61,11 @@ the reason is the same each time: the information is not available yet:
   and reallocate its buffer. Both the type checker and `hir-lowering` re-form the desugared
   `Expr::Binary` themselves for the types that take it, which is what keeps a user operator-trait
   impl reachable through `+=`.
-- `Stmt::ValElse { pattern, value, else_binding, else_block, span }` survives because its pattern
-  is **refutable**: the test and the failure branch have to be represented. `pattern` reuses the
-  `Pattern` set from `match`; `else_binding` is the optional `|name|`, where an `Identifier` named
-  `_` is the written wildcard, distinct from `None`.
+- `Stmt::ValElse { pattern, ty, value, else_binding, else_block, span }` survives because its
+  pattern is **refutable**: the test and the failure branch have to be represented. `pattern`
+  reuses the `Pattern` set from `match`; `ty` is the optional `val PATTERN: TYPE = ...` annotation,
+  which types the scrutinee rather than a binding; `else_binding` is the optional `|name|`, where an
+  `Identifier` named `_` is the written wildcard, distinct from `None`.
 - `Expr::ArrayRest { array, start, exact, span }` survives because the trailing `..rest`
   sub-slice's size (`[T; N - start]`) is known only after type checking. `exact` records a
   rest-less pattern, whose length must match exactly.

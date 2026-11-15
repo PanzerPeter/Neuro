@@ -114,7 +114,11 @@ impl Lowerer {
 
             // `?` desugars to a `match` whose failure arm returns; the expected type
             // describes the unwrapped payload, not the fallible operand.
-            Expr::Try { operand, span } => self.lower_try(operand, *span),
+            Expr::Try { operand, span } => {
+                let expected =
+                    expected.filter(|_| crate::safetensors::reads_tensor_by_context(operand));
+                self.lower_try(operand, expected, *span)
+            }
 
             Expr::Literal(lit, span) => {
                 let ty = literal_type(lit, expected);
@@ -160,7 +164,7 @@ impl Lowerer {
                 // `??` is not an operand-symmetric operator: it desugars to a `match` on
                 // the left side, which types the right side from the unwrapped payload.
                 if matches!(op, ast_types::BinaryOp::NullCoalesce) {
-                    return self.lower_null_coalesce(left, right, *span);
+                    return self.lower_null_coalesce(left, right, expected, *span);
                 }
                 // A tensor operand types the SCALAR on the other side by its element
                 // (the tensor broadcast rule), in both directions. The right side is not lowered

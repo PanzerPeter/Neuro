@@ -47,7 +47,7 @@ Design goals:
 | [Ownership and Borrowing](language-reference/ownership.md) | Moves, `Copy` and `.clone()`, `&T` and `&mut T` borrows and their exclusivity, lifetimes, owned elements, `Drop` |
 | [Memory Model](language-reference/memory-model.md) | What is reclaimed and when: stack values, collections, reassigned bindings, `pool` blocks, and what still leaks in alpha |
 | [Modules](language-reference/modules.md) | Multi-file programs, `mod.nr` directories, per-module namespaces, qualified paths, `import`, inline `module` blocks, `export import` re-exports, visibility |
-| [Standard Library](language-reference/standard-library.md) | `std::fs` files, `std::env` arguments and variables, `std::io::read_line`, `std::time` instants and durations, and the `IoError` they fail with |
+| [Standard Library](language-reference/standard-library.md) | `std::fs` files, `std::safetensors` weights, `std::env` arguments and variables, `std::io::read_line`, `std::time` instants and durations, and the `IoError` they fail with |
 
 ## User Guides
 

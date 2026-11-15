@@ -39,9 +39,10 @@ impl Lowerer {
     pub(super) fn lower_try(
         &mut self,
         operand: &Expr,
+        expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
-        let scrutinee = self.lower_expr(operand, None)?;
+        let scrutinee = self.lower_expr(operand, expected)?;
         let (success_tag, payload) = self.success_variant(&scrutinee.ty)?;
         let base = self
             .fallible_base(&scrutinee.ty)

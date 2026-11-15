@@ -5,6 +5,35 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-161: a struct field cannot name a struct declared after it
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (struct registration, pass 1)
+- **Severity**: major. Valid source is refused, in a program and in a library module alike
+
+**Minimal repro**
+
+```neuro
+struct Outer { inner: Pair }
+
+struct Pair { y: i32 }
+
+func main() -> i32 {
+    val o = Outer { inner: Pair { y: 3 } }
+    o.inner.y
+}
+```
+
+Expected: exit code 3. Observed: `unknown type name 'Pair'`, then `struct 'Outer' has no field
+'inner'`. Pass 1 resolves each struct's field types while it registers the structs, in source
+order, so a field naming a later struct finds nothing. Enum payloads and newtype inners resolve in
+later passes and do not have the problem.
+
+**Workaround**: declare the field's struct first.
+
+**Fix sketch**: register every struct name before resolving any field type, then resolve the
+fields in a second loop, keeping the duplicate-name check and the recursive-struct refusal.
+
 ## BUG-160: a generic struct literal with a `&[T]` field and no annotation does not compile
 
 - **Status**: open, confirmed

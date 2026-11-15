@@ -347,7 +347,8 @@ declaration lives.
 ## What has not landed yet
 
 The standard library's modules are `std::prelude`, `std::testing` ([Tests](functions.md#tests)), and
-`std::fs`, `std::env`, `std::io` and `std::time` ([Standard Library](standard-library.md)). The names
+`std::fs`, `std::safetensors`, `std::env`, `std::io` and `std::time`
+([Standard Library](standard-library.md)). The names
 the compiler implements itself (`print`, `println`, `Vec`, `HashMap`, `BTreeMap`, `StringBuilder`, `Tensor`, `einsum`) have no
 declaration in it yet. `@no_prelude` does not take them away, and `std::prelude::Vec` is not a path.
 

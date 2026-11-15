@@ -367,7 +367,8 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   scope with its own binding, and only then defines the pattern's bindings in the **enclosing**
   scope so later statements type against them. `resolve_else_binding` mirrors the checker's
   binding table off `enum_instance_base`: a `Result`'s `Err` payload (slot 0), `None` for
-  `Option`, else the whole scrutinee.
+  `Option`, else the whole scrutinee. An annotation (`val PATTERN: TYPE = ...`) is resolved and
+  handed to the scrutinee as its expected type.
 - **The `for`-loop iteration protocol** (`iteration.rs`). A `Stmt::ForEach` whose head is a
   nominal type carrying an `IntoIterator` or `Iterator` impl (`trait_impls`, this slice's own
   copy of the checker's table) becomes a `HirStmt::Expr` wrapping a `Block`: a mutable
@@ -861,6 +862,15 @@ compiler bug, not a diagnostic.
   `os_intrinsics::os_intrinsic_signature`, after every other free-function route, and lowers it as
   a `Call` on a `Variable` callee the backend recognises by name. The checker has already confined
   them to library bodies.
+- **`std::safetensors`'s compiler-known methods** (`safetensors.rs`), intercepted at the top of
+  `lower_method_call`, which now takes the expected type. `file.tensor(name)` becomes a `Match` on
+  the library's private `std::safetensors::locate(&file, name, "F32", "[2, 3]")`, the dtype and
+  shape spelled as text the library compares, whose `Ok` arm wraps
+  `__tensor_from_bytes(bytes)` in a new `Result<Tensor<T, S>, IoError>` instance and whose other
+  arm forwards the error. `out.add(name, &t)` becomes
+  `std::safetensors::append(&mut out, name, dtype, shape, __tensor_bytes(&t))`. The two intrinsics
+  are the backend's and appear in no checker table. `lower_try` and `lower_null_coalesce` take
+  the expected type and pass it to a `.tensor(...)` operand only, as the checker does.
 - **`__char_at(offset)`**: `lower_builtin_method` types the prelude's decode step as
   `HirType::Char` with a `u64` argument. The semantic pass has already refused it to every
   module but the prelude's, so no gate is repeated here.

@@ -36,7 +36,7 @@ impl Lowerer {
 
     /// Assemble the single [`HirExprKind::EnumConstruct`] node every surface form
     /// lowers to. `payload` is already in the variant's declared field order.
-    pub(super) fn build_enum_construct(
+    pub(crate) fn build_enum_construct(
         &self,
         enum_name: &str,
         variant: &str,

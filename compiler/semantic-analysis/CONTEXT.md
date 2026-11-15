@@ -386,6 +386,16 @@ a wrong count):
   `library_modules`, the prelude's id plus every module declaring a `std::` name (which no program
   can), so a program calling one gets `UndefinedFunction`. Lowering and the backend keep their own
   copies of the table;
+- `std::safetensors`'s two compiler-known methods (`type_checkers/expressions/safetensors.rs`),
+  reached from the struct-method path ahead of the impl lookup by the canonical receiver names
+  `std::safetensors::File` and `std::safetensors::Writer`. `file.tensor(name)` is
+  `Result<Tensor<T, S>, IoError>` with `Tensor<T, S>` read off the expectation, the tensor itself
+  or the whole `Result`; none is `TensorReadNeedsType`, and a `?` extent is refused through
+  `reject_dynamic_extent`. A `?` or `??` whose operand is a `.tensor(...)` call
+  (`reads_tensor_by_context`) passes its own expectation down to it, and an annotated `val-else`
+  checks its scrutinee against the annotation. `out.add(name, &t)` takes a `&mut` receiver and a
+  borrowed tensor of any element type and static shape (`TensorWriteNeedsBorrow` otherwise). The
+  library declares neither method;
 - `string.__char_at(offset) -> char`, gated on `in_prelude()` (the declaration being checked
   carries `ast_types::PRELUDE_MODULE`). It is the decode step `Chars::next` is written against;
   the language specifies no byte-indexed read of a string, so every other module sees

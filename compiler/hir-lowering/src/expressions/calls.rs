@@ -127,7 +127,7 @@ impl Lowerer {
                 self.lower_ident_call(&ident.name, type_args, args, expected, span)
             }
             Expr::FieldAccess { object, field, .. } => {
-                self.lower_method_call(object, &field.name, type_args, args, span)
+                self.lower_method_call(object, &field.name, type_args, args, expected, span)
             }
             // `Tensor::<f32, [3, 3]>::zeros()` and the five other construction helpers, unless
             // the program declares its own `Tensor`.
@@ -1040,9 +1040,14 @@ impl Lowerer {
         method: &str,
         type_args: &[ast_types::GenericArg],
         args: &[Expr],
+        expected: Option<&HirType>,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         let object = self.lower_expr(object, None)?;
+        if crate::safetensors::is_safetensors_method(&object.ty, method) {
+            let object = super::coercion::auto_deref(object);
+            return self.lower_safetensors_method(object, method, args, expected, span);
+        }
         if method == CLONE_METHOD
             && let Some(copy) = self.clone_of_declared_param(&object, span)
         {

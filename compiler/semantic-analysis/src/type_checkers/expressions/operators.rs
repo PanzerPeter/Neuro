@@ -46,7 +46,7 @@ impl TypeChecker {
         // side is typed by the left's *payload*, not by the left itself. Handled before
         // the shared operand check below, which would type `fallback` as an Option.
         if matches!(op, BinaryOp::NullCoalesce) {
-            return self.check_null_coalesce(left, right, span);
+            return self.check_null_coalesce(left, right, span, expected);
         }
 
         if op.is_comparison()
@@ -399,8 +399,17 @@ impl TypeChecker {
     ///
     /// The `Result` error payload is deliberately unconstrained: `??` means "I do not
     /// care why it failed", so `E` never reaches the fallback.
-    fn check_null_coalesce(&mut self, left: &Expr, right: &Expr, span: &Span) -> Option<Type> {
-        let left_ty = self.check_expr(left, None).unwrap_or(Type::Unknown);
+    fn check_null_coalesce(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        span: &Span,
+        expected: Option<&Type>,
+    ) -> Option<Type> {
+        let left_expected = expected.filter(|_| super::safetensors::reads_tensor_by_context(left));
+        let left_ty = self
+            .check_expr(left, left_expected)
+            .unwrap_or(Type::Unknown);
         // The fallback is still checked on every error path so a second mistake inside it
         // is reported in the same pass rather than on the next compile.
         if matches!(left_ty, Type::Unknown) {

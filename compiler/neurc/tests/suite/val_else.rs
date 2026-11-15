@@ -346,3 +346,30 @@ func main() -> i32 {
     let test = CompileTest::new();
     assert_eq!(test.compile_and_run("val_else_array.nr", source), Ok(34));
 }
+
+/// `val PATTERN: TYPE = ...` types the scrutinee, so a literal payload takes the annotated
+/// type, and an annotation the scrutinee does not have is refused.
+#[test]
+fn an_annotation_types_the_scrutinee() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    val Some(small): Option<u8> = Option::Some(200) else { return 1 }
+    val wrapped = small.wrapping_add(100)
+    wrapped as i32
+}
+"#;
+    assert_eq!(test.compile_and_run("typed.nr", source), Ok(44));
+    let refused = test
+        .check(
+            "mismatch.nr",
+            r#"
+func main() -> i32 {
+    val Some(x): Option<i32> = Option::Some(true) else { return 1 }
+    x
+}
+"#,
+        )
+        .expect_err("a scrutinee that is not the annotated type is refused");
+    assert!(refused.contains("type mismatch"), "{refused}");
+}

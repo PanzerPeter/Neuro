@@ -19,8 +19,14 @@ const RESULT_FAILURE_VARIANT: &str = "Err";
 impl TypeChecker {
     /// Check `operand?`: unwrap a fallible value to its success payload, propagating
     /// the failure variant out of the enclosing function.
-    pub(super) fn check_try_expr(&mut self, operand: &Expr, span: Span) -> Option<Type> {
-        let operand_ty = self.check_expr(operand, None).unwrap_or(Type::Unknown);
+    pub(super) fn check_try_expr(
+        &mut self,
+        operand: &Expr,
+        expected: Option<&Type>,
+        span: Span,
+    ) -> Option<Type> {
+        let expected = expected.filter(|_| super::safetensors::reads_tensor_by_context(operand));
+        let operand_ty = self.check_expr(operand, expected).unwrap_or(Type::Unknown);
         if matches!(operand_ty, Type::Unknown) {
             return Some(Type::Unknown);
         }

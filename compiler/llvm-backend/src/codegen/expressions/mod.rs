@@ -19,6 +19,7 @@ mod methods;
 mod slices;
 mod string_parse;
 mod struct_eq;
+mod tensor_bytes;
 mod tensor_grad;
 mod tensor_index;
 mod tensor_rng;
@@ -360,6 +361,19 @@ impl<'ctx> CodegenContext<'ctx> {
                 if CodegenContext::is_io_builtin(name) && !self.functions.contains_key(name) {
                     self.codegen_io_builtin(name, args)?;
                     return Ok(None);
+                }
+                if CodegenContext::is_tensor_bytes_intrinsic(name)
+                    && !self.functions.contains_key(name)
+                {
+                    let neuro_hir::HirType::Function { ret, .. } = &callee.ty else {
+                        return Err(CodegenError::InternalError(format!(
+                            "`{name}` reached codegen without a function type"
+                        )));
+                    };
+                    let result = Type::from_hir(ret);
+                    return Ok(Some(
+                        self.codegen_tensor_bytes_intrinsic(name, args, &result)?,
+                    ));
                 }
                 if CodegenContext::is_os_intrinsic(name) && !self.functions.contains_key(name) {
                     let neuro_hir::HirType::Function { ret, .. } = &callee.ty else {

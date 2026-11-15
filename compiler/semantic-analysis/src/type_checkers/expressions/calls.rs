@@ -1081,6 +1081,18 @@ impl TypeChecker {
                     }
                 };
 
+                if let Some(ty) = self.check_safetensors_method(
+                    &struct_name,
+                    object,
+                    &obj_ty,
+                    &field.name,
+                    args,
+                    expected,
+                    *span,
+                ) {
+                    return Some(ty);
+                }
+
                 let mangled = match self
                     .impl_methods
                     .get(&struct_name)

@@ -22,6 +22,7 @@ const MODULES: &[(&str, &str)] = &[
     ("io", include_str!("../std/io.nr")),
     ("env", include_str!("../std/env.nr")),
     ("time", include_str!("../std/time.nr")),
+    ("safetensors", include_str!("../std/safetensors.nr")),
 ];
 
 /// The module whose enums lend their variants to every module.
