@@ -148,7 +148,13 @@ func main() -> i32 {
     let (code, out) = run_in_place(&exe, &Run::default());
     assert_eq!(code, 0, "the program failed; it printed:\n{out}");
     let mut lines = out.lines();
-    assert_eq!(lines.next(), Some("Other"));
+    // glibc opens a directory and fails the read (`EISDIR`); the Windows CRT refuses the open.
+    let directory = if cfg!(windows) {
+        "PermissionDenied"
+    } else {
+        "Other"
+    };
+    assert_eq!(lines.next(), Some(directory));
     let expected = if locked_is_readable {
         "read"
     } else {

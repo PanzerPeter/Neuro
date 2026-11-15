@@ -358,7 +358,7 @@ func main() -> i32 {
         val e: Tensor<f32, [3]> = [1.0, 1.0, 1.0]
         total += (&z * e.abs() - (z - 1.0)).sum()
     }
-    return total as i32
+    return total as i32 % 256
 }
 "#;
     // Per round: 2y + (1 - y) = [2, 3, 5] sums to 10, and z - (z - 1) is three ones.

@@ -10,6 +10,14 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.50.3] - 2026-11-15
+
+### Fixed
+
+- Two test-suite checks that assumed Linux now pass on Windows. A process exit code is not cut to
+  eight bits there, so the program reduces it itself, and the Windows C runtime refuses to open a
+  directory (`PermissionDenied`) where glibc opens it and fails the read (`Other`).
+
 ## [5.50.2] - 2026-11-15
 
 ### Fixed
