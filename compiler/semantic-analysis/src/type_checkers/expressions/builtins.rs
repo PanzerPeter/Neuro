@@ -26,6 +26,11 @@ pub(crate) const CHAR_SLICE_METHOD: &str = "char_slice";
 pub(crate) const CHARS_STRUCT: &str = "Chars";
 /// `string.chars()`: the method that produces one.
 pub(crate) const CHARS_METHOD: &str = "chars";
+/// `string.lines()` and `string.split(sep)`, and the prelude iterators they hand out.
+pub(crate) const LINES_METHOD: &str = "lines";
+pub(crate) const SPLIT_METHOD: &str = "split";
+const LINES_STRUCT: &str = "Lines";
+const SPLIT_STRUCT: &str = "Split";
 /// The prelude-private decode intrinsic `Chars::next` steps with: the Unicode scalar
 /// whose UTF-8 encoding begins at a byte offset.
 pub(crate) const CHAR_AT_METHOD: &str = "__char_at";
@@ -175,6 +180,21 @@ impl TypeChecker {
                     });
                 }
                 Some(self.chars_iterator(object, call_span))
+            }
+            // `.lines()` and `.split(sep)`: iterators over `&string` pieces of the
+            // receiver, borrowing it as `.chars()` does. The separator is a `&string`, so
+            // a literal passes as it is, and the iterator holds its borrow too.
+            (Type::String, LINES_METHOD) => {
+                self.check_call_args(args, &[], call_span);
+                Some(self.text_iterator(object, LINES_STRUCT, call_span))
+            }
+            (Type::String, SPLIT_METHOD) => {
+                let separator = Type::Reference {
+                    inner: Box::new(Type::String),
+                    mutable: false,
+                };
+                self.check_call_args(args, &[separator], call_span);
+                Some(self.text_iterator(object, SPLIT_STRUCT, call_span))
             }
             // The decode step `Chars::next` is written against. Private to the prelude:
             // the language specifies no byte-indexed access to a string, and this is the
@@ -414,20 +434,26 @@ impl TypeChecker {
     }
 
     /// The `Chars` iterator type `.chars()` yields, with the receiver's borrow recorded.
+    pub(crate) fn chars_iterator(&mut self, object: &Expr, call_span: Span) -> Type {
+        self.text_iterator(object, CHARS_STRUCT, call_span)
+    }
+
+    /// The prelude iterator `name` over a string (`Chars`, `Lines` or `Split`), with
+    /// the receiver's borrow recorded.
     ///
     /// The type is the standard library's, so a program checked without it has no
     /// iterator to hand out and gets the same unknown-type diagnostic any other missing
     /// library declaration produces.
-    pub(crate) fn chars_iterator(&mut self, object: &Expr, call_span: Span) -> Type {
+    fn text_iterator(&mut self, object: &Expr, name: &str, call_span: Span) -> Type {
         self.register_slice_borrow(object, call_span);
-        if !self.is_declared_struct(CHARS_STRUCT) {
+        if !self.is_declared_struct(name) {
             self.record_error(TypeError::UnknownTypeName {
-                name: CHARS_STRUCT.to_string(),
+                name: name.to_string(),
                 span: call_span,
             });
             return Type::Unknown;
         }
-        Type::Struct(CHARS_STRUCT.to_string())
+        Type::Struct(name.to_string())
     }
 
     /// Validate `__char_at`'s single byte-offset argument.

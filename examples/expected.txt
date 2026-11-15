@@ -73,6 +73,7 @@ strings/string_len.nr            0
 strings/string_parse.nr          42
 strings/string_slice.nr          0
 strings/string_slice_method.nr   12
+strings/string_split.nr          74
 strings/strings.nr               0
 strings/triple_quoted.nr         6
 
@@ -223,6 +224,7 @@ showcase/robust_fit.nr               23
 showcase/running_stats.nr            5
 showcase/sample_audit.nr             177
 showcase/scan_guard.nr               160
+showcase/score_sheet.nr              183
 showcase/season_table.nr             116
 showcase/sensor_pipeline.nr          57
 showcase/sensor_windows.nr           85

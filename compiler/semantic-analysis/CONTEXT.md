@@ -375,6 +375,11 @@ a wrong count):
   registers a transient borrow of the receiver, because the iterator holds a view into the
   receiver's bytes rather than owning them. `Chars` is a prelude declaration, so a program
   checked without the standard library gets `UnknownTypeName` instead;
+- `string.lines() -> Lines` and `string.split(sep) -> Split`, the prelude's piece iterators,
+  typed and borrowed exactly as `.chars()` is (`text_iterator`). `sep` is checked as a `&string`,
+  so a literal passes as it is, and the call-result walk makes a binding hold its borrow beside the
+  receiver's. A block exit walks the receiver only, so `holds_separator` has `refuse_dying_borrows`
+  walk a `Split`'s argument too;
 - the standard library's runtime intrinsics (`__read_text`, `__arg`, `__monotonic_nanos`, ...),
   free functions typed by `os_intrinsic_signature` in `type_checkers/os_intrinsics.rs` and checked
   through `check_call_args`. They resolve only while `current_module` is one of
@@ -519,7 +524,7 @@ loop.
   transient borrow `.slice` does, and the call-result walk makes a binding hold it. A receiver
   that is neither a place nor a borrow is `CannotBorrowValue`; a program without the prelude's
   struct gets no method. `views_builtin_receiver` tells `result_borrows_owned_receiver` that these
-  and `.chars()` point into an owned receiver, so one over a local cannot be returned or stored
+  and the text iterators (`.chars()`, `.lines()`, `.split(sep)`) point into an owned receiver, so one over a local cannot be returned or stored
   through a reference. The views step with four map intrinsics, `__slot_count`, `__slot_live`
   (hashed only), `__key_at` and `__value_at`, typed in the prelude only by `check_map_intrinsic`
   ahead of the collection method table. A generic struct's fields resolve as their own module, so

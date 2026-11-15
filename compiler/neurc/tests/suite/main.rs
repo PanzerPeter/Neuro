@@ -144,6 +144,7 @@ mod string_literal_views;
 mod string_owner_bit;
 mod string_parse;
 mod string_slice;
+mod string_splitting;
 mod string_temporaries;
 mod string_type;
 mod struct_by_value;

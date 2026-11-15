@@ -334,13 +334,21 @@ impl TypeChecker {
         let value = match peel_parens(value) {
             // Under elision a method's reference comes from its receiver, not its arguments:
             // `m.get(&key)` may end a block that declares `key`.
-            Expr::Call { func, .. } if !self.holds_function_value(ty) => match func.as_ref() {
-                Expr::FieldAccess { object, field, .. } => {
-                    self.refuse_dying_receiver(object, &field.name, floor);
-                    object.as_ref()
+            Expr::Call { func, args, .. } if !self.holds_function_value(ty) => {
+                match func.as_ref() {
+                    Expr::FieldAccess { object, field, .. } => {
+                        self.refuse_dying_receiver(object, &field.name, floor);
+                        // `.split(sep)` keeps its separator's borrow as well as the receiver's.
+                        if self.holds_separator(ty) {
+                            for arg in args {
+                                self.refuse_dying_borrows(arg, ty, floor);
+                            }
+                        }
+                        object.as_ref()
+                    }
+                    _ => value,
                 }
-                _ => value,
-            },
+            }
             other => other,
         };
         let mut carried = Carried::default();

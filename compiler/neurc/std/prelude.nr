@@ -464,6 +464,93 @@ impl Iterator for Chars {
     }
 }
 
+// The iterators `text.lines()` and `text.split(sep)` hand out: each piece of one borrowed
+// string as a `&string` view into it, so splitting copies nothing. As with `Chars`, the
+// fields are private and the compiler fills them in.
+//
+// Both walk the text one code point at a time through a `Chars` cursor, so every offset
+// they cut at is a scalar boundary and `.slice` never lands inside one.
+export struct Lines {
+    source: &string,
+    start: u64
+}
+
+impl Iterator for Lines {
+    type Item = &string
+    // A line ends at `\n`, and a `\r` just before it goes with it. Text that ends in a
+    // newline has no empty line after it, so `"a\n"` is one line and `""` is none.
+    func next(&mut self) -> Option<&string> {
+        val length = self.source.len()
+        val first = self.start
+        if first >= length {
+            return Option::None
+        }
+        mut cursor = Chars { source: self.source, offset: first }
+        mut carriage = false
+        while cursor.offset < length {
+            val at = cursor.offset
+            val code = self.source.__char_at(at)
+            cursor.next()
+            if code == '\n' {
+                self.start = cursor.offset
+                val end = if carriage { at - 1 } else { at }
+                return Option::Some(self.source.slice(first..end))
+            }
+            carriage = code == '\r'
+        }
+        self.start = length
+        Option::Some(self.source.slice(first..length))
+    }
+}
+
+// Every piece between two occurrences of `separator`, empty ones included: `"a,,b"` split
+// on `","` is `"a"`, `""`, `"b"`, and `""` is one empty piece. `done` marks the last piece
+// handed out, which no offset can say once the text ends in a separator.
+export struct Split {
+    source: &string,
+    separator: &string,
+    start: u64,
+    done: bool
+}
+
+impl Iterator for Split {
+    type Item = &string
+    func next(&mut self) -> Option<&string> {
+        if self.done {
+            return Option::None
+        }
+        val wanted = self.separator.len()
+        if wanted == 0 {
+            panic("split separator is empty")
+        }
+        val length = self.source.len()
+        val first = self.start
+        // ponytail: a match is tried at every code point, O(text * separator) in the worst
+        // case; a byte search intrinsic (`memmem`-like) if long separators ever matter.
+        mut scan = Chars { source: self.source, offset: first }
+        while scan.offset < length {
+            val at = scan.offset
+            // Equal scalars have equal widths, so the two cursors stay in step.
+            mut text = Chars { source: self.source, offset: at }
+            mut sought = Chars { source: self.separator, offset: 0 }
+            mut matched = true
+            while matched && sought.offset < wanted {
+                val expected = self.separator.__char_at(sought.offset)
+                matched = text.offset < length && self.source.__char_at(text.offset) == expected
+                text.next()
+                sought.next()
+            }
+            if matched {
+                self.start = text.offset
+                return Option::Some(self.source.slice(first..at))
+            }
+            scan.next()
+        }
+        self.done = true
+        Option::Some(self.source.slice(first..length))
+    }
+}
+
 // The iterator `.iter()` hands out over an array, a slice or a `Vec`: a cursor over a
 // borrow of the elements, yielding each one as `&T`.
 //

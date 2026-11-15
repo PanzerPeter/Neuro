@@ -488,7 +488,7 @@
         {
           "comment": "Compiler-known collections and the types the prelude (`compiler/neurc/std/prelude.nr`) declares in every program.",
           "name": "support.type.neuro",
-          "match": "\\b(Vec|HashMap|BTreeMap|StringBuilder|Tensor|Option|Result|OrderedF32|OrderedF64|ParseError|IoError|IoErrorKind|Chars|Iter|HashKeys|HashValues|BTreeKeys|BTreeValues|Range|Rev|Step|Map|Filter|Enumerate|Device|PoolHandle)\\b"
+          "match": "\\b(Vec|HashMap|BTreeMap|StringBuilder|Tensor|Option|Result|OrderedF32|OrderedF64|ParseError|IoError|IoErrorKind|Chars|Lines|Split|Iter|HashKeys|HashValues|BTreeKeys|BTreeValues|Range|Rev|Step|Map|Filter|Enumerate|Device|PoolHandle)\\b"
         },
         {
           "comment": "Lang-item traits the compiler recognises by name, operator traits included.",

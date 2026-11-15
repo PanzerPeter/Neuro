@@ -1441,7 +1441,14 @@ fn closure_literal_arg(arg: &Expr) -> bool {
 }
 
 /// The `string` methods whose result is a view into the receiver's bytes.
-const STRING_VIEW_METHODS: [&str; 4] = ["slice", "char_slice", "chars", "char_indices"];
+const STRING_VIEW_METHODS: [&str; 6] = [
+    "slice",
+    "char_slice",
+    "chars",
+    "char_indices",
+    "lines",
+    "split",
+];
 
 /// Whether `expr` is a string literal, parenthesized or not: `.rodata` text that no
 /// statement end releases.

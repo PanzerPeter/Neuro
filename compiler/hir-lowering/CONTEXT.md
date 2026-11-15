@@ -854,6 +854,9 @@ compiler bug, not a diagnostic.
   to the prelude iterator's own `StructLiteral`: `Chars { source: &receiver, offset: 0 }`. No
   backend learns that `.chars()` exists. The borrow is emitted even for a temporary receiver,
   which is sound because an immutable borrow of a `string` IS the fat pointer by value.
+  `.lines()` and `.split(sep)` build `Lines { source, start: 0 }` and
+  `Split { source, separator, start: 0, done: false }` the same way (`text_iterator`), the
+  separator lowered against `&string` so a literal is a view.
 - **The runtime intrinsics** (`__read_text`, `__arg`, ...): `lower_call` types a call to one by
   `os_intrinsics::os_intrinsic_signature`, after every other free-function route, and lowers it as
   a `Call` on a `Variable` callee the backend recognises by name. The checker has already confined

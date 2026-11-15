@@ -171,7 +171,8 @@ no impl (the scalars, `string`, a struct carrying the derive).
 `std/prelude.nr` currently declares `Option<T>`, `Result<T, E>`, `ParseError`, `IoError` and
 `IoErrorKind` (what `std::fs` and `std::io` fail with), the `OrderedF32` / `OrderedF64`
 validating wrappers, the `Iterator` / `IntoIterator` protocol traits, `Chars`, the codepoint
-iterator `string.chars()` hands out, the adapters, `Range` / `Rev` / `Step`, the value a range
+iterator `string.chars()` hands out, `Lines` and `Split`, the piece iterators `.lines()` and
+`.split(sep)` hand out, the adapters, `Range` / `Rev` / `Step`, the value a range
 written outside a `for` head builds and its `.rev()` / `.step(n)` forms, `Device`, the enum `tensor.to(device)` takes, and the
 `PoolHandle` / `PoolAware` pair a type implements to be allowed inside a `pool`. The wrappers exist so
 an ordered map can be keyed on a float: IEEE-754 `<` is a partial order, so a raw float key
@@ -199,7 +200,9 @@ the prelude-private `__char_at(offset)` intrinsic (`in_prelude()` in the type ch
 `PRELUDE_MODULE`, the constant `ast_types` now owns so both this crate and the checker read the
 same one). The step width follows from the decoded scalar's own magnitude, so a step reads the
 text once. `.chars()` fills the fields in: the lowering builds the struct literal, and the fields
-stay private so nothing else can.
+stay private so nothing else can. `Lines` and `Split` are built the same way and walk the text
+through a `Chars` cursor, so each piece is cut at a scalar boundary with `.slice`, a view whose
+length carries no owner bit.
 
 ### Source map
 Every file of a program, the standard library's first as `<std>/<name>.nr`, is added to one

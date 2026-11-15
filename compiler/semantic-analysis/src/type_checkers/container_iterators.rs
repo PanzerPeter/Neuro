@@ -19,8 +19,10 @@ use crate::types::{CollectionKind, Type};
 
 const ITER_METHOD: &str = "iter";
 const ITER_STRUCT: &str = "Iter";
-/// `string.chars()`, whose `Chars` borrows the text as `Iter` borrows its elements.
-const CHARS_METHOD: &str = "chars";
+const SPLIT_STRUCT: &str = "Split";
+/// `string.chars()`, `.lines()` and `.split(sep)`, whose iterators borrow the text as
+/// `Iter` borrows its elements.
+const TEXT_ITERATOR_METHODS: [&str; 3] = ["chars", "lines", "split"];
 
 /// The prelude-private map intrinsics a view's `next` steps with.
 const SLOT_COUNT_INTRINSIC: &str = "__slot_count";
@@ -40,10 +42,10 @@ fn view_struct(kind: CollectionKind, keys: bool) -> Option<&'static str> {
 }
 
 /// Whether `method` on an owned built-in `receiver` answers a value that points into it:
-/// `.iter()`, a map view, or `.chars()`. Returning one over a local dangles.
+/// `.iter()`, a map view, or a text iterator. Returning one over a local dangles.
 pub(crate) fn views_builtin_receiver(receiver: &Type, method: &str) -> bool {
     match receiver {
-        Type::String => method == CHARS_METHOD,
+        Type::String => TEXT_ITERATOR_METHODS.contains(&method),
         Type::Array { .. }
         | Type::Collection {
             kind: CollectionKind::Vec,
@@ -58,6 +60,13 @@ pub(crate) fn views_builtin_receiver(receiver: &Type, method: &str) -> bool {
 }
 
 impl TypeChecker {
+    /// Whether `ty` is the prelude's `Split`, the one builtin view that also holds a borrow
+    /// of its argument, the separator.
+    pub(crate) fn holds_separator(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Struct(name) if name == SPLIT_STRUCT)
+            && self.struct_modules.get(SPLIT_STRUCT) == Some(&PRELUDE_MODULE)
+    }
+
     /// Type `object.method()` as a borrowing iterator over the container `object`, or
     /// answer `None` when the call is not one, leaving the caller to look further.
     ///
@@ -191,6 +200,8 @@ mod tests {
             "values"
         ));
         assert!(views_builtin_receiver(&Type::String, "chars"));
+        assert!(views_builtin_receiver(&Type::String, "lines"));
+        assert!(views_builtin_receiver(&Type::String, "split"));
         assert!(!views_builtin_receiver(
             &collection(CollectionKind::Vec),
             "len"
@@ -211,6 +222,22 @@ mod tests {
         );
         assert!(
             matches!(errors.as_slice(), [TypeError::MethodNotFound { method_name, .. }] if method_name == "iter"),
+            "got {errors:?}"
+        );
+    }
+
+    /// Without the prelude there is no `Split` to hand out, but the separator is still
+    /// checked as a `&string`.
+    #[test]
+    fn without_the_prelude_split_still_checks_its_separator() {
+        let errors =
+            semantic_errors("func main() -> i32 {\n    val it = \"a\".split(5)\n    0\n}\n");
+        assert!(
+            matches!(
+                errors.as_slice(),
+                [TypeError::Mismatch { .. }, TypeError::UnknownTypeName { name, .. }]
+                    if name == "Split"
+            ),
             "got {errors:?}"
         );
     }

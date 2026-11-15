@@ -42,9 +42,8 @@ const DEVICE_TYPE_NAME: &str = "Device";
 const SLICE_METHOD: &str = "slice";
 
 /// The codepoint iterator `string.chars()` yields, declared in the prelude, and the
-/// two fields the lowering fills in: the borrowed text and the byte cursor into it.
+/// byte cursor the lowering fills in beside the borrowed text.
 pub(crate) const CHARS_STRUCT: &str = "Chars";
-pub(crate) const CHARS_SOURCE_FIELD: &str = "source";
 pub(crate) const CHARS_OFFSET_FIELD: &str = "offset";
 /// The method that produces one.
 pub(crate) const CHARS_METHOD: &str = "chars";

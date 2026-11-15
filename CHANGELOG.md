@@ -10,6 +10,18 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.48.0] - 2026-11-15
+
+### Added
+
+- `text.lines()` and `text.split(sep)` walk a string's pieces as `&string` views into it, so
+  splitting a file's text copies nothing. A line ends at `\n` and takes a `\r` before it along, and
+  a final newline opens no empty line. `.split` keeps every piece, empty ones included, and its
+  separator is any `&string`: a literal, a borrowed owned string, longer than one byte or not
+  ASCII. Both return iterator values (`Lines`, `Split`) that bind, pass, return and take the
+  adapters. The text and the separator stay borrowed while one lives, so neither can move or be
+  released under it. An empty separator panics.
+
 ## [5.47.0] - 2026-11-15
 
 ### Added

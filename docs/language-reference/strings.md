@@ -166,6 +166,8 @@ val world: &string = s.slice(7..=11)  // "world", inclusive upper bound
 | `.chars()` | `Chars` | Iterator over Unicode scalar values. See [Iterating Characters](#iterating-characters). |
 | `.char_indices()` | pair in a `for` head | Scalar with its byte offset. See [Iterating Characters](#iterating-characters). |
 | `.parse::<T>()` | `Result<T, ParseError>` | The text read as a number or a `bool`. See [Parsing Text](#parsing-text). |
+| `.lines()` | `Lines` | Iterator over the lines, each a `&string`. See [Splitting Text](#splitting-text). |
+| `.split(sep)` | `Split` | Iterator over the pieces between separators, each a `&string`. See [Splitting Text](#splitting-text). |
 
 ## Slicing
 
@@ -299,6 +301,52 @@ match "300".parse::<u8>() {
 `{e:?}` prints the variant's name. The variants always take the `ParseError::` prefix. They are not bare names the way `Some` and `Ok` are.
 
 A program may declare its own `ParseError` or `Result`, as with any prelude name. A call to `.parse` in that program is then a compile error, unless the declaration has the same variants as the prelude's.
+
+## Splitting Text
+
+`.lines()` and `.split(sep)` walk a string's pieces. Each piece is a `&string` view into the text, so splitting copies nothing. Together with `.parse::<T>()` they turn a text file into values:
+
+```neuro
+val table = "name,qty\r\napples,3\nplums,4\n"
+for line in table.lines() {
+    for cell in line.split(",") {
+        print("[{cell}]")
+    }
+    println("")
+}
+// [name][qty]
+// [apples][3]
+// [plums][4]
+```
+
+A line ends at `\n`, and a `\r` just before it goes with it, so Windows line endings read the same as Unix ones. A final newline does not start an empty line: `"a\n"` has one line, `"\n"` has one empty line, and `""` has none.
+
+`.split` keeps every piece, empty ones included:
+
+| Call | Pieces |
+|---|---|
+| `"a,,b".split(",")` | `"a"`, `""`, `"b"` |
+| `",a,".split(",")` | `""`, `"a"`, `""` |
+| `"".split(",")` | `""` |
+| `"x::y".split("::")` | `"x"`, `"y"` |
+| `"aaa".split("aa")` | `""`, `"a"` |
+
+The separator is a `&string`, so a literal works as it is and an owned string is passed as `&sep`. It may be longer than one byte and need not be ASCII. An empty separator panics with `split separator is empty` when the first piece is asked for.
+
+The iterators are ordinary values: they bind, pass to a function, return, sit in a struct field and take `.map` / `.filter`. Each borrows the text, and a `Split` also borrows its separator, so neither can move or be released while the iterator lives, and an iterator over a local cannot be returned:
+
+```neuro
+func cells(row: &string) -> Split {
+    row.split(";")          // fine: the text belongs to the caller
+}
+
+func broken() -> Split {
+    val row = "a;b".clone()
+    row.split(";")          // error: `row` is released when the function returns
+}
+```
+
+Two results of `next()` on one iterator cannot be held at the same time yet: `val a = it.next()` followed by `val b = it.next()` is refused. Take the pieces one at a time in a `for` loop, as [`string_split.nr`](../../examples/strings/string_split.nr) does.
 
 ## Growable Strings (`StringBuilder`)
 

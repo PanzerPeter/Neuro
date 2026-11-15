@@ -9,10 +9,83 @@ use shared_types::Literal;
 
 use super::grid::PARTITION_METHOD;
 use super::{
-    CHAR_AT_METHOD, CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_SOURCE_FIELD, CHARS_STRUCT,
-    CLONE_METHOD, DEVICE_TYPE_NAME, IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD, TENSOR_TO_METHOD,
+    CHAR_AT_METHOD, CHARS_METHOD, CHARS_OFFSET_FIELD, CHARS_STRUCT, CLONE_METHOD, DEVICE_TYPE_NAME,
+    IO_BUILTINS, PANIC_BUILTINS, SLICE_METHOD, TENSOR_TO_METHOD,
 };
 use crate::{Lowerer, LoweringError, is_float, is_integer};
+
+/// `string.lines()` and `string.split(sep)`, the prelude iterators they build, and the
+/// fields the lowering fills in beside the borrowed `source`.
+const LINES_METHOD: &str = "lines";
+const SPLIT_METHOD: &str = "split";
+const LINES_STRUCT: &str = "Lines";
+const SPLIT_STRUCT: &str = "Split";
+const TEXT_SOURCE_FIELD: &str = "source";
+const TEXT_START_FIELD: &str = "start";
+const SPLIT_SEPARATOR_FIELD: &str = "separator";
+const SPLIT_DONE_FIELD: &str = "done";
+
+/// The immutable borrow `&string`.
+fn string_view() -> HirType {
+    HirType::Reference {
+        inner: Box::new(HirType::String),
+        mutable: false,
+    }
+}
+
+/// A `u64` zero, where a text iterator's cursor starts.
+fn zero_offset(span: shared_types::Span) -> HirExpr {
+    HirExpr::new(
+        HirExprKind::Literal(Literal::Integer(0, None)),
+        HirType::U64,
+        span,
+    )
+}
+
+fn text_field(name: &str, value: HirExpr) -> HirFieldInit {
+    let span = value.span;
+    HirFieldInit {
+        name: name.to_string(),
+        value: Box::new(value),
+        span,
+    }
+}
+
+/// The prelude iterator `name` over `receiver`'s text, its `source` field a borrow of the
+/// receiver followed by `rest`.
+///
+/// The borrow is what keeps the iterator from consuming the string. An immutable borrow
+/// of a `string` IS the fat pointer by value, so it holds a temporary receiver
+/// (`(a + b).chars()`) exactly as safely as it holds a named one.
+fn text_iterator(
+    name: &str,
+    receiver: HirExpr,
+    rest: Vec<HirFieldInit>,
+    span: shared_types::Span,
+) -> HirExpr {
+    let source = match receiver.ty {
+        HirType::Reference { .. } => receiver,
+        _ => HirExpr::new(
+            HirExprKind::Reference {
+                operand: Box::new(receiver),
+                mutable: false,
+            },
+            string_view(),
+            span,
+        ),
+    };
+    let mut fields = vec![text_field(TEXT_SOURCE_FIELD, source)];
+    fields.extend(rest);
+    HirExpr::new(
+        HirExprKind::StructLiteral {
+            name: name.to_string(),
+            fields,
+            base: None,
+        },
+        HirType::Struct(name.to_string()),
+        span,
+    )
+}
 
 /// The prelude types `string.parse::<T>()` answers with.
 const RESULT_ENUM: &str = "Result";
@@ -985,6 +1058,11 @@ impl Lowerer {
         if method == CHARS_METHOD && matches!(recv.referent(), HirType::String) {
             return self.lower_chars_iterator(object, span);
         }
+        if (method == LINES_METHOD || method == SPLIT_METHOD)
+            && matches!(recv.referent(), HirType::String)
+        {
+            return self.lower_text_pieces(object, method, args, span);
+        }
         if let Some(iterator) = self.lower_container_iterator(&object, method, span)? {
             return Ok(iterator);
         }
@@ -1280,54 +1358,45 @@ impl Lowerer {
 
     /// Build the `Chars` iterator `text.chars()` yields: a borrow of the receiver's UTF-8
     /// bytes paired with a byte cursor at zero.
-    ///
-    /// The borrow is what keeps the iterator from consuming the string. An immutable
-    /// borrow of a `string` IS the fat pointer by value, so it holds a temporary receiver
-    /// (`(a + b).chars()`) exactly as safely as it holds a named one.
     pub(crate) fn lower_chars_iterator(
         &mut self,
         receiver: HirExpr,
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
-        let borrowed_ty = HirType::Reference {
-            inner: Box::new(HirType::String),
-            mutable: false,
+        let offset = text_field(CHARS_OFFSET_FIELD, zero_offset(span));
+        Ok(text_iterator(CHARS_STRUCT, receiver, vec![offset], span))
+    }
+
+    /// Build the iterator `text.lines()` or `text.split(sep)` yields: a borrow of the
+    /// receiver, the separator for `.split`, and a cursor at the first piece.
+    fn lower_text_pieces(
+        &mut self,
+        receiver: HirExpr,
+        method: &str,
+        args: &[Expr],
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let start = text_field(TEXT_START_FIELD, zero_offset(span));
+        if method == LINES_METHOD {
+            return Ok(text_iterator(LINES_STRUCT, receiver, vec![start], span));
+        }
+        let [separator] = args else {
+            return Err(LoweringError::Malformed {
+                detail: "`.split` takes one separator argument".to_string(),
+            });
         };
-        let source = match receiver.ty {
-            HirType::Reference { .. } => receiver,
-            _ => HirExpr::new(
-                HirExprKind::Reference {
-                    operand: Box::new(receiver),
-                    mutable: false,
-                },
-                borrowed_ty,
-                span,
-            ),
-        };
-        Ok(HirExpr::new(
-            HirExprKind::StructLiteral {
-                name: CHARS_STRUCT.to_string(),
-                fields: vec![
-                    HirFieldInit {
-                        name: CHARS_SOURCE_FIELD.to_string(),
-                        value: Box::new(source),
-                        span,
-                    },
-                    HirFieldInit {
-                        name: CHARS_OFFSET_FIELD.to_string(),
-                        value: Box::new(HirExpr::new(
-                            HirExprKind::Literal(shared_types::Literal::Integer(0, None)),
-                            HirType::U64,
-                            span,
-                        )),
-                        span,
-                    },
-                ],
-                base: None,
-            },
-            HirType::Struct(CHARS_STRUCT.to_string()),
+        let separator = self.lower_expr(separator, Some(&string_view()))?;
+        let done = HirExpr::new(
+            HirExprKind::Literal(Literal::Boolean(false)),
+            HirType::Bool,
             span,
-        ))
+        );
+        let fields = vec![
+            text_field(SPLIT_SEPARATOR_FIELD, separator),
+            start,
+            text_field(SPLIT_DONE_FIELD, done),
+        ];
+        Ok(text_iterator(SPLIT_STRUCT, receiver, fields, span))
     }
 
     /// Lower `seq.slice(range)` on an array, `Vec`, or slice: the single range argument
@@ -1560,5 +1629,41 @@ fn names_storage(expr: &HirExpr) -> bool {
         | HirExprKind::TupleIndex { object, .. }
         | HirExprKind::Index { object, .. } => names_storage(object),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{text_field, text_iterator, zero_offset};
+    use neuro_hir::{HirExpr, HirExprKind, HirType};
+    use shared_types::{Literal, Span};
+
+    /// An owned receiver is borrowed into `source`, which comes first, and the other
+    /// fields follow in the order given.
+    #[test]
+    fn a_text_iterator_borrows_an_owned_receiver_first() {
+        let span = Span::new(0, 3);
+        let text = HirExpr::new(
+            HirExprKind::Literal(Literal::String("a,b".to_string())),
+            HirType::String,
+            span,
+        );
+        let built = text_iterator(
+            "Lines",
+            text,
+            vec![text_field("start", zero_offset(span))],
+            span,
+        );
+        assert_eq!(built.ty, HirType::Struct("Lines".to_string()));
+        let HirExprKind::StructLiteral { name, fields, .. } = &built.kind else {
+            panic!("expected a struct literal, got {built:?}");
+        };
+        assert_eq!(name, "Lines");
+        let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["source", "start"]);
+        assert!(matches!(
+            fields[0].value.kind,
+            HirExprKind::Reference { mutable: false, .. }
+        ));
     }
 }
