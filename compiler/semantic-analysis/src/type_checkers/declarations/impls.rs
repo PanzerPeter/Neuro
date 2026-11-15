@@ -98,7 +98,10 @@ impl TypeChecker {
             }
 
             let return_type = if let Some(ret_ty) = &method.return_type {
-                self.resolve_type(ret_ty).unwrap_or(Type::Void)
+                // A return type that failed to resolve was reported; `Unknown` keeps the
+                // body's `return`s and each call site from reporting it again as a `void`
+                // it never wrote, as for a free function.
+                self.resolve_type(ret_ty).unwrap_or(Type::Unknown)
             } else {
                 Type::Void
             };
@@ -674,7 +677,9 @@ impl TypeChecker {
             // its own end at runtime.
             if tail_returns {
                 self.check_implicit_return(&method.body, &return_type);
-            } else if !matches!(return_type, Type::Void) && !stmts_diverge(&method.body) {
+            } else if !matches!(return_type, Type::Void | Type::Unknown)
+                && !stmts_diverge(&method.body)
+            {
                 self.record_error(TypeError::MissingReturn {
                     expected: return_type.clone(),
                     span: method.name.span,

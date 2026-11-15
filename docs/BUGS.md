@@ -5,6 +5,48 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-164: a function named like a C library function takes its place
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend` (`declare_function`, `declare_method` in `codegen/functions.rs`)
+- **Severity**: critical. A float method silently returns the wrong value; other names fail
+  LLVM verification or panic the compiler
+
+**Minimal repro**
+
+```neuro
+func exp(x: f64) -> f64 { 100.0 }
+
+func main() -> i32 {
+    val y: f64 = 1.0
+    (y.exp() * 1000.0) as i32
+}
+```
+
+Expected: exit code 158 (2718 modulo 256). Observed: exit code 160 (100000 modulo 256), because
+`y.exp()` ran the program's `exp`. `func pow(x: f64, y: f64) -> f64 { 0.0 }` makes `2.0.pow(3.0)`
+return 0. `func free(x: i32) -> i32` or `func write(a: i32, b: i32, c: i32) -> i32` beside a
+string concatenation or a `println` fails with `module verification failed: "Call parameter type
+does not match function signature!"`. `func malloc(n: u64) -> u64` panics `neurc` in
+`format_helpers.rs` (`expected PointerValue variant`). `func abort() -> i32` turns an index panic
+into a segmentation fault.
+
+**Root cause**: confirmed in the code. A function, method or closure of the root module is
+emitted under its bare name (`@exp`, `@free`; a module's items are `@"geo::make"`). The backend
+finds the C functions it calls (`malloc`, `free`, `write`, `abort`) by name with `get_function`
+and gets the program's function instead, and the linker binds the math library calls LLVM emits
+for `.exp()` and `.pow()` to the program's definitions.
+
+**Workaround**: rename the function.
+
+**Fix sketch**: emit every program function except the root `main` under a symbol no C name can
+take, such as a `neuro.fn.` prefix (a Neuro name holds no `.`). Calls already go through the
+backend's name-keyed function table, so only the declarations, the `neurc test` entry's lookup
+of each test, and the runtime pruning's removal from that table change. The open question is
+`--emit obj`: `docs/guides/cli-usage.md` and both Python differential harnesses load root
+functions from the object by their bare names, so a library build needs an exported alias per
+root function, or the backend needs to know when it builds an executable.
+
 ## BUG-163: a `()` pattern does not parse
 
 - **Status**: open, confirmed
@@ -88,8 +130,14 @@ later passes and do not have the problem.
 
 **Workaround**: declare the field's struct first.
 
+The same ordering is the only thing that refuses a struct holding itself: `struct A { x: i32, a: A }`
+and the pair `struct A { b: B }`, `struct B { a: A }` both fail with `unknown type name`, not
+with a diagnostic that names the cycle.
+
 **Fix sketch**: register every struct name before resolving any field type, then resolve the
-fields in a second loop, keeping the duplicate-name check and the recursive-struct refusal.
+fields in a second loop, keeping the duplicate-name check. Add a recursive-struct check beside
+`reject_recursive_enums`, since once the names resolve nothing else refuses an inline cycle, and
+the backend's layout would recurse on one.
 
 ## BUG-160: a generic struct literal with a `&[T]` field and no annotation does not compile
 

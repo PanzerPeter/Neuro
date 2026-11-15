@@ -367,3 +367,37 @@ fn regression_a_store_below_a_failed_place_reports_one_error() {
         );
     }
 }
+
+#[test]
+fn regression_method_with_unresolved_return_type_cascaded_as_void() {
+    // A method whose return type does not resolve was registered as returning `void`, so its
+    // own `return` and every caller binding its result reported errors of their own. A free
+    // function's unresolved return type is `Unknown`, which reports nothing further.
+    for return_type in ["Nope", "impl Shape"] {
+        let source = format!(
+            r#"trait Shape {{ func area(&self) -> i32 }}
+    struct S {{ x: i32 }}
+    impl S {{
+        func f(&self) -> {return_type} {{
+            if self.x > 0 {{ return self.x }}
+            self.x
+        }}
+    }}
+    func test() -> i32 {{
+        val s = S {{ x: 1 }}
+        val a = s.f()
+        0
+    }}"#
+        );
+        let items = syntax_parsing::parse(&source).unwrap();
+        let errors = type_check(&items).unwrap_err();
+        assert_eq!(errors.len(), 1, "-> {return_type}: {errors:?}");
+        assert!(
+            matches!(
+                errors[0],
+                TypeError::UnknownTypeName { .. } | TypeError::ImplTraitNotAllowedHere { .. }
+            ),
+            "-> {return_type}: {errors:?}"
+        );
+    }
+}

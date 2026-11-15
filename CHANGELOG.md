@@ -10,6 +10,15 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.50.1] - 2026-11-15
+
+### Fixed
+
+- A method whose return type does not resolve (an unknown name, or `impl Trait`, which a method
+  cannot return yet) reports that one error. It was taken to return nothing, so its own `return`
+  and every caller that bound its result reported a second and third error about a `void` the
+  program never wrote.
+
 ## [5.50.0] - 2026-11-15
 
 ### Added
