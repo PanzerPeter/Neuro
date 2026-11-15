@@ -386,7 +386,7 @@ func main() -> i32 {
     assert!(result.is_err(), "calling unknown method should fail");
     let err = result.unwrap_err();
     assert!(
-        err.contains("struct 'Point' has no method 'nonexistent'"),
+        err.contains("type 'Point' has no method 'nonexistent'"),
         "error should mention the missing method, got: {}",
         err
     );

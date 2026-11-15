@@ -60,7 +60,7 @@ func main() -> i32 {
         "calling .clone() on a struct without @derive(Clone) must fail"
     );
     assert!(
-        stderr.contains("struct 'Point' has no method 'clone'"),
+        stderr.contains("type 'Point' has no method 'clone'"),
         "{stderr}"
     );
 }

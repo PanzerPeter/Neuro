@@ -498,7 +498,8 @@ type token self-delimiting so the concatenation is injective: a declared type's 
 with its length (`5Inner`), a trait object's too (`dyn4Show`), and a function type spells its
 arity, parameters and result (`fn1_i32_bool`). Without it the struct `tup2_i32_i32` and the
 tuple `(i32, i32)` shared a token, as did `Pair<A_B, C>` and `Pair<A, B_C>`, and every function
-type.
+type. No token ends in `_`: a rank-0 tensor is `tensor_f32_r0` and the unit tuple `tup0`, since a
+trailing `_` before a method's `__` makes a `___` the backend splits one character early.
 
 **Generic methods** (a method's own `<U>`) are templates too. `register_impl_methods` (a plain
 impl) and `register_instance_methods` (each generic-impl instance) store them in

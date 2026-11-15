@@ -182,7 +182,9 @@ impl<'ctx> CodegenContext<'ctx> {
         self.pool_marks.push(mark);
         self.pool_locals.push(HashSet::new());
         self.pool_exits.push(exit);
-        let result = self.codegen_block_expr(stmts);
+        // The pool's tail stays a yielded value: its arena is released below, and a value
+        // the tail built there is reclaimed with it rather than by a drop.
+        let result = self.codegen_block_expr(stmts, true);
         let _ = self.pool_exits.pop();
         let _ = self.pool_locals.pop();
         let _ = self.pool_marks.pop();
@@ -211,9 +213,12 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
+    /// `yields` is false for a `void` block: nothing reads its tail, so the tail is emitted
+    /// as a statement and a value it computes is released like any other discarded one.
     pub(crate) fn codegen_block_expr(
         &mut self,
         stmts: &[HirStmt],
+        yields: bool,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         self.push_drop_scope();
         let Some((last, init)) = stmts.split_last() else {
@@ -230,7 +235,7 @@ impl<'ctx> CodegenContext<'ctx> {
         // yields unit, and asking `codegen_expr` for its value would fail. It is emitted
         // as an ordinary statement instead, like any other non-expression tail.
         let value_tail = match last {
-            HirStmt::Expr(expr) => !matches!(expr.ty, HirType::Void),
+            HirStmt::Expr(expr) => yields && !matches!(expr.ty, HirType::Void),
             _ => false,
         };
         let result = if let (true, HirStmt::Expr(expr)) = (value_tail, last) {

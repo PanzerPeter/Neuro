@@ -22,7 +22,8 @@ compilation.
 
 `type_checkers/expressions/` holds the `check_expr` dispatch (`mod.rs`) plus `calls`,
 `enum_exprs`, `struct_exprs`, `operators`, `blocks`, `places`, `sequences`, `builtins`,
-`const_predicates`, `interpolation`, `try_expr`, `compose`, and `lending` (the borrow a call takes
+`const_predicates`, `interpolation`, `try_expr`, `compose`, `safetensors` (the compiler-known
+methods of the `std::safetensors` file and writer), and `lending` (the borrow a call takes
 of a function value it calls or hands to a function-typed parameter). `type_checkers/declarations/` holds the
 reserved-name pass, generic scope, and generic unification/substitution in `mod.rs`, with one
 module per declaration kind beside it. `tests/` is split by subject.
@@ -258,7 +259,13 @@ back `Unknown` or with no type at all (an undefined name): the second used to fa
 false `UninitializedVariable`. Once the program has any error, an `Unknown` initializer that
 `expr_diverges` does not explain binds silently too: it came from a value an earlier error left
 at `Unknown` (`val c = b.sum()` after `b`'s initializer failed). A return type that fails to
-resolve registers as `Unknown` rather than `void`, so its call sites stay quiet. A statement-level `if` / `else if` / `while` condition that is
+resolve registers as `Unknown` rather than `void`, so its call sites stay quiet. Three more
+names follow the same rule: a `for` item whose head failed to type; a variant pattern's
+bindings when the scrutinee failed to type (a generic enum's template would otherwise bind
+them at its own `T`) or when the pattern names another enum than the scrutinee has, bound as
+the pattern's enum types them; and a `val-else` binding left `Unknown` in a refused program.
+An interpolation hole whose own error left it `Unknown` is not refused a second time as
+unrenderable. A statement-level `if` / `else if` / `while` condition that is
 `Unknown` is not re-reported as a `bool` mismatch, as the expression-level `if` already skipped it.
 
 ### Primitive and reference type contracts

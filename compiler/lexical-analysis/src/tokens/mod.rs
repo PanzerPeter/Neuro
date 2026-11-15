@@ -74,9 +74,10 @@ pub enum InterpChunk {
 }
 
 /// Token types in the Neuro language
-// Logos takes one `#[token]` or `#[regex]` per spelling, so variants repeat the same callback
-// and priority arguments by design; clippy reads those as duplicated attributes.
-#[expect(clippy::duplicated_attributes)]
+#[expect(
+    clippy::duplicated_attributes,
+    reason = "logos takes one `#[token]` or `#[regex]` per spelling, so variants repeat the same callback and priority arguments by design"
+)]
 #[derive(Debug, Clone, PartialEq, Logos)]
 #[logos(skip r"[ \t\r]+")]
 #[logos(error = LexError)]

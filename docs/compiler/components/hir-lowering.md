@@ -14,7 +14,7 @@ The type checker validates types but does not expose them, so lowering re-derive
 - **Dependencies**: `ast-types` (read-only traversal), `neuro-hir` (the output node set), `shared-types`, `thiserror` (for `LoweringError`). `syntax-parsing` is a dev-dependency only, for tests that build ASTs through the parser.
 - **Public API**: `lower_program` and `LoweringError`.
 - **No semantic coupling.** Lowering does not import `semantic_analysis::Type`. That import would couple two feature slices, which VSA forbids, so duplicating the checker's tables is the intended cost. A divergence between the two surfaces as a `LoweringError`, which is how the duplication is supposed to fail.
-- **Internals**: [`autodiff/`](../../../compiler/hir-lowering/src/autodiff/) (the derivative transform), [`tensor_ops.rs`](../../../compiler/hir-lowering/src/tensor_ops.rs) (outlining of tensor operations), and one module per construct family (`expressions/`, `items/`, `statements/`, `closures.rs`, `iteration.rs`, and so on).
+- **Internals**: [`autodiff/`](../../../compiler/hir-lowering/src/autodiff/) (the derivative transform), [`tensor_ops.rs`](../../../compiler/hir-lowering/src/tensor_ops.rs) (outlining of tensor operations), and one module per construct family (`expressions/`, `items/`, `statements.rs`, `closures.rs`, `iteration.rs`, and so on).
 
 ## Behavior
 
@@ -39,7 +39,7 @@ HIR has no source form for these, so each carries a fixed type:
 
 - A `loop` used as a value takes the type of its `break v`, or `void`.
 - A method name used as a callee (`FieldAccess`) carries the call's result type, since a method is not a value.
-- A `Range` carries `void`. It is valid only as a `string.slice` or `string.char_slice` argument, and that lowering reads its bounds directly.
+- A `Range` passed to `string.slice` or `string.char_slice` carries `void`, because that lowering reads its bounds directly. Anywhere else a range is a value: a literal of the prelude's `Range` struct at its bounds' type.
 - A `pool` block is `void` and is lowered against no expected type. A `pool` is a statement, not a value.
 - The parser's `Paren` grouping node is dropped, because the tree already encodes grouping.
 

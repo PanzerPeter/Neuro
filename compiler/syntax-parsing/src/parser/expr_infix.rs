@@ -363,10 +363,11 @@ impl Parser {
                 })?;
                 let op = self.token_to_binary_op(&op_token)?;
                 let precedence = self.get_precedence(&op_token.kind);
-                // R-to-L coalescing (`??`): recurse at one-step-lower precedence so the
-                // outer loop re-enters on the next `??` instead of stopping. Appendix B row 14.
+                // R-to-L coalescing (`??`): recurse at the next row down (`Range`), so the
+                // fallback takes another `??` but stops at `..`, `>>` and `|>`, which are
+                // looser. Appendix B row 13.
                 let right_prec = if matches!(op_token.kind, TokenKind::QuestionQuestion) {
-                    Precedence::Lowest
+                    Precedence::Range
                 } else {
                     precedence
                 };

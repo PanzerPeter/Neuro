@@ -29,7 +29,7 @@ mod unary;
 
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::*;
-use neuro_hir::{HirExpr, HirExprKind};
+use neuro_hir::{HirExpr, HirExprKind, HirType};
 
 use crate::codegen::context::{BuiltinMethod, CodegenContext, DropTarget, resolve_builtin_method};
 use crate::codegen::drops::builds_its_own_buffer;
@@ -151,7 +151,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 )
             }
 
-            HirExprKind::Block { stmts } => self.codegen_block_expr(stmts),
+            HirExprKind::Block { stmts } => {
+                self.codegen_block_expr(stmts, !matches!(expr.ty, HirType::Void))
+            }
 
             // A `loop` in value position lowers like the statement form, but
             // its `break v` result is loaded and returned. A unit loop (no value
@@ -163,7 +165,9 @@ impl<'ctx> CodegenContext<'ctx> {
             }
 
             // `unsafe` is inert: lower its body identically to a bare block.
-            HirExprKind::Unsafe { stmts } => self.codegen_block_expr(stmts),
+            HirExprKind::Unsafe { stmts } => {
+                self.codegen_block_expr(stmts, !matches!(expr.ty, HirType::Void))
+            }
 
             // A `pool` yields unit; its value is the arena region around the body.
             HirExprKind::Pool { stmts, .. } => self.codegen_pool_expr(stmts),

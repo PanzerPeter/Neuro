@@ -45,7 +45,7 @@ pub(crate) const STATUS_BITS: u32 = 64;
 const STATUS_EXTENT: i64 = 1;
 
 /// The key's low bits, which hold a failed check's number. A body with more checks than they
-/// can number is left to the LLVM backend.
+/// can number gets no body, which the driver reports as an internal error.
 pub(crate) const SITE_BITS: u32 = 12;
 pub(crate) const MAX_SITES: usize = (1 << SITE_BITS) - 1;
 

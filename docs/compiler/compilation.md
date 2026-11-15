@@ -31,7 +31,9 @@ The `-O` level reaches stage 8 and stage 9. At `-O0` the tensor bodies check int
 
 **`neurc run <FILE>`** compiles as `compile` does, into a temporary directory, runs the executable and exits with its status. The executable keeps the source's name, so `argv[0]` is meaningful. The directory is removed on exit, and no success line is printed, so the program's stdout is its own.
 
-Flags are documented in the [CLI Usage Guide](../guides/cli-usage.md), including `--gpu-arch`, which `compile` and `run` accept.
+**`neurc test <FILE>`** runs the same front half and the same backend as `compile`, but needs no `main`: the executable's entry runs the `@test` function its first argument indexes. The driver runs it once per test, each in its own process, and a test passes when its process exits `0`. It prints a verdict per test and the output of each failure.
+
+Flags are documented in the [CLI Usage Guide](../guides/cli-usage.md), including `--gpu-arch`, which `compile`, `run` and `test` accept.
 
 ## Errors
 
@@ -59,6 +61,8 @@ Compilation failed: Type checking failed
 | | 1 | An error in any stage, including a missing `main` or a linker failure |
 | `run` | the program's own status | The program ran; `main`'s return value, which the OS truncates to 8 bits |
 | | 1 | Compilation or linking failed, or the program was killed by a signal |
+| `test` | 0 | Every test passed, or there were none |
+| | 1 | A test failed, or compilation or linking failed |
 | all | 2 | A rejected command line, such as an unknown flag or `-O4`. Nothing is read. |
 | all | 101 | The compiler itself panicked. The panic message is already on stderr. |
 

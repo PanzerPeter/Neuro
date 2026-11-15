@@ -216,7 +216,7 @@ y = 3.14   // error: type mismatch: expected i32, found f64
 func main() -> i32 {
     val z
     return 0
-}   // error: variable 'z' used without initialization
+}   // error: binding 'z' has no initializer; a `val` or `mut` is initialized where it is declared: write `= value`
 ```
 
 ```neuro
@@ -230,7 +230,7 @@ const C: i32 = f()   // error: constant expression required: only literals, arit
 
 ```neuro
 func main() -> i32 {
-    val [a, b] = [1, 2, 3]   // error: array destructuring pattern binds 2 element(s) but the array has 3: list every element or add a `..rest` pattern
+    val [a, b] = [1, 2, 3]   // error: array pattern binds 2 element(s) but the array has 3: list every element or add a `..rest` pattern
     return a
 }
 ```

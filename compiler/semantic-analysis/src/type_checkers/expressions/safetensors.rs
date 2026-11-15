@@ -39,7 +39,11 @@ fn text() -> Type {
 impl TypeChecker {
     /// The type of a compiler-known method on a `std::safetensors` struct, or `None` for any
     /// other method, which the ordinary method path then resolves or reports.
-    #[expect(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the method-call dispatch passes its receiver, call and expectation as it holds \
+                  them; a struct built for this one hook would only repack the same values"
+    )]
     pub(super) fn check_safetensors_method(
         &mut self,
         struct_name: &str,

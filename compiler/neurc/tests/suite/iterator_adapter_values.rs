@@ -459,3 +459,27 @@ func main() -> i32 {
     );
     assert_exit("adapter_own_map.nr", &source, 73);
 }
+
+/// A `for` body over an iterator value is a block nothing reads, so a value its last statement
+/// computes is released there: an overwriting `insert` drops the string it displaces, and a
+/// discarded call result is freed each iteration.
+#[test]
+fn a_value_ending_a_for_body_over_an_iterator_is_released() {
+    let source = r#"
+func some() -> Option<string> { Option::Some("x".clone() + "yzw") }
+
+func main() -> i32 {
+    mut m: HashMap<string, string> = HashMap::new()
+    for line in "a\na\na".lines() {
+        m.insert(line.clone(), "v".clone() + "w")
+    }
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    v.push(2)
+    for x in v.iter() { some() }
+    m.len() as i32
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("for_body_tail.nr", source), 1);
+}

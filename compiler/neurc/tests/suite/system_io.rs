@@ -115,6 +115,49 @@ func main() -> i32 {
 }
 
 #[test]
+fn a_directory_and_an_unreadable_file_report_their_kinds() {
+    let (_test, exe) = build(
+        r#"
+func kind_of(path: &string) -> string {
+    match std::fs::read_to_string(path) {
+        Ok(_) => "read",
+        Err(e) => "{e.kind:?}",
+    }
+}
+
+func main() -> i32 {
+    println(kind_of("a_dir"))
+    println(kind_of("locked.txt"))
+    0
+}
+"#,
+    );
+    let dir = exe.parent().expect("the binary has a directory");
+    std::fs::create_dir(dir.join("a_dir")).expect("create a directory");
+    let locked = dir.join("locked.txt");
+    std::fs::write(&locked, "secret").expect("write the locked file");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000))
+            .expect("drop every permission");
+    }
+    // Root, and every non-Unix host, reads the file regardless of its mode.
+    let locked_is_readable = std::fs::read(&locked).is_ok();
+
+    let (code, out) = run_in_place(&exe, &Run::default());
+    assert_eq!(code, 0, "the program failed; it printed:\n{out}");
+    let mut lines = out.lines();
+    assert_eq!(lines.next(), Some("Other"));
+    let expected = if locked_is_readable {
+        "read"
+    } else {
+        "PermissionDenied"
+    };
+    assert_eq!(lines.next(), Some(expected));
+}
+
+#[test]
 fn a_failure_names_the_file_and_propagates_through_question_mark() {
     let out = stdout_with(
         r#"

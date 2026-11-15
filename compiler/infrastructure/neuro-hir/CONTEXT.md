@@ -10,7 +10,7 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
   `HirTrait`, `HirClosure`, `HirCapture`, `HirStmt`, `HirPlace`, `HirExpr`, `HirExprKind`,
   `HirFieldInit`, `HirGridIndex`, `HirInterpPart`, `HirMatchArm`, `HirMatchBinding`,
   `HirMatchTest`, `HirPatternStep`, `HirMathOp`, `HirReduceOp`, `HirSortKind`, `HirTensorApply`, `HirTensorAxis`,
-  `HirType`, `HirCollectionKind`, `AxisNames`
+  `HirType`, `HirCollectionKind`, `AxisNames`, `MapView`
 - Pure functions over those types: `static_shape`, `extent_display`,
   `HirTarget::{has_gpu_body, requires_gpu, outlined}`, `HirType::referent`,
   `HirPlace::{to_expr, ty}`, `HirCollectionKind::{name, arity, mangle_tag}`,

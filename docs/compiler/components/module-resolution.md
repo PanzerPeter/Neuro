@@ -30,7 +30,7 @@ Every declaration outside the root module is renamed to its path followed by its
 
 A bare name written in a module resolves to the first of these that has it:
 
-1. a local: a parameter, a `val` or `var`, a pattern or loop binding, a closure parameter, or a generic parameter;
+1. a local: a parameter, a `val` or `mut`, a pattern or loop binding, a closure parameter, or a generic parameter;
 2. the module's imports, its own declarations and its inline blocks;
 3. the same for each module around it, when it is an inline block;
 4. the prelude's variants.
@@ -95,16 +95,16 @@ This slice never touches a span. The driver adds each file to the program's sour
 
 | Situation | Message |
 |---|---|
-| Reaching an item with no `export` | ``secret` is private to module `math` and cannot be used from `main.nr`; write `export` before its declaration to make it module-public`` |
-| A root-file name used in another module | ``secret` is declared in `main.nr`, not in `lib.nr`, and nothing in `lib.nr` imports it; every module is a namespace, so import it or write its path`` |
-| Two imports of one name | ``size` is imported twice in `main.nr`; one name can stand for one thing, so rename one of them with `as`` |
-| An import of a name the module declares | ``size` is imported in `main.nr`, which declares a `size` of its own; one name can stand for one thing, so rename the import with `as`` |
-| A directory in a path with no `mod.nr` | ``dir` is a directory with no `mod.nr`, so it is not a module (referenced from `main.nr`); add `dir/mod.nr` or point the path at a `.nr` file`` |
-| A path of three segments naming no module | ``nope::a::b` does not name a module (referenced from `main.nr`); expected `nope.nr` or `nope/mod.nr` beside it`` |
-| An import of a name the module lacks | ``module `math` declares no item named `nope` (referenced from `main.nr`)`` |
-| An import head that is neither a module nor an enum | ``Shape` in `main.nr` names neither a module nor an enum, so the import brings nothing into scope`` |
-| `export import` of a module or variant | ``export import` in `main.nr` would re-export `x`, which names a module rather than an item; only an item can be re-exported; drop the `export``` |
-| A bare path to a block from another file | ``leaf::Thing` in `other.nr` cannot reach the inline module `leaf`: a block is in scope inside the module that declares it, and from anywhere else is reached through that module's path`` |
+| Reaching an item with no `export` | `` `secret` is private to module `math` and cannot be used from `main.nr`; write `export` before its declaration to make it module-public `` |
+| A root-file name used in another module | `` `secret` is declared in `main.nr`, not in `lib.nr`, and nothing in `lib.nr` imports it; every module is a namespace, so import it or write its path `` |
+| Two imports of one name | `` `size` is imported twice in `main.nr`; one name can stand for one thing, so rename one of them with `as` `` |
+| An import of a name the module declares | `` `size` is imported in `main.nr`, which declares a `size` of its own; one name can stand for one thing, so rename the import with `as` `` |
+| A directory in a path with no `mod.nr` | `` `dir` is a directory with no `mod.nr`, so it is not a module (referenced from `main.nr`); add `dir/mod.nr` or point the path at a `.nr` file `` |
+| A path of three segments naming no module | `` `nope::a::b` does not name a module (referenced from `main.nr`); expected `nope.nr` or `nope/mod.nr` beside it `` |
+| An import of a name the module lacks | `` module `math` declares no item named `nope` (referenced from `main.nr`) `` |
+| An import head that is neither a module nor an enum | `` `Shape` in `main.nr` names neither a module nor an enum, so the import brings nothing into scope `` |
+| `export import` of a module or variant | `` `export import` in `main.nr` would re-export `x`, which names a module rather than an item; only an item can be re-exported; drop the `export` `` |
+| A bare path to a block from another file | `` `leaf::Thing` in `other.nr` cannot reach the inline module `leaf`: a block is in scope inside the module that declares it, and from anywhere else is reached through that module's path `` |
 
 ## Testing
 

@@ -38,7 +38,7 @@ neurc check hello.nr
 ```
 
 ```text
-Type checking passed for "hello.nr" (1 module(s), 22 HIR items)
+Type checking passed for "hello.nr" (1 module(s), N HIR items)
 ```
 
 The HIR item count includes the implicit prelude, so it is larger than the number of

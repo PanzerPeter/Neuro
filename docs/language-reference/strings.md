@@ -194,7 +194,7 @@ val empty = s.char_slice(5..5)        // "", the character count is a legal boun
 
 Only the bounds rule applies here, and a violation panics with `string char slice out of bounds`. A code point index cannot name a position inside a code point, so there is no alignment rule.
 
-A range `a..b` is not a value. It may be the argument of `.slice` or `.char_slice`, a `for` head, a tensor index or a `match` pattern, so `val r = 0..5` is a compile error.
+`.slice` and `.char_slice` take the range written at the call: a bound range value (`val r = 1..3`, then `s.slice(r)`) is refused with ``.slice() / .char_slice() expects a range argument `a..b` or `a..=b` ``. See [Ranges as Values](control-flow.md#ranges-as-values) for what a range value does take.
 
 ### Views of a temporary
 

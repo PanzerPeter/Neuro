@@ -17,7 +17,7 @@ neurc check examples/basics/hello.nr
 ```
 
 ```text
-Type checking passed for "examples/basics/hello.nr" (1 module(s), 24 HIR items)
+Type checking passed for "examples/basics/hello.nr" (1 module(s), N HIR items)
 ```
 
 The HIR count includes the implicit prelude, so it is larger than the number of declarations in

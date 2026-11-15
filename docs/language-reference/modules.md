@@ -101,6 +101,9 @@ level above it. A brace entry may name a **child module** as well as an item.
 An import may not bind a name the module already declares, or one another import already bound.
 `as` renames one of them. A local variable may shadow an imported name, renamed or not.
 
+Two modules may import from each other. Every module is loaded before any name is resolved, so a
+cycle of imports is not an error.
+
 Imported variants read as themselves in value and pattern position alike:
 
 ```neuro
@@ -329,20 +332,20 @@ declaration lives.
 
 | Situation | What you get |
 |---|---|
-| `math::cbrt` where `math.nr` has no `cbrt` | ``module `math` declares no item named `cbrt` `` |
-| `utils::read` where `utils/` has no `mod.nr` | ``utils` is a directory with no `mod.nr` … add `utils/mod.nr`` |
-| `missing::inner::value()` naming no module at all | ``missing::inner::value` does not name a module … expected `missing.nr` or `missing/mod.nr` beside it`` |
-| A root-file name used bare in another module | ``secret` is declared in `main.nr`, not in `lib.nr` … import it or write its path`` |
-| An import of a name the module declares | ``size` is imported in `main.nr`, which declares a `size` of its own … rename the import with `as`` |
-| `import math::{cbrt}` where `math.nr` has no `cbrt` | ``module `math` declares no item named `cbrt` `` |
-| Two imports binding one name | ``sqrt` is imported twice … rename one of them with `as`` |
-| A prelude name in a `@no_prelude` file | ``Option` comes from `std::prelude`, and `main.nr` opts out of the prelude with `@no_prelude`; write `import std::prelude::{Option}` or `std::prelude::Option`` |
-| `Some(n)` in a pattern with no import behind it | ``variant `Some` is used without its enum … write `Enum::Some` or add `import Enum::{Some}`` |
-| Reaching a declaration with no `export` | ``internal` is private to module `lib` … write `export` before its declaration`` |
-| Reaching a field with no `export` | ``field 'timeout' of struct 'Config' is private to the module that declares it`` |
-| `export` on an `impl` or a `type` alias | ``export` cannot be applied to …`` |
-| `export import` naming a module or a variant | ``export import` … would re-export `x`, which names a module rather than an item`` |
-| Two inline blocks in one module sharing a name | ``m` is declared twice as an inline module … rename one of them`` |
+| `math::cbrt` where `math.nr` has no `cbrt` | `` module `math` declares no item named `cbrt` `` |
+| `utils::read` where `utils/` has no `mod.nr` | `` `utils` is a directory with no `mod.nr` … add `utils/mod.nr` `` |
+| `missing::inner::value()` naming no module at all | `` `missing::inner::value` does not name a module … expected `missing.nr` or `missing/mod.nr` beside it `` |
+| A root-file name used bare in another module | `` `secret` is declared in `main.nr`, not in `lib.nr` … import it or write its path `` |
+| An import of a name the module declares | `` `size` is imported in `main.nr`, which declares a `size` of its own … rename the import with `as` `` |
+| `import math::{cbrt}` where `math.nr` has no `cbrt` | `` module `math` declares no item named `cbrt` `` |
+| Two imports binding one name | `` `sqrt` is imported twice … rename one of them with `as` `` |
+| A prelude name in a `@no_prelude` file | `` `Option` comes from `std::prelude`, and `main.nr` opts out of the prelude with `@no_prelude`; write `import std::prelude::{Option}` or `std::prelude::Option` `` |
+| `Some(n)` in a pattern with no import behind it | `` variant `Some` is used without its enum … write `Enum::Some` or add `import Enum::{Some}` `` |
+| Reaching a declaration with no `export` | `` `internal` is private to module `lib` … write `export` before its declaration `` |
+| Reaching a field with no `export` | `` field 'timeout' of struct 'Config' is private to the module that declares it `` |
+| `export` on an `impl` or a `type` alias | `` `export` cannot be applied to … `` |
+| `export import` naming a module or a variant | `` `export import` … would re-export `x`, which names a module rather than an item `` |
+| Two inline blocks in one module sharing a name | `` `m` is declared twice as an inline module … rename one of them `` |
 
 ## What has not landed yet
 

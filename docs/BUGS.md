@@ -5,6 +5,112 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-168: a `match` on a diverging scrutinee reports a template parameter
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`check_enum_pattern` in `type_checkers/matches.rs`)
+- **Severity**: minor. Only dead code reaches it, and the error names a type the program never
+  wrote
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    match panic("x") {
+        Some(a) => a + 1,
+        None => 0,
+    }
+}
+```
+
+Expected: the program compiles, since no arm can run, or one error saying the scrutinee never
+produces a value. Observed: `cannot apply binary operator + to types T and i32`.
+
+**Root cause**: the scrutinee's type is the diverging one, so `Some(a)` binds `a` at the generic
+enum's own parameter `T` instead of at a concrete type. The recovery that binds such a payload at
+the unknown type is limited to programs already refused, so that a clean program never lowers an
+unknown binding.
+
+**Workaround**: none needed; the `match` is dead code.
+
+**Fix sketch**: give a diverging scrutinee its own rule: accept the `match` with every arm
+unreachable, or refuse it with one error that names the divergence.
+
+## BUG-167: a block statement whose value nothing reads leaks it
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend` (`is_fresh_value` in `codegen/drops/mod.rs`)
+- **Severity**: minor. A leak, and only for a block written as a statement with a value at its end
+
+**Minimal repro**
+
+```neuro
+func some() -> Option<string> { Option::Some("x".clone() + "yzw") }
+
+func main() -> i32 {
+    { some() }
+    0
+}
+```
+
+Expected: the `Option<string>` the block yields is released at the end of its statement.
+Observed: AddressSanitizer's leak check reports its string.
+
+**Root cause**: the block is typed by its tail, so it yields the value and marks it moved. The
+statement that discards it releases only a value `is_fresh_value` accepts, and that list has no
+`Block` or `Unsafe` (`is_fresh_string` already has them, which is why a bare `string` does not leak).
+
+**Workaround**: drop the braces (a bare `some()` statement releases its result), or bind it.
+
+**Fix sketch**: accept `Block` and `Unsafe` in `is_fresh_value`, since their tail is moved out to
+the reader, with a leak-checked test beside `a_value_ending_a_for_body_over_an_iterator_is_released`.
+
+## BUG-166: a tensor expression with more than 4095 checks is an internal error
+
+- **Status**: open, confirmed
+- **Area**: `mlir-backend` (the `MAX_SITES` cap in `tensor_arithmetic.rs`, `tensor_compound.rs` and
+  `kernel/mod.rs`)
+- **Severity**: minor. Only a pathological expression reaches it, and only at `-O 0`
+
+**Minimal repro**: at `-O 0`, one statement summing 4200 `i32` tensor terms
+(`val r = &a + &a + ...` with `a: Tensor<i32, [2]>`).
+
+Expected: the program compiles. Observed: `internal error: no MLIR body computes the tensor
+operation '__tensor_op_0'`.
+
+**Root cause**: a check site is numbered in 12 bits, so a body that would need more than 4095 sites
+returns `None`. That used to leave the operation to the inkwell tensor lowering, which 5A deleted, so
+nothing computes it now.
+
+**Workaround**: split the expression into `val` bindings, or build at `-O 1` or above.
+
+**Fix sketch**: have `hir-lowering` split an outlined expression whose check count would pass the
+cap, or give every site past it one shared key that reports the statement without a column.
+
+## BUG-165: a chain of checked integer tensor operations carries a check per pair of operations
+
+- **Status**: open, confirmed
+- **Area**: `mlir-backend` (`linalg-fuse-elementwise-ops` in the CPU and GPU pipelines of
+  `bridge.rs`)
+- **Severity**: minor. Debug builds only; compile time, memory and run time grow with the square
+  of the chain's length
+
+**Minimal repro**: at `-O 0`, `val r = &a + &a + ...` with `a: Tensor<i32, [2]>`. `--emit llvm-ir`
+holds 345 `atomicrmw` check stores for 25 terms and 1270 for 50, where about one per term is
+expected. 250 terms take about 14 s to compile (0.2 s at `-O 2`), and 500 terms run LLVM out of
+memory under a 3 GB cap.
+
+**Root cause**: each checked operation's `linalg.generic` writes its status in an `scf.if`, a side
+effect, so fusion copies a producer into its consumer without erasing it. Every later operation
+re-fuses the whole chain before it: n operations carry n(n+1)/2 checks.
+
+**Workaround**: split long integer tensor expressions into `val` bindings, or build at `-O 1` or
+above.
+
+**Fix sketch**: build a straight element-wise chain as one `linalg.generic` in
+`build_expression`, so fusion has nothing to do; or leave `linalg-fuse-elementwise-ops` out of the
+pipeline for checked bodies, which costs a buffer per operation but stays linear.
+
 ## BUG-164: a function named like a C library function takes its place
 
 - **Status**: open, confirmed

@@ -144,7 +144,7 @@ Reads `.nr` files from disk; writes nothing.
   written: bare identifiers, `match` / `val-else` patterns, the holes of an interpolated string,
   and every name that can only be a type or a trait (a struct literal's, an `impl` block's type
   and trait, a bound, a supertrait, `impl` / `dyn` types). It also tracks locals (parameters,
-  `val` / `var`, pattern and loop bindings, closure parameters, generic parameters) and offers no
+  `val` / `mut`, pattern and loop bindings, closure parameters, generic parameters) and offers no
   name whose head is one. Discovery and rewriting are the same traversal with different
   callbacks, so a new position cannot be handled by one and forgotten by the other.
 - Spans are never touched here. The injected parser parses each file at its own base in the

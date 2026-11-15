@@ -422,6 +422,11 @@ impl TypeChecker {
                     scrutinee_ty: scrut_ty.clone(),
                     span,
                 });
+                // The pattern's names are still bound, as the pattern's own enum types
+                // them, so their uses do not each report the mismatch again as undefined.
+                if self.lookup_enum_variant(base, variant).is_some() {
+                    self.check_enum_pattern(base, variant, payload, &Type::Unknown, span, bindings);
+                }
                 return;
             }
         };
@@ -436,7 +441,20 @@ impl TypeChecker {
         };
         let form = info.form;
         // Clone the field list so the immutable borrow of `self` ends before we bind.
-        let fields: Vec<(Option<String>, Type)> = info.fields.clone();
+        let mut fields: Vec<(Option<String>, Type)> = info.fields.clone();
+        // A scrutinee that failed to type reaches a generic enum's template, whose payload
+        // types still name its parameters. Binding at `T` would report a mismatch against
+        // a type the program never wrote, so in a program already refused the bindings
+        // recover at `Unknown`. A diverging scrutinee in a clean program is not recovered:
+        // its bindings would reach lowering with no type.
+        if matches!(scrut_ty, Type::Unknown)
+            && !self.errors.is_empty()
+            && self.is_generic_enum(enum_name)
+        {
+            for (_, field_ty) in &mut fields {
+                *field_ty = Type::Unknown;
+            }
+        }
 
         match (form, payload) {
             (VariantForm::Unit, EnumPatternPayload::Unit) => {}

@@ -19,12 +19,18 @@ impl TypeChecker {
             let InterpPart::Formatted { expr, spec, span } = part else {
                 continue;
             };
+            let errors_before = self.errors.len();
             let Some(ty) = self.check_expr(expr, None) else {
                 continue;
             };
             // `{r}` on a `&T` renders the referent: a borrow has no rendering of
             // its own, and requiring `*r` at every hole would be noise.
             let rendered = ty.referent().clone();
+            // A hole whose own error left it `Unknown` was reported already; refusing to
+            // render it would print a second error naming a type the program never wrote.
+            if matches!(rendered, Type::Unknown) && self.errors.len() > errors_before {
+                continue;
+            }
             let hole_span = expr_span_or(expr, *span);
 
             let kind = spec.as_ref().map(|s| s.kind).unwrap_or(FormatKind::Default);

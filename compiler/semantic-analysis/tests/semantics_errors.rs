@@ -401,3 +401,95 @@ fn regression_method_with_unresolved_return_type_cascaded_as_void() {
         );
     }
 }
+
+#[test]
+fn regression_for_item_over_failed_head_cascaded_as_undefined() {
+    // A `for` head that fails to type left its item unbound, so every use of the item in
+    // the body reported a second `UndefinedVariable` chasing the head's own error. A pair
+    // head was already bound at `Unknown`; a plain item now is too.
+    for head in ["nothing", "nothing.iter()", "5"] {
+        let source = format!(
+            r#"func test() -> i32 {{
+        mut t = 0
+        for x in {head} {{ t += x }}
+        t
+    }}"#
+        );
+        let items = syntax_parsing::parse(&source).unwrap();
+        let errors = type_check(&items).unwrap_err();
+        assert_eq!(errors.len(), 1, "for x in {head}: {errors:?}");
+        assert!(
+            matches!(
+                errors[0],
+                TypeError::UndefinedVariable { ref name, .. } if name == "nothing"
+            ) || matches!(errors[0], TypeError::NotIterable { .. }),
+            "for x in {head}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn regression_generic_variant_pattern_over_failed_scrutinee_bound_template_parameter() {
+    // A scrutinee that failed to type matched `Opt::Has(a)` against the enum's template, so
+    // `a` was bound at its parameter `T` and every use reported `expected i32, found T`.
+    for test in [
+        "if val Opt::Has(a) = nothing { t += a }",
+        "while val Opt::Has(a) = nothing { t += a }",
+        "match nothing { Opt::Has(a) => { t += a } _ => {} }",
+        "val Opt::Has(a) = nothing else { return 0 }\n        t += a",
+    ] {
+        let source = format!(
+            r#"enum Opt<T> {{ Has(T), Empty }}
+    func test() -> i32 {{
+        mut t = 0
+        {test}
+        t
+    }}"#
+        );
+        let items = syntax_parsing::parse(&source).unwrap();
+        let errors = type_check(&items).unwrap_err();
+        assert_eq!(errors.len(), 1, "{test}: {errors:?}");
+        assert!(
+            matches!(errors[0], TypeError::UndefinedVariable { ref name, .. } if name == "nothing"),
+            "{test}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn regression_interpolation_hole_with_its_own_error_reported_twice() {
+    // A hole whose expression already failed (`x.item()` on a scalar) types as `Unknown`,
+    // and interpolation refused that too, printing a second error about a value of type
+    // `<error>`.
+    let source = r#"func test() -> string {
+        val x: f32 = 1.0
+        "{x.item()} {nothing}"
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let errors = type_check(&items).unwrap_err();
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert!(
+        !errors
+            .iter()
+            .any(|e| matches!(e, TypeError::UnformattableType { .. })),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn regression_val_else_over_mismatched_scrutinee_left_bindings_undefined() {
+    // A `val-else` whose pattern does not fit the scrutinee reported the mismatch and then
+    // left its bindings undefined, so each later use was a second `UndefinedVariable`.
+    let source = r#"enum Opt<T> { Has(T), Empty }
+    func test(x: i32) -> i32 {
+        val Opt::Has(a) = x else { return 0 }
+        a + 1
+    }"#;
+    let items = syntax_parsing::parse(source).unwrap();
+    let errors = type_check(&items).unwrap_err();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        matches!(errors[0], TypeError::PatternTypeMismatch { .. }),
+        "{errors:?}"
+    );
+}

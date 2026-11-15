@@ -34,9 +34,9 @@ impl TypeChecker {
     }
 
     /// Resolve each newtype's inner type now that every nominal name is registered,
-    /// then reject cyclic newtypes and non-Copy inner types.
+    /// then reject cyclic newtypes.
     pub(crate) fn resolve_newtype_inners(&mut self, items: &[ast_types::Item]) {
-        // Phase 1: resolve every accepted newtype's inner type. A duplicate/rejected
+        // Every inner type resolves first. A duplicate/rejected
         // declaration (still absent or already resolved) is skipped so it cannot
         // overwrite the first, valid definition.
         let mut spans: HashMap<String, Span> = HashMap::new();
@@ -53,7 +53,7 @@ impl TypeChecker {
             }
         }
 
-        // Phase 2: with all inners resolved, reject cycles, which would otherwise make
+        // With all inners resolved, cycles are rejected, which would otherwise make
         // every predicate that recurses through the inner type run forever.
         for (name, inner_span) in &spans {
             let mut seen = HashSet::new();

@@ -114,6 +114,11 @@ neurc run <file.nr> [options]
 **Options**:
 - `-O, --optimization <0-3>`: default `0`. See [Optimization levels](#optimization-levels).
 - `--gpu-arch <CHIP>`: as for `compile`. See [Choosing a GPU](#choosing-a-gpu).
+- `-- <ARGS>...`: everything after `--` goes to the program, and `std::env::args()` lists it after the program's name.
+
+```bash
+neurc run examples/system/command_line.nr -- 4
+```
 
 The executable is removed once the program exits, so `run` never leaves a binary beside the source. Use `compile` to keep one.
 
@@ -163,7 +168,7 @@ On Windows the test executable reads its test index from the command line, which
 
 ## Optimization levels
 
-`-O` applies to `compile` and `run`.
+`-O` applies to `compile`, `run` and `test`.
 
 - `-O0` (default): a debug build. Integer overflow panics: `panic: integer overflow at <file>:<line>:<col>`.
 - `-O1` to `-O3`: release builds. Integer overflow wraps. `-O2` is the usual choice for speed; `-O3` is the most aggressive.

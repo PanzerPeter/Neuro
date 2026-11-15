@@ -205,7 +205,7 @@ The exception would be an operation with no parallel axis, which has no loop to 
 and so runs on the host against device buffers; only a rank-0 operation has none, and a rank-0
 operation needs rank-0 operands, which come from the parameters. `launches_every_op` therefore
 keeps a body with a rank-0 tensor parameter or result off the GPU module, through the admission
-rule `build_linkable_module` takes (the CPU path admits every `Host` function, the GPU path every
+rule `build_linkable_module` takes (the CPU path admits every outlined and `GpuOrHost` function, the GPU path every
 `Gpu` one that passes this test), and `refused_bodies` turns what is left out into the error.
 
 **Reductions.** `tensor_reduce::build_reduce` lowers `.sum()` / `.mean()` / `.max()` / `.min()`,
@@ -355,9 +355,12 @@ checks report different diagnostics) and the check's number, counted from 1, in 
 The min therefore keeps the failure the host meets first (operations run one after another,
 elements in row-major order), whichever thread wrote it. The checks travel as
 `LinkableBodies::guards` and the caller panics for the one left. A failed divisor is replaced by 1
-so the body stays defined; a body with more than 4095 checks stays the LLVM backend's.
+so the body stays defined; a body with more than 4095 checks gets no body here, which `neurc`
+reports as an internal error at the operation.
 `linalg-fuse-elementwise-ops` does not erase a fused producer whose body has a check, since the
-`scf.if` store is a side effect, so its checks run once more in a loop of their own.
+`scf.if` store is a side effect, so its checks run once more in a loop of their own, and every
+later operation in a chain fuses the whole chain before it again: a chain of n checked operations
+carries n(n+1)/2 checks.
 
 **Broadcasting is per-operand indexing maps.** Operand shapes align at their *trailing* axis,
 so an operand of lower rank supplies the innermost axes and its map simply omits the leading

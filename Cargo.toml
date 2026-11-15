@@ -7,15 +7,13 @@ members = [
     "compiler/infrastructure/ast-types",
     "compiler/infrastructure/neuro-hir",
 
-    # Phase 1: Core Compiler Slices
+    # Feature slices
     "compiler/lexical-analysis",
     "compiler/syntax-parsing",
     "compiler/module-resolution",
     "compiler/argument-binding",
     "compiler/semantic-analysis",
     "compiler/llvm-backend",
-
-    # Phase 1.8: HIR & MLIR Backend Plumbing
     "compiler/hir-lowering",
     "compiler/mlir-backend",
 
@@ -24,7 +22,7 @@ members = [
 ]
 
 [workspace.package]
-version = "5.50.1"
+version = "5.50.2"
 edition = "2024"
 rust-version = "1.100"
 authors = ["Neuro Contributors"]
@@ -51,7 +49,7 @@ logos = "0.16"
 # LLVMs use libffi but leave it out of `llvm-config --system-libs`, so nothing else would.
 inkwell = { version = "0.11", default-features = false, features = ["llvm23-1", "target-x86"] }
 
-# MLIR Backend (Phase 1.8+)
+# MLIR Backend
 # Rust MLIR bindings for the tensor lowering path. melior 0.28.x is the MLIR 23
 # line (via mlir-sys 230). mlir-sys finds MLIR through
 # `$MLIR_SYS_230_PREFIX/bin/llvm-config`, so MLIR must be installed into the same
@@ -81,9 +79,11 @@ criterion = "0.8"
 
 # Lints every member opts into with `[lints] workspace = true`. A suppression is
 # `#[expect(...)]`, never `#[allow(...)]`: an expectation that stops firing is itself
-# a warning, so a stale suppression cannot outlive the code it excused.
+# a warning, so a stale suppression cannot outlive the code it excused. Each one also
+# names its `reason`, so the excuse travels with it.
 [workspace.lints.clippy]
 allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
 
 [profile.dev]
 split-debuginfo = "unpacked"

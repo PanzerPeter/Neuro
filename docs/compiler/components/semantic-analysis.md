@@ -60,7 +60,7 @@ val c: i64 = a as i64  // ok
 | 3 | Register module-level constants | they must be visible in every function body |
 | 3b | Register every free function signature, and require `func main() -> i32` at the root | a call resolves regardless of source order, and mutually recursive functions can name each other |
 | 3b' | Give each return-position `impl Trait` the type its body produces, by checking the body and keeping only the type | a body can be checked only once every signature it calls is known |
-| 3c | `@grad` signature rules (with the form rule of `@no_grad`), then `@gpu` and `@kernel` forms | every signature is resolved, so a generated name can be tested against every declared struct |
+| 3c | `@grad` signature rules (with the form rule of `@no_grad`), then `@gpu`, `@kernel` and `@test` forms | every signature is resolved, so a generated name can be tested against every declared struct |
 | 4 | Check function, method and const bodies | every signature is known, so forward references resolve |
 | 5 | Lints (`run_lints`) | they run regardless of type errors, so style guidance always reaches the developer |
 
@@ -82,10 +82,11 @@ These rules live in [`type_checkers/grad.rs`](../../../compiler/semantic-analysi
 
 `.backward()` writes gradients into the `&mut` arguments of the `@grad` call its receiver came from, after that call returns. So a `val` bound to such a call holds those borrows until its `.backward()` releases them. The `.backward()` must be on that binding, in the same block, and only once. `.grad()` and `.hessian()` borrow their receiver, and `.zero_grad()` takes it exclusively. The user-facing rules are in the [autodiff reference](../../language-reference/autodiff.md).
 
-### `@gpu` and `@kernel` signatures
+### `@gpu`, `@kernel` and `@test` signatures
 
 - `@gpu` marks a free function that is not also `@grad`. It takes no argument, or one `fallback:` set to the literal `true` or `false`. Whether the body can become a GPU kernel is decided by the GPU backend at compile time, so `check` can accept a body that `compile` refuses.
 - `@kernel` has its own form rules (`KernelForm`). It is a free function with one `threads:` array of one to three positive integer literals whose product is at most 1024, and a `void` return. Its parameters are numbers, `bool`s, `Tensor` inputs, or `KernelOut<Tensor>` outputs. The output handles may only be indexed inside an `unsafe` block. The rules are in [Tensors](../../language-reference/tensors.md#writing-a-kernel-kernel) and [`type_checkers/kernel.rs`](../../../compiler/semantic-analysis/src/type_checkers/kernel.rs).
+- `@test` marks a free, non-generic function with no parameters that returns nothing, because `neurc test` calls each one with no arguments and ignores its result. The attribute takes no arguments and is refused on a method or a struct. The rules are in [`type_checkers/test_functions.rs`](../../../compiler/semantic-analysis/src/type_checkers/test_functions.rs).
 
 ## Diagnostics
 
@@ -98,7 +99,7 @@ error: name 'add__one' contains '__', which is reserved for compiler-generated s
 
 ## Testing
 
-- Unit tests sit beside the code, in [`types.rs`](../../../compiler/semantic-analysis/src/types.rs) and in `type_checkers/tests/`.
+- Unit tests sit beside the code: `#[cfg(test)]` modules in the files they cover, such as [`types.rs`](../../../compiler/semantic-analysis/src/types.rs), and the subject files in `type_checkers/tests/`.
 - Integration tests are in [`compiler/semantic-analysis/tests/`](../../../compiler/semantic-analysis/tests/), one file per subject. They parse source strings with `syntax_parsing::parse` and call `type_check`.
 - End-to-end behavior is covered by the `neurc` suites in [`compiler/neurc/tests/suite/`](../../../compiler/neurc/tests/suite/).
 

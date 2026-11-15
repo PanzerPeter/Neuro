@@ -59,14 +59,16 @@ transforms.
 - shared-types: type system primitives, `FormatSpec` for interpolation
 
 inkwell (feature `llvm23-1`) is a third-party crate, not Shared Kernel. Requires LLVM 23;
-set `LLVM_SYS_231_PREFIX` (e.g. `/usr` on Arch) before building. `semantic-analysis` is not a
+set `LLVM_SYS_231_PREFIX` to the one prefix holding LLVM and MLIR 23 (the Arch build installs
+`/opt/llvm-mlir-23`; `/usr` has no MLIR C library) before building. `semantic-analysis` is not a
 production dependency: neurc orders type-check then HIR lowering before codegen.
 `syntax-parsing`, `hir-lowering` and `mlir-backend` appear only in `[dev-dependencies]` (tests and
 benches lower source to HIR before compiling, and a test compiling a tensor operation links the
 host body `mlir-backend` computes for it, as `neurc` does).
 
-`resolve_builtin_method` / `is_panic_builtin` / `is_io_builtin` are duplicated from
-`semantic-analysis` to keep the backend independent of the type-checker slice.
+`resolve_builtin_method` is duplicated from `semantic-analysis`, and `is_panic_builtin` /
+`is_io_builtin` restate the builtin names it knows, to keep the backend independent of the
+type-checker slice.
 
 ## Module Emission Order
 `compile` splits into `build_module` (generate + verify) and `emit_object_code`, so codegen tests
@@ -83,14 +85,20 @@ load-bearing:
    regardless of order.
 2. **Vtables** (`emit_vtables`): after all signatures are declared, before any body, so item
    order never matters.
-3. **Bodies.**
-4. **Standard-output drain** (`finalize_stdout_buffer`): inserted after all bodies, because only
+3. **Bodies**, then the derivative homes (`define_derivative_homes`) and, for `compile_tests`,
+   the test entry (`define_test_entry`).
+4. **Pruning and process setup**: `prune_unused_library_functions`, then
+   `store_program_arguments` and `finish_stdin_sync`, which ask what the pruned module still
+   uses. See External Bodies (the OS runtime).
+5. **Standard-output drain** (`finalize_stdout_buffer`): inserted after all bodies, because only
    a finished module knows whether it prints at all and because the exit paths it edits are all
    emitted by then. See Standard-Output ABI.
-5. **External bodies** (`link_external_bodies`), when any were handed in: after every body, so
+6. **External bodies** (`link_external_bodies`), when any were handed in: after every body, so
    each wrapper's declaration of its symbol is already there for the linked definition to
    resolve. See External Bodies.
-6. **Soft-float builtins** linked in when the module uses `half`/`bfloat`, after codegen and
+7. **Runtimes**: the GPU runtime (`requires_gpu_runtime`), the OS runtime
+   (`requires_os_runtime`) and the text parser (`requires_text_parser`), each only when used.
+8. **Soft-float builtins** linked in when the module uses `half`/`bfloat`, after codegen and
    before `verify`.
 
 ## External Bodies

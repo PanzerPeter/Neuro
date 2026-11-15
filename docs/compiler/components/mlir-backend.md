@@ -45,7 +45,7 @@ Every build compiles this crate, so every build needs MLIR 23 in the same prefix
 
 ### Lowering rules
 
-- Free functions, `impl` methods and lifted closures become `func.func` *declarations* (empty region, private visibility, external symbols). A closure's captured-environment pointer is an implicit first parameter, as in the LLVM backend's calling convention. A method receiver lowers to a pointer parameter. Structs, enums and constants carry no callable surface and are skipped.
+- Free functions, `impl` methods and lifted closures become `func.func` *declarations* (empty region, private visibility, external symbols). A closure's captured-environment pointer is an implicit first parameter, as in the LLVM backend's calling convention. A method receiver lowers to a pointer parameter. Structs, enums, constants and traits carry no callable surface and are skipped.
 - HIR scalars map to MLIR scalars: `i8` to `i64`, `i1` for `bool`, `i32` for `char`, and `f16`, `bf16`, `f32`, `f64`.
 - A tensor maps to a ranked MLIR tensor: `Tensor<f32, [2, 3]>` is `tensor<2x3xf32>`, and a dynamic `?` axis becomes MLIR's dynamic-size sentinel. The element must map to an MLIR integer or float. An aggregate element is `MlirError::UnsupportedType`.
 - A function value maps to `!llvm.struct<(ptr, ptr)>`, the same function and environment pair the LLVM backend uses. Every other aggregate, reference or string type (tuples, enums, the standard collections, and references to them) maps to an opaque `!llvm.ptr`. A reference to a tensor is the tensor itself. A newtype maps to its inner type.
@@ -181,7 +181,7 @@ The `LLVMContext` that step 8 builds into is **inkwell's own**. `mlir-sys` and `
 
 The [LLVM backend](llvm-backend.md#mlir-bodies) emits each call to such a function as a call to its symbol, and links the IR in. The result buffer is the LLVM backend's allocation, so it is a DLPack tensor like any other. A buffer the body needs in between is allocated and freed inside it.
 
-**Integer checks.** The LLVM backend panics on an integer overflow in a debug build and on a zero divisor in every build, naming the operator. A body here cannot panic, and on a GPU nothing can stop the program. A checked body therefore takes one more parameter, a `memref<1xi64>` status word that its caller fills with all ones. A failed check (an `scf.if` in the `linalg` body) lowers the word with an atomic unsigned min to a key: the operation's number on top, the element's row-major position in the middle, and the check's number, counted from 1, in the low 12 bits. The smallest key is the failure the host would have stopped at, whichever GPU thread got there first. `lower_for_link` returns each symbol's checks with it, and the LLVM backend panics for the one left in the word after the call. A failed divisor is replaced by 1 so the body stays defined. `neurc` passes `Overflow::Checked` only at `-O0`, so overflow checks exist only in a debug build. A body with more than 4095 checks stays on the LLVM backend.
+**Integer checks.** The LLVM backend panics on an integer overflow in a debug build and on a zero divisor in every build, naming the operator. A body here cannot panic, and on a GPU nothing can stop the program. A checked body therefore takes one more parameter, a `memref<1xi64>` status word that its caller fills with all ones. A failed check (an `scf.if` in the `linalg` body) lowers the word with an atomic unsigned min to a key: the operation's number on top, the element's row-major position in the middle, and the check's number, counted from 1, in the low 12 bits. The smallest key is the failure the host would have stopped at, whichever GPU thread got there first. `lower_for_link` returns each symbol's checks with it, and the LLVM backend panics for the one left in the word after the call. A failed divisor is replaced by 1 so the body stays defined. `neurc` passes `Overflow::Checked` only at `-O0`, so overflow checks exist only in a debug build. A body with more than 4095 checks gets no MLIR body, which `neurc` reports as the internal error under [Diagnostics](#diagnostics).
 
 ### GPU kernels
 
@@ -220,11 +220,14 @@ The same per-thread lowering runs the outlined operations that `linalg` cannot e
 | `TranslationFailed` | `MLIR could not be translated to LLVM IR` | MLIR's translation to LLVM IR failed |
 | `LlvmVerificationFailed` | `translated LLVM module failed verification: {detail}` | the translated module is not valid LLVM IR |
 | `ModuleVerificationFailed` | `MLIR module failed verification` | the MLIR module is not valid |
-| `InvalidGpuChip` | `unknown GPU chip `{chip}`: expected a processor LLVM 23 knows, such as `sm_80` or `gfx90a`` | a `--gpu-arch` value LLVM does not know |
-| `GpuSerializationFailed` | `GPU kernels could not be serialized; an AMD target needs ROCm installed` | an AMD build without ROCm's `ld.lld` |
-| `GpuBodiesNotLowered` | `no GPU kernel for `@gpu` {names}: the GPU path lowers straight-line tensor code ...` | a `@gpu` body outside the GPU subset, with each function's span |
-| `KernelBodiesNotLowered` | `no GPU kernel for `@kernel` {names}` | a `@kernel` body with a construct the kernel lowering lacks |
-| `AttributeSyntax` | `MLIR rejected the generated attribute `{attribute}`` | an internal attribute the builders wrote, which MLIR did not parse |
+| `InvalidGpuChip` | ``unknown GPU chip `{chip}`: expected a processor LLVM 23 knows, such as `sm_80` or `gfx90a` `` | a `--gpu-arch` value LLVM does not know |
+| `GpuSerializationFailed` | `GPU kernels could not be serialized; an AMD target needs ROCm installed ...` | an AMD build without ROCm's `ld.lld` |
+| `GpuBodiesNotLowered` | ``no GPU kernel for `@gpu` {names}: the GPU path lowers straight-line tensor code ...`` | a `@gpu` body outside the GPU subset, with each function's span |
+| `KernelBodiesNotLowered` | ``no GPU kernel for `@kernel` {names}`` | a `@kernel` body with a construct the kernel lowering lacks |
+| `AttributeSyntax` | ``MLIR rejected the generated attribute `{attribute}` `` | an internal attribute the builders wrote, which MLIR did not parse |
+| `Melior` | `melior operation failed: {detail}` | a melior call (a block argument or an operation result) failed. This is a lowering bug. |
+
+Before the two GPU refusals, `neurc` prints one diagnostic at each function's span: `` `@gpu` function 'f' cannot become a GPU kernel ``, or `` `@kernel` function 'k' cannot lower a function call to the GPU `` with the refused construct's span.
 
 Two cases are not errors. A function the builder cannot express stays a declaration (see [Tensor arithmetic](#tensor-arithmetic)), and a tensor operation outlined out of host code that has no body is a compiler bug. `neurc` reports that one as `internal error: no MLIR body computes the tensor operation`.
 

@@ -132,7 +132,7 @@ pub struct LinkableBodies {
 /// linkable LLVM IR: element-wise arithmetic and matrix products over numeric tensors of
 /// static shape, straight-line, with owned or `&` operands. Integer arithmetic carries the
 /// LLVM backend's checks, its overflow ones only where `overflow` says they panic. A
-/// `@gpu` function is never one of them: it is [`lower_for_gpu`](crate::lower_for_gpu)'s.
+/// bare `@gpu` function is never one of them: it is [`lower_for_gpu`](crate::lower_for_gpu)'s.
 ///
 /// Each symbol has MLIR's calling convention rather than Neuro's. A tensor
 /// parameter crosses as an exploded row-major `memref` descriptor (allocated

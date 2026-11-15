@@ -77,7 +77,10 @@ impl TypeChecker {
         // A binding is a part of the scrutinee, so it holds what the scrutinee borrows.
         let mut declared = std::collections::HashSet::new();
         for (name, ty, binding_span) in bindings {
-            if matches!(ty, Type::Unknown) {
+            // In a program already refused, an `Unknown` binding came from an error and is
+            // bound so later uses do not report it again as undefined. Otherwise it came
+            // from a diverging scrutinee, which leaves nothing to bind.
+            if matches!(ty, Type::Unknown) && self.errors.is_empty() {
                 continue;
             }
             if !declared.insert(name.clone()) {

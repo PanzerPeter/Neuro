@@ -91,7 +91,7 @@ Exact dependency versions live in the workspace `Cargo.toml` files, not here.
 | `.nr` | Neuro source files |
 | `.nrp` | Package definitions (planned) |
 
-Model weights are planned to use the standard `.safetensors` format rather than a Neuro-specific one.
+Model weights use the standard `.safetensors` format rather than a Neuro-specific one, through [`std::safetensors`](language-reference/standard-library.md#weights-stdsafetensors).
 
 ## Project Resources
 

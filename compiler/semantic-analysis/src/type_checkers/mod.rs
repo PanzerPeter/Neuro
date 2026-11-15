@@ -745,14 +745,10 @@ impl TypeChecker {
             // A `&mut T` moves, since a copy would be a second exclusive borrow of one
             // value. A reference parameter reborrows it instead (`pass_argument`).
             Type::Reference { mutable, .. } => !mutable,
-            // An array is `Copy` exactly when its element type is `Copy`.
-            // The element is currently restricted to Copy scalars at resolution time,
-            // so this recursion is always true in practice; it keeps the rule honest
-            // if the restriction is later relaxed.
+            // An array is `Copy` exactly when its element type is `Copy`: an array of
+            // `string` owns each element and moves as a whole.
             Type::Array { element, .. } => self.copy_within(element, visiting),
             // A tuple is `Copy` exactly when every element is `Copy`.
-            // Element Copy-ness is enforced at resolution, so this is always true in
-            // practice; it keeps the rule honest if that restriction is relaxed.
             Type::Tuple(elements) => elements.iter().all(|e| self.copy_within(e, visiting)),
             // A collection owns a heap buffer, so duplicating its header would
             // alias, and later double-free, that buffer.
@@ -1176,7 +1172,7 @@ impl TypeChecker {
         }
 
         // Pass 1c: resolve and validate newtype inner types now that every nominal
-        // name is registered: enforces the Copy-inner restriction and rejects cycles.
+        // name is registered, and reject cycles.
         // Runs before Copy-derive validation so a struct with a newtype field
         // sees the newtype's real Copy-ness.
         self.resolve_newtype_inners(items);

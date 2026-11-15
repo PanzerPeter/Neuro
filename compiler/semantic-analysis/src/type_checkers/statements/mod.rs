@@ -694,7 +694,6 @@ impl TypeChecker {
                 {
                     return Some(());
                 }
-                // Resolve declared type if present
                 let declared_ty = if let Some(ty) = ty {
                     self.resolve_type(ty)
                 } else {
@@ -735,26 +734,18 @@ impl TypeChecker {
 
                 let final_ty = match (declared_ty, init_ty) {
                     (Some(decl), Some(init)) => {
-                        // Both declared and initialized: types must match
                         if !self.assignable(&init, &decl) {
                             self.record_type_mismatch(&decl, init, *span);
                             // Use declared type to avoid cascading errors
                         }
                         decl
                     }
-                    (Some(decl), None) => {
-                        // Only declared: use declared type
-                        decl
-                    }
-                    (None, Some(init)) => {
-                        // Only initialized: infer from initializer (Phase 1: simple inference)
-                        init
-                    }
+                    (Some(decl), None) => decl,
+                    (None, Some(init)) => init,
                     // An initializer whose error was already reported binds at `Unknown`
                     // below, the same as one that came back `Unknown`.
                     (None, None) if init_errored => Type::Unknown,
                     (None, None) => {
-                        // Neither declared nor initialized: error
                         self.record_error(TypeError::UninitializedVariable {
                             name: name.name.clone(),
                             span: *span,
@@ -1112,18 +1103,19 @@ impl TypeChecker {
                 };
 
                 let element_ty = self.check_loop_adapters(element_ty, adapters);
-                // The body opens by destructuring the item, so it is bound even when its
-                // type is unknown, and a wrong shape is reported once, here.
+                // The item is bound even when the head failed to type, which has reported
+                // its own error: an unbound name would turn every use in the body into a
+                // second, misleading `UndefinedVariable`. A wrong shape is reported once, here.
                 let element_ty = match element_ty {
                     Some(ty) if *pair && !matches!(&ty, Type::Unknown) && !is_pair(&ty) => {
                         self.record_error(TypeError::PairHeadOverNonPair {
                             found: ty,
                             span: iterator.span,
                         });
-                        Some(Type::Unknown)
+                        Type::Unknown
                     }
-                    None if *pair => Some(Type::Unknown),
-                    other => other,
+                    Some(ty) => ty,
+                    None => Type::Unknown,
                 };
 
                 // Body moves are not guaranteed straight-line; restore move state after
@@ -1144,51 +1136,47 @@ impl TypeChecker {
                 self.hold_adapter_borrows(adapters);
 
                 self.define_loop_index(index);
-                if let Some(element_ty) = element_ty {
-                    match self
-                        .symbols
-                        .define(iterator.name.clone(), element_ty.clone(), false)
-                    {
-                        // Each element is a part of the iterable, so it holds what the
-                        // iterable borrows: `&v` itself, or what a `[&T; N]` was built from.
-                        // A borrowed head is held for the whole loop even when what a step
-                        // yields holds nothing (`&mut it` over an iterator of `i32`): the
-                        // loop goes on reading the head between steps.
-                        Ok(()) => match view {
-                            // A view lends from the map it walks, as `&m` would.
-                            Some((receiver, _)) => {
-                                let lent = Expr::Reference {
-                                    operand: Box::new(receiver.clone()),
-                                    mutable: false,
-                                    span: receiver.span(),
-                                };
-                                let (head, held) = match iterable_ty {
-                                    Type::Reference { .. } => (receiver, iterable_ty.clone()),
-                                    _ => (
-                                        &lent,
-                                        Type::Reference {
-                                            inner: Box::new(iterable_ty.clone()),
-                                            mutable: false,
-                                        },
-                                    ),
-                                };
-                                self.hold_carried_borrows(&iterator.name, head, &held);
-                            }
-                            None => {
-                                let held = match iterable_ty {
-                                    Type::Reference { .. } => &iterable_ty,
-                                    _ => &element_ty,
-                                };
-                                self.hold_carried_borrows(&iterator.name, iterable, held);
-                            }
-                        },
-                        Err(duplicate_name) => {
-                            self.record_error(TypeError::VariableAlreadyDefined {
-                                name: duplicate_name,
-                                span: iterator.span,
-                            })
+                match self
+                    .symbols
+                    .define(iterator.name.clone(), element_ty.clone(), false)
+                {
+                    // Each element is a part of the iterable, so it holds what the
+                    // iterable borrows: `&v` itself, or what a `[&T; N]` was built from.
+                    // A borrowed head is held for the whole loop even when what a step
+                    // yields holds nothing (`&mut it` over an iterator of `i32`): the
+                    // loop goes on reading the head between steps.
+                    Ok(()) => match view {
+                        // A view lends from the map it walks, as `&m` would.
+                        Some((receiver, _)) => {
+                            let lent = Expr::Reference {
+                                operand: Box::new(receiver.clone()),
+                                mutable: false,
+                                span: receiver.span(),
+                            };
+                            let (head, held) = match iterable_ty {
+                                Type::Reference { .. } => (receiver, iterable_ty.clone()),
+                                _ => (
+                                    &lent,
+                                    Type::Reference {
+                                        inner: Box::new(iterable_ty.clone()),
+                                        mutable: false,
+                                    },
+                                ),
+                            };
+                            self.hold_carried_borrows(&iterator.name, head, &held);
                         }
-                    }
+                        None => {
+                            let held = match iterable_ty {
+                                Type::Reference { .. } => &iterable_ty,
+                                _ => &element_ty,
+                            };
+                            self.hold_carried_borrows(&iterator.name, iterable, held);
+                        }
+                    },
+                    Err(duplicate_name) => self.record_error(TypeError::VariableAlreadyDefined {
+                        name: duplicate_name,
+                        span: iterator.span,
+                    }),
                 }
 
                 for stmt in body {

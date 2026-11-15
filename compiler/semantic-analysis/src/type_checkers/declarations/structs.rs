@@ -441,10 +441,6 @@ impl TypeChecker {
     /// Materialize a monomorphized instance of a generic struct with concrete type
     /// arguments, registering its concrete fields and impl methods on demand,
     /// and return its distinct nominal [`Type::Struct`]. Idempotent per instance.
-    ///
-    /// Type arguments are restricted to `Copy` this phase, mirroring generic
-    /// functions: a bare type parameter has no move semantics, so a non-Copy argument
-    /// is rejected.
     pub(crate) fn instantiate_generic_struct(
         &mut self,
         base: &str,

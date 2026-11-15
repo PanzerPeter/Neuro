@@ -10,6 +10,46 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.50.2] - 2026-11-15
+
+### Fixed
+
+- `??` binds tighter than a range, `>>` and `|>`, as the precedence table says: `a ?? b..c` is
+  `(a ?? b)..c` and `opt ?? 0 |> f` is `f(opt ?? 0)`. The fallback used to take everything to its
+  right.
+- A value that the last statement of a `for` body over an iterator value computes is released
+  each iteration. `for line in text.lines() { m.insert(k, v) }` leaked the string each overwriting
+  `insert` displaced.
+- A generic struct instantiated at `()` or at a rank-0 tensor compiles once it has a method. Its
+  instance name ended in `_`, so the backend split the method name in the wrong place.
+- A type error no longer drags follow-on errors after it: the item of a `for` over a head that
+  failed to check, a pattern over a scrutinee that failed or did not match, a `val ... else` in
+  such a program, and an interpolation hole that already reported its own error each used to
+  report again.
+- A method call on a type with no such method says `type 'f32' has no method 'item'`; it called
+  every receiver a struct, arrays and numbers included.
+
+### Changed
+
+- Every `#[expect(...)]` in the compiler carries a `reason`, and the workspace lints enforce it.
+
+### Documentation
+
+- Corrected claims that had fallen behind the code: a range is a value; a local is `val` or `mut`;
+  two quoted diagnostics; `.safetensors` weights are implemented; `neurc run file.nr -- args` and
+  `neurc test` in the CLI guide and the compilation overview; the owner-bit string model, the
+  emission order, the run-time panic messages and the system runtime in the LLVM backend page; the
+  MLIR backend's host admission rule and its 4095-check limit. Two modules may import each other,
+  and the modules page now says so.
+- Diagnostics tables in the module-resolution, modules and MLIR backend pages render their code
+  spans correctly.
+- New open bugs: BUG-165 and BUG-166 (checked integer tensor chains at `-O 0`), BUG-167 (a block
+  statement whose value nothing reads leaks it) and BUG-168 (a `match` on a diverging scrutinee).
+
+### Tests
+
+- A directory read reports `Other` and an unreadable file `PermissionDenied`.
+
 ## [5.50.1] - 2026-11-15
 
 ### Fixed

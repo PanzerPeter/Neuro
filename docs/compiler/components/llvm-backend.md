@@ -5,19 +5,19 @@ The LLVM backend turns the typed HIR into native object code, or into textual LL
 **Crate**: `compiler/llvm-backend`
 **Library**: inkwell (LLVM 23 bindings)
 **Build requirement**: `LLVM_SYS_231_PREFIX` pointing at an LLVM 23 install. Every build of the compiler also needs MLIR 23 in the same prefix ([Installation](../../getting-started/installation.md#mlir)).
-**Entry points**: `compile` and `compile_to_ir`, both in [`lib.rs`](../../../compiler/llvm-backend/src/lib.rs)
+**Entry points**: `compile`, `compile_to_ir` and `compile_tests`, all in [`lib.rs`](../../../compiler/llvm-backend/src/lib.rs)
 
 ## Overview
 
 The backend reads the HIR produced by [HIR lowering](hir-lowering.md), not the AST. Lowering has already attached a resolved type to every expression, so codegen reads types inline and no backend pass collects them again. The language features it generates are described in the [language reference](../../language-reference/).
 
-`compile` returns object code, which `neurc` passes to the system linker. `compile_to_ir` runs the same pipeline up to the optimizer and returns the module as text. The program's source text and path travel with the HIR so that panic messages can name `file:line:col`.
+`compile` returns object code, which `neurc` passes to the system linker. `compile_to_ir` runs the same pipeline up to the optimizer and returns the module as text. `compile_tests` builds the executable behind `neurc test`, whose `main` runs the test at the index its first argument gives. Each entry also takes a `SourceMap` of every file's text, so that panic messages can name `file:line:col`.
 
 ## Architecture
 
 - **Dependencies**: `neuro-hir` (the HIR it consumes), `ast-types` (the operator enums), `shared-types`, `inkwell`, `thiserror`. The `syntax-parsing`, `hir-lowering` and `mlir-backend` crates are dev-dependencies only: tests and benches lower source before compiling, and a test that compiles a tensor operation links the body MLIR computes for it.
-- **Public API**: `compile`, `compile_to_ir`, `ExternalBodies`, `BodyGuard`, `BodyGuardKind`, `BodyMemory`, `GpuVendor`, `OptimizationLevelSetting`, `CodegenError`, `CodegenResult`
-- **Internals**: `pub(crate)` throughout. `codegen/` holds the emitter, split by construct (expressions, statements, drops, collections, and so on). `type_mapping.rs` and `types.rs` map Neuro types to LLVM types. `softfloat/` holds the half-precision builtins, and `codegen/text_parse.c` the text parser behind `.parse::<T>()`.
+- **Public API**: `compile`, `compile_to_ir`, `compile_tests`, `ExternalBodies`, `BodyGuard`, `BodyGuardKind`, `BodyMemory`, `GpuVendor`, `OptimizationLevelSetting`, `CodegenError`, `CodegenResult`
+- **Internals**: `pub(crate)` throughout. `codegen/` holds the emitter, split by construct (expressions, statements, drops, collections, and so on). `type_mapping.rs` and `types.rs` map Neuro types to LLVM types. `softfloat/` holds the half-precision builtins, `codegen/text_parse.c` the text parser behind `.parse::<T>()`, and `codegen/os_runtime.c` the [system runtime](#system-runtime).
 - **Output**: a platform object file, or the textual module from `compile_to_ir`.
 
 ### Module emission order
@@ -26,10 +26,12 @@ The backend reads the HIR produced by [HIR lowering](hir-lowering.md), not the A
 
 1. Every function, method and closure signature is declared before any body, so a call resolves whatever the item order. Monomorphized instances rely on this.
 2. Vtables are emitted for every `impl Trait for Type`.
-3. Bodies are generated.
-4. The standard-output drain is inserted on every exit path, if the module prints.
-5. External bodies are linked, after every body, so each wrapper's declaration already exists.
-6. Soft-float builtins are linked, if the module uses `half` or `bfloat`.
+3. Bodies are generated, then the derivative homes and, for `compile_tests`, the test entry.
+4. Library functions nothing calls are pruned. Then `main` stores the command line if the program reads it, and standard input is synchronized with standard output if the program reads a line.
+5. The standard-output drain is inserted on every exit path, if the module prints.
+6. External bodies are linked, after every body, so each wrapper's declaration already exists.
+7. The GPU runtime, the system runtime and the text parser are each linked if the module calls into them.
+8. Soft-float builtins are linked, if the module uses `half` or `bfloat`.
 
 The module is then verified. The optimizer and instruction selection run after that (see [optimization levels](#optimization-levels)).
 
@@ -69,7 +71,7 @@ A `string` is `{ ptr, i64 }`: the pointer to UTF-8 bytes, and the byte count wit
 
 `==` and `!=` compare the length, then call libc `memcmp`. `+` allocates a new buffer with no terminator.
 
-Whether a buffer must be freed is decided at compile time, never read from the value: a literal and a heap string have the same shape. `produces_owned_string` in [`drops/owned_strings.rs`](../../../compiler/llvm-backend/src/codegen/drops/owned_strings.rs) answers for each expression, and the answer is conservative on purpose. A missed "owned" leaks a buffer. A wrong "owned" hands `.rodata` to `free`. The full ownership rules are in the [CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md).
+Whether a buffer must be freed is read from the value at run time. Bit 63 of the length is the owner bit: every producer that allocates (`+`, an interpolation, `.clone()`, `StringBuilder::to_string`) sets it, while a literal, a slice and a borrow leave it clear. Every reader of the length masks the bit off, and a release frees the buffer only when the bit is set, so releasing a literal is a no-op and no compile-time ownership analysis is needed. A string is therefore at most 2^63 - 1 bytes. The helpers are in [`drops/owned_strings.rs`](../../../compiler/llvm-backend/src/codegen/drops/owned_strings.rs), and the full ownership rules in the [CONTEXT.md](../../../compiler/llvm-backend/CONTEXT.md).
 
 ### Structs, enums and methods
 
@@ -131,7 +133,7 @@ The failure path is emitted into a module-private cold function, a thunk named `
 
 A panic writes its message to stderr with `write(2, ...)`, then calls `abort()`, which ends the process with status 134 on Linux.
 
-Compiling a file `add.nr` that holds this function, at `-O0` with `neurc compile add.nr --emit llvm-ir`, gives the IR below. The panic text names that file:
+Compiling a file `add.nr` that holds this function, at `-O0` with `neurc compile add.nr --emit llvm-ir`, gives the IR below. The panic text names that file. The prelude's own thunks and strings are numbered first, so the numbers in the names change with the prelude:
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
@@ -142,7 +144,7 @@ func add(a: i32, b: i32) -> i32 {
 The output also contains the prelude's functions, and the `write` and `abort` declarations, which are omitted here:
 
 ```llvm
-@panic.str.4 = private unnamed_addr constant [40 x i8] c"panic: integer overflow at add.nr:2:12\0A\00"
+@panic.str.298 = private unnamed_addr constant [40 x i8] c"panic: integer overflow at add.nr:2:12\0A\00"
 
 define i32 @add(i32 %0, i32 %1) {
 entry:
@@ -159,7 +161,7 @@ entry:
   br i1 %arith.ok, label %guard.cont, label %guard.fail, !prof !0
 
 guard.fail:                                       ; preds = %entry
-  call void @neuro.cold.panic.2() #1
+  call void @neuro.cold.panic.138() #1
   unreachable
 
 guard.cont:                                       ; preds = %entry
@@ -167,9 +169,9 @@ guard.cont:                                       ; preds = %entry
 }
 
 ; Function Attrs: cold minsize noinline noreturn
-define private void @neuro.cold.panic.2() #0 {
+define private void @neuro.cold.panic.138() #0 {
 entry:
-  %panic.write = call i64 @write(i32 2, ptr @panic.str.4, i64 39)
+  %panic.write = call i64 @write(i32 2, ptr @panic.str.298, i64 39)
   call void @abort()
   unreachable
 }
@@ -242,6 +244,12 @@ On generic x86-64, LLVM lowers `half` and `bfloat` conversions to runtime calls 
 
 `.parse::<T>()` calls a small runtime linked only into a module that uses it. [`text_parse.ll`](../../../compiler/llvm-backend/src/codegen/text_parse.ll) is generated from `text_parse.c`. It converts decimal text to a float exactly, with big integers, instead of calling `strtod`: no libc parses to `f16` or `bf16`, and going through `f64` would round twice. One path serves all four formats and gives the same bits on every platform. It was checked against glibc's `strtod` and `strtof`, and against exact rational arithmetic for the half formats.
 
+### System runtime
+
+`std::fs`, `std::env`, `std::time`, `std::io::read_line()` and the file reads behind `std::safetensors` reach the operating system through a small runtime, [`os_runtime.ll`](../../../compiler/llvm-backend/src/codegen/os_runtime.ll), generated from `os_runtime.c`. A `&string` or `&[u8]` argument goes as its pointer and masked length. An entry that returns text or bytes writes a `malloc` buffer through out-slots and returns a status, and the caller builds the `Result` from it: a failure becomes an `IoError` whose `kind` is mapped from `errno`, never a crash. The C source includes no header, so one `.ll` serves every host, and what differs by system (`errno`'s location, the monotonic clock) is reached through hook globals set at link time.
+
+The library functions nothing calls are pruned first, and the runtime is linked only when an entry is still used, so a program that does no I/O links none of it. A program that reads its command line gets a new `main(argc, argv)` that stores both and calls its own `main`.
+
 ## Diagnostics
 
 ### Runtime panics
@@ -254,7 +262,11 @@ These are what a program prints when a check fails. Each comes from the `panic:`
 | `panic: shift overflow at …` | a shift amount is outside `0..width` | `-O0` only (masked above) |
 | `panic: division by zero at …` | `/` by zero | every build |
 | `panic: remainder by zero at …` | `%` by zero | every build |
-| `panic: array index out of bounds at …` | an array, `Vec`, slice or tensor index outside its length | every build |
+| `panic: array index out of bounds at …` | an array index outside its length | every build |
+| `panic: Vec index out of bounds at …` | a `Vec` index outside its length | every build |
+| `panic: slice index out of bounds at …`, `panic: slice range out of bounds at …` | a slice index outside the slice, or a `.slice(a..b)` range outside its array, `Vec` or slice | every build |
+| `panic: tensor index out of bounds at …` | a tensor index outside its axis | every build |
+| `panic: string slice out of bounds at …`, `panic: string char slice out of bounds at …` | a `slice` or `char_slice` range outside the string | every build |
 | `panic: string slice splits a UTF-8 code point at …` | a byte `slice` endpoint inside a code point | every build |
 | `panic: range step must be positive at …` | `.step(n)` with `n <= 0` | every build |
 | `panic: <message> at …` | `panic(msg)` | every build |

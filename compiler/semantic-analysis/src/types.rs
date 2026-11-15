@@ -168,13 +168,12 @@ pub enum Type {
     /// User-defined struct type, identified by name (nominal typing).
     Struct(std::string::String),
     /// User-defined enum type, identified by name (nominal typing). A tagged
-    /// union of variants; in Phase 1E its payloads are scalar `Copy` primitives, so
-    /// an enum is `Copy`.
+    /// union of variants; it is `Copy` exactly when every payload is.
     Enum(std::string::String),
     /// User-defined newtype, identified by name (nominal typing). A distinct
-    /// wrapper over an inner type, not interchangeable with it. In Phase 1E the
-    /// inner type is restricted to `Copy` types, so a newtype is `Copy`; the inner
-    /// type is looked up in the checker's newtype table rather than embedded here.
+    /// wrapper over an inner type, not interchangeable with it, and `Copy` exactly when
+    /// the inner type is. The inner type is looked up in the checker's newtype table
+    /// rather than embedded here.
     Newtype(std::string::String),
     /// Borrow `&T` / `&mut T`: a non-owning reference to `inner`.
     /// References are `Copy` and never move the borrowed value. `mutable`

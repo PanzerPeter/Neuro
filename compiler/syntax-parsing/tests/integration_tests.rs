@@ -466,3 +466,44 @@ fn test_attribute_after_a_const_is_not_a_matmul() {
     let items = parse(source).expect("an attribute must open a new item");
     assert_eq!(items.len(), 2);
 }
+
+/// `??` binds tighter than range, composition and pipeline (Appendix B), and chains
+/// right to left.
+#[test]
+fn test_null_coalesce_binds_tighter_than_range_and_pipeline() {
+    use syntax_parsing::{BinaryOp, Expr, parse_expr};
+
+    let Ok(Expr::Range { start, .. }) = parse_expr("a ?? b..c") else {
+        panic!("`a ?? b..c` should be a range whose start is `a ?? b`");
+    };
+    assert!(matches!(
+        *start,
+        Expr::Binary {
+            op: BinaryOp::NullCoalesce,
+            ..
+        }
+    ));
+
+    let Ok(Expr::Call { args, .. }) = parse_expr("a ?? b |> f") else {
+        panic!("`a ?? b |> f` should be a call of `f`");
+    };
+    assert!(matches!(
+        args[0],
+        Expr::Binary {
+            op: BinaryOp::NullCoalesce,
+            ..
+        }
+    ));
+
+    let Ok(Expr::Binary { right, op, .. }) = parse_expr("a ?? b ?? c") else {
+        panic!("`a ?? b ?? c` should be a coalesce");
+    };
+    assert_eq!(op, BinaryOp::NullCoalesce);
+    assert!(matches!(
+        *right,
+        Expr::Binary {
+            op: BinaryOp::NullCoalesce,
+            ..
+        }
+    ));
+}

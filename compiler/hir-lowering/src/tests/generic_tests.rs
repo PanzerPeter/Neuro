@@ -29,6 +29,26 @@ fn generic_struct_monomorphizes_per_type_argument() {
 }
 
 #[test]
+fn an_instance_name_never_ends_in_an_underscore() {
+    // A rank-0 tensor and the unit tuple once mangled to `tensor_f32_` and `tup0_`, so a
+    // method key `<instance>__get` held `___` and codegen split the receiver off one
+    // character early ("unknown struct type 'Box1$g_tup0'").
+    let program = lower(
+        "struct Box1<T> { v: T }\n\
+         impl<T> Box1<T> { func get(&self) -> &T { &self.v } }\n\
+         func main() -> i32 { val t: Tensor<f32, []> = Tensor::scalar(2.5f32)\n\
+         val a = Box1 { v: t }\n val b = Box1 { v: () }\n\
+         val x = a.get()\n val y = b.get()\n 0 }",
+    );
+    let mut names: Vec<String> = struct_names(&program)
+        .into_iter()
+        .filter(|n| n.starts_with("Box1$g"))
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["Box1$g_tensor_f32_r0", "Box1$g_tup0"]);
+}
+
+#[test]
 fn generic_struct_literal_type_is_the_concrete_instance() {
     let program = lower(
         "struct Wrapper<T> { value: T }\n\

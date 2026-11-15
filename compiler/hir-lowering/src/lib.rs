@@ -915,13 +915,22 @@ fn mangle_type(ty: &HirType) -> String {
         }
         HirType::Array { element, size } => format!("arr{}_{}", size, mangle_type(element)),
         HirType::Slice(element) => format!("slice_{}", mangle_type(element)),
+        // No token may end in `_`: a method key appends `__<method>`, and a third `_`
+        // makes codegen split the receiver off one character early.
+        HirType::Tensor { element, shape, .. } if shape.is_empty() => {
+            format!("tensor_{}_r0", mangle_type(element))
+        }
         HirType::Tensor { element, shape, .. } => {
             let extents: Vec<String> = shape.iter().map(neuro_hir::extent_display).collect();
             format!("tensor_{}_{}", mangle_type(element), extents.join("x"))
         }
         HirType::Tuple(elements) => {
-            let parts: Vec<String> = elements.iter().map(mangle_type).collect();
-            format!("tup{}_{}", elements.len(), parts.join("_"))
+            let mut token = format!("tup{}", elements.len());
+            for part in elements.iter().map(mangle_type) {
+                token.push('_');
+                token.push_str(&part);
+            }
+            token
         }
         HirType::DynObject(name) => format!("dyn{}{}", name.len(), name),
         HirType::Function { params, ret } => {

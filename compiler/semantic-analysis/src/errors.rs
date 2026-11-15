@@ -988,7 +988,7 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("struct '{struct_name}' has no method '{method_name}'")]
+    #[error("type '{struct_name}' has no method '{method_name}'")]
     MethodNotFound {
         struct_name: String,
         method_name: String,
