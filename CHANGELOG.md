@@ -10,6 +10,14 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.49.2] - 2026-11-15
+
+### Changed
+
+- Building the compiler needs Rust 1.100 or later (was 1.98.1). CI lints with the latest stable
+  clippy, and an older local clippy disagrees with it on which lints exist, so a gate that
+  passed locally could fail in CI.
+
 ## [5.49.1] - 2026-11-15
 
 ### Fixed

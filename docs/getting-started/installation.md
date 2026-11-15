@@ -62,7 +62,7 @@ LLVM 23 and MLIR 23 installed into one prefix before Cargo runs.
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Rust | 1.98.1+ | Install via rustup |
+| Rust | 1.100+ | Install via rustup |
 | LLVM | 23 | Development package required (headers + `llvm-config` + link libraries) |
 | MLIR | 23 | Installed into the same prefix as LLVM; see [MLIR](#mlir) |
 | C linker | any | `clang`, `gcc`, or the MSVC linker from Visual Studio Build Tools |

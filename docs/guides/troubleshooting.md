@@ -459,7 +459,7 @@ Include in the report, following [CONTRIBUTING.md](../../CONTRIBUTING.md):
 - OS: Windows 11 / Ubuntu 22.04 / macOS 13
 - Neuro: output of `neurc --version`, and the commit hash
 - LLVM: 23.x
-- Rust: 1.98.1+
+- Rust: 1.100+
 
 ## Issue
 [Description]

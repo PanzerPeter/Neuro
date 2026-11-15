@@ -134,7 +134,7 @@ covers updating and GPU use. On macOS and Windows, or to work on the compiler, b
 
 | Requirement | Version | Notes |
 |---|---|---|
-| **Rust** | 1.98.1+ | Install via [rustup](https://rustup.rs/) |
+| **Rust** | 1.100+ | Install via [rustup](https://rustup.rs/) |
 | **LLVM 23 and MLIR 23** | 23.x with dev libraries, in one prefix | Per-platform commands below |
 | **C linker** | any | `gcc` / `clang` on Linux and macOS, MSVC on Windows |
 
