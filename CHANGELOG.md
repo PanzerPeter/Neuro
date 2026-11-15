@@ -10,6 +10,39 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.50.0] - 2026-11-15
+
+### Added
+
+- A first training run from a file, end to end. The new
+  [Your First Training Run](docs/getting-started/first-training-run.md) tutorial has Python write a
+  batch with `safetensors`, a Neuro program read it, train a linear model five steps on the CPU,
+  save a checkpoint with its step count, read it back and train five more steps on the GPU, and
+  NumPy repeat the ten steps. Neuro's weights match NumPy's to the bit, and the tutorial gives the
+  exact output of each command. The suite runs the tutorial's program on a batch laid out byte for
+  byte as Python writes it, checks every loss against NumPy, checks the program against the
+  tutorial's listing, and, where a GPU is usable, trains thirty steps on the CPU and the GPU side by
+  side and finds the same bits at every step.
+- `examples/showcase/file_training.nr`: a batch read with `std::safetensors`, a checkpoint saved and
+  resumed on the GPU, the GPU half checked step by step against the CPU, and the result scored by a
+  `@gpu` function.
+
+### Changed
+
+- `examples/showcase/logistic_fit.nr` no longer penalizes the bias, and its perplexity comes from
+  the likelihood alone rather than the penalized loss. `examples/showcase/vector_physics.nr` and
+  `examples/operators/operator_overloading.nr` drop a hand-written `ne` that the provided one
+  already gives, and `vector_physics.nr` adds a `SubAssign` impl.
+- The examples and the standard library's sources use compound assignment, `for` over ranges and
+  `.item()` where they still spelled out `x = x + 1`, a counted `while` or `.sum()` of a rank-0
+  tensor. Output is unchanged.
+
+### Fixed
+
+- A borrowed operand of an operator now ends with the operator when the result holds no borrow, as
+  a call's argument already did, so `&y * 2.0 + (1.0 - y)` compiles. It was refused with
+  `cannot move out of 'y' while it is borrowed`.
+
 ## [5.49.2] - 2026-11-15
 
 ### Changed
@@ -3405,7 +3438,7 @@ Phase 4, GPU acceleration, is next.
 
 - An allocation stored into something that outlives a `pool` block is now routed
   to the ordinary heap instead of being refused. The compiler already knew the
-  owner — it is the left-hand side of the statement — so `out = "a" + "b"` inside
+  owner (it is the left-hand side of the statement), so `out = "a" + "b"` inside
   a pool, with `out` declared before it, compiles and the text survives the
   arena's release. The whole statement is emitted with the arena switched off,
   which covers a field or element of an outliving binding and a write through a
@@ -3415,7 +3448,7 @@ Phase 4, GPU acceleration, is next.
   allocated on an earlier line (`out = local`), because no choice of allocator
   moves a buffer that already exists, and a result reached through a trait
   object, because the implementation behind the vtable is unknown. Handing a
-  value to a callee that can store it past the block is unchanged — the argument
+  value to a callee that can store it past the block is unchanged: the argument
   is emitted where it stands, so `b.stash("a" + "b")` is still an error.
 
 ## [3.2.0] - 2026-09-21
@@ -3498,7 +3531,7 @@ Audit pass after the v3.0.0 milestone. No language surface changed.
 
 ## [3.0.0] - 2026-09-19
 
-Phase 2 (Tensor Foundation & MLIR) is complete: every sub-phase 2A–2F has shipped. Phase 3
+Phase 2 (Tensor Foundation & MLIR) is complete: every sub-phase 2A to 2F has shipped. Phase 3
 (Automatic Differentiation) is now the open phase.
 
 ### Added
@@ -3532,7 +3565,7 @@ Phase 2 (Tensor Foundation & MLIR) is complete: every sub-phase 2A–2F has ship
 
 - There is deliberately no `.filter` on a tensor: its output length depends on the buffer's
   values, so the result would have no shape the type system can name. The `.where(mask, a, b)`
-  select named in its place is not implemented either — it needs a boolean element type
+  select named in its place is not implemented either: it needs a boolean element type
   first.
 - An inline closure still needs annotated parameters and an explicit return type, so the
   stage is spelled `(|x: f32| -> f32 { x * 2.0 })`.
@@ -3873,8 +3906,8 @@ Phase 2 (Tensor Foundation & MLIR) is complete: every sub-phase 2A–2F has ship
 
 - codegen: a destroyed value destroys every owner it holds. A struct field, an array or
   tuple element, an enum payload and a newtype's inner value each run their destructor when
-  the holder's does — the holder's own `drop` first, then its positions in declaration
-  order — so a `Vec`, a `String`, a `Tensor` or a user `Drop` type held inside another value
+  the holder's does (the holder's own `drop` first, then its positions in declaration
+  order), so a `Vec`, a `String`, a `Tensor` or a user `Drop` type held inside another value
   no longer leaks. An enum switches on its tag and destroys only the active variant's
   payload.
 - codegen: each held position carries its own drop flag, so a position given up before the
@@ -3913,7 +3946,7 @@ Phase 2 (Tensor Foundation & MLIR) is complete: every sub-phase 2A–2F has ship
   buffer are all released at the assignment instead of only at scope exit, so a binding
   rotated through a loop no longer leaks one value per iteration.
 - codegen: the new value is built before the old one is released, so an assignment may read
-  the value it replaces — `s = s + "!"` and the `s += "!"` it desugars from both concatenate
+  the value it replaces: `s = s + "!"` and the `s += "!"` it desugars from both concatenate
   out of the buffer the release then frees.
 - tests: reassignment cases in the `drop_destructors` suite (displaced value, value already
   moved out, a loop rotating one binding, self-assignment), IR-level coverage for the heap
@@ -3967,8 +4000,8 @@ Phase 2 (Tensor Foundation & MLIR) is complete: every sub-phase 2A–2F has ship
   A consuming call moves the receiver, so a later use of it is `use of moved value`,
   and the method owns what it was handed: it may move a non-`Copy` field straight out
   of `self`, and a `Drop` receiver runs its destructor once, inside the callee. This is
-  what an `into_*` conversion needs. A receiver that owns nothing to give away — a
-  `&T` / `&mut T`, or the `self` of a `&self` / `&mut self` method — is rejected with
+  what an `into_*` conversion needs. A receiver that owns nothing to give away (a
+  `&T` / `&mut T`, or the `self` of a `&self` / `&mut self` method) is rejected with
   `cannot move out of` naming it, and a consuming method may not return a reference into
   its receiver, which is destroyed when it returns. Generic structs get the same
   treatment through monomorphization.
@@ -3982,8 +4015,8 @@ Phase 2 (Tensor Foundation & MLIR) is complete: every sub-phase 2A–2F has ship
 
 ### Added
 
-- semantic: a generic function's type argument may be any type. A non-`Copy` value —
-  a struct holding a `string`, a `string`, a `Vec`, a tensor — now crosses a generic
+- semantic: a generic function's type argument may be any type. A non-`Copy` value
+  (a struct holding a `string`, a `string`, a `Vec`, a tensor) now crosses a generic
   boundary by value, and a `Drop` type's destructor runs exactly once whether the
   callee consumes the value or returns it. The abstract-body soundness condition that
   the old `Copy` restriction stood in for is now discharged where the body is: inside a

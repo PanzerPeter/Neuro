@@ -6,7 +6,7 @@ func main() -> i32 {
 
     for i in 0..=5 {
         println("visit {i}")
-        total = total + i
+        total += i
     }
 
     println("sum of 0..=5 = {total}")

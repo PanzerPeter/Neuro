@@ -8,7 +8,7 @@
 func total<I: Iterator<Item = &i32>>(values: I) -> i32 {
     mut sum = 0
     for value in values {
-        sum = sum + value
+        sum += value
     }
     sum
 }
@@ -38,7 +38,7 @@ func main() -> i32 {
     val bonus = scores.iter().map(|s| s * 10)
     mut bonus_total = 0
     for b in bonus {
-        bonus_total = bonus_total + b
+        bonus_total += b
     }
     println("bonus total {bonus_total}")
 
@@ -46,7 +46,7 @@ func main() -> i32 {
     mut cursor = scores.iter()
     mut opening = ""
     for s in &mut cursor {
-        opening = opening + "{s} "
+        opening += "{s} "
         if *s == 12 {
             break
         }

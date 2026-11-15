@@ -318,7 +318,7 @@ impl<I: Iterator<Item = A>, A> Iterator for Enumerate<I, A> {
         match self.inner.next() {
             Option::Some(value) => {
                 val at = self.position
-                self.position = self.position + 1
+                self.position += 1
                 Option::Some((at, value))
             }
             Option::None => Option::None
@@ -357,7 +357,7 @@ impl<T: Comparable + Copy> Iterator for Range<T> {
         // The offset of the walk's last value from `start`.
         mut last = self.end.__to_u64().wrapping_sub(self.start.__to_u64())
         if !self.inclusive {
-            last = last - 1
+            last -= 1
         }
         val value = if self.reversed { self.start.__offset(last) } else { self.start }
         if last < self.stride {
@@ -459,7 +459,7 @@ impl Iterator for Chars {
         if code >= 65536 {
             width = 4
         }
-        self.offset = self.offset + width
+        self.offset += width
         Option::Some(scalar)
     }
 }

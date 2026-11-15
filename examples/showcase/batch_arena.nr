@@ -111,8 +111,8 @@ func main() -> i32 {
                 println("step {opened.step}: mean={mean:.3} max={top:.3}")
 
                 // Scalars may cross the arena boundary; the tensors above may not.
-                running = running + mean
-                steps = steps + 1
+                running += mean
+                steps += 1
 
                 // A routed store: `headline` outlives the block, so this text is built
                 // on the heap even though the statement sits two arenas deep.

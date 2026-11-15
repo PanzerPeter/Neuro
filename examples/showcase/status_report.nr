@@ -76,7 +76,7 @@ func main() -> i32 {
     for sensor in sensors {
         val rendered = sensor.line() + " | " + describe(sensor.level())
         println(rendered)
-        matched = matched + check(rendered, expected_line(index))
+        matched += check(rendered, expected_line(index))
         index += 1
     }
 
@@ -85,7 +85,7 @@ func main() -> i32 {
     val label = "checked"
     val summary = "{label:>10}: {matched} of {index}"
     println(summary)
-    matched = matched + check(summary, "   checked: 3 of 3")
+    matched += check(summary, "   checked: 3 of 3")
 
     if matched != 4 {
         return 0

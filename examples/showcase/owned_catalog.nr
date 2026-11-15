@@ -94,7 +94,7 @@ func main() -> i32 {
     // `keys()` lends each key in turn; nothing is copied out of the map.
     mut key_bytes: u64 = 0
     for key in notes.keys() {
-        key_bytes = key_bytes + key.len()
+        key_bytes += key.len()
     }
     if key_bytes != 5 {
         return 95
@@ -122,7 +122,7 @@ func main() -> i32 {
             Option::None => { return 97 }
         }
         round.clear()
-        i = i + 1
+        i += 1
     }
 
     // A builder fed from a copy and from a slot read in place.

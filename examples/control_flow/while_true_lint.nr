@@ -10,7 +10,7 @@ func main() -> i32 {
         if i == 7 {
             break
         }
-        i = i + 1
+        i += 1
     }
     println("while true counted to {i}")
     return i

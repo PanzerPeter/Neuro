@@ -62,7 +62,7 @@ func main() -> i32 {
                 println(line)
 
                 // A scalar may be stored into the counter declared outside the pool.
-                total_rounds = total_rounds + 1
+                total_rounds += 1
 
                 // And so may this, because `describe` allocates outside the arena.
                 // Writing `summary = line` instead would not compile: `line` is the

@@ -29,13 +29,13 @@ func main() -> i32 {
     while minute < 240 {
         val load = 40.0 + ((minute % 61) as f64)
         readings.push(Reading { minute: minute, load: load })
-        minute = minute + 1
+        minute += 1
     }
 
     mut peaks: i32 = 0
     for reading in &readings {
         if reading.at_peak() {
-            peaks = peaks + 1
+            peaks += 1
         }
         println(reading.render())
     }
@@ -46,7 +46,7 @@ func main() -> i32 {
     mut row: i32 = 0
     while row < 160 {
         banner.push_str("[{row:>3}] shift block filler row\n")
-        row = row + 1
+        row += 1
     }
     print(banner.to_string())
 

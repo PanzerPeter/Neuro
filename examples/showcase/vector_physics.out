@@ -5,4 +5,5 @@ step 3: pos = (8, 12)
 pos == target -> manhattan  = 20
 pos - vel     (Sub impl)    = (6, 9)
 -back         (Neg impl)    = (-6, -9)
+pos -= vel    (SubAssign)   = (6, 9), back: true, off target: true
 total                       = 35

@@ -19,7 +19,7 @@ impl Iterator for EvensIter {
             return Option::None
         }
         val current = self.next_value
-        self.next_value = self.next_value + 2
+        self.next_value += 2
         Option::Some(current)
     }
 }
@@ -69,7 +69,7 @@ func main() -> i32 {
     mut sum = 0
     for value in evens {
         println("even: {value}")
-        sum = sum + value
+        sum += value
     }
     println("sum of evens below 10 = {sum}")
 
@@ -77,7 +77,7 @@ func main() -> i32 {
     mut count = 0
     for (position, value) in evens.enumerate() {
         println("position {position} holds {value}")
-        count = count + 1
+        count += 1
     }
     println("visited {count} values")
 
@@ -85,7 +85,7 @@ func main() -> i32 {
     val cursor = EvensIter { next_value: 4, limit: 10 }
     mut tail = 0
     for value in cursor {
-        tail = tail + value
+        tail += value
     }
     println("evens from 4 sum to {tail}")
 
@@ -97,7 +97,7 @@ func main() -> i32 {
     mut scaled = 0
     for value in tripled {
         println("tripled: {value}")
-        scaled = scaled + value
+        scaled += value
     }
     println("tripled evens below 8 sum to {scaled}")
 

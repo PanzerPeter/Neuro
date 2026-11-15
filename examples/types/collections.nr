@@ -13,22 +13,22 @@ func main() -> i32 {
 
     mut sum: i32 = 0
     for c in &counts {
-        sum = sum + c
+        sum += c
     }
     // sum == 16
 
     println("Vec  after push/index -> for-in sum {sum}")
 
     match counts.pop() {
-        Option::Some(last) => { sum = sum + last }   // + 7 -> 23
-        Option::None => { sum = sum - 100 }
+        Option::Some(last) => { sum += last }   // + 7 -> 23
+        Option::None => { sum -= 100 }
     }
     println("Vec  pop() Some       -> {sum}")
 
     // `get` is the checked counterpart to `counts[i]`, which panics out of range.
     match counts.get(9u64) {
-        Option::Some(_) => { sum = sum - 100 }
-        Option::None => { sum = sum + 1 }            // -> 24
+        Option::Some(_) => { sum -= 100 }
+        Option::None => { sum += 1 }            // -> 24
     }
     println("Vec  get(9) None      -> {sum}")
 
@@ -39,14 +39,14 @@ func main() -> i32 {
     stock.insert("bolt", 42)                          // overwrites in place
 
     match stock.get("bolt") {
-        Option::Some(n) => { sum = sum + n }          // + 42 -> 66
-        Option::None => { sum = sum - 100 }
+        Option::Some(n) => { sum += n }          // + 42 -> 66
+        Option::None => { sum -= 100 }
     }
     if stock.contains_key("nut") {
-        sum = sum + 1                                 // -> 67
+        sum += 1                                 // -> 67
     }
     if stock.remove("nut").is_some() {
-        sum = sum + 1                                 // -> 68
+        sum += 1                                 // -> 68
     }
     println("Map  get/contains/rm  -> {sum}")
 

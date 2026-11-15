@@ -6,20 +6,20 @@
 func main() -> i32 {
     mut every_fifth = ""
     for i in (0..30).step(5) {
-        every_fifth = every_fifth + "{i} "
+        every_fifth += "{i} "
     }
     println("(0..30).step(5)          = {every_fifth}")
 
     // An inclusive range still yields its bound when a stride lands on it.
     mut inclusive = ""
     for i in (0..=12).step(4) {
-        inclusive = inclusive + "{i} "
+        inclusive += "{i} "
     }
     println("(0..=12).step(4)         = {inclusive}")
 
     mut down = ""
     for i in (0..10).rev().step(3) {
-        down = down + "{i} "
+        down += "{i} "
     }
     println("(0..10).rev().step(3)    = {down}")
 
@@ -34,7 +34,7 @@ func main() -> i32 {
     // `.enumerate()` counts iterations, not the stride.
     mut pairs = ""
     for (position, value) in (100..130).step(10).enumerate() {
-        pairs = pairs + "{position}:{value} "
+        pairs += "{position}:{value} "
     }
     println("enumerated               = {pairs}")
 

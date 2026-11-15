@@ -54,13 +54,13 @@ func main() -> i32 {
 
         'sweep: for tick in 0..4 {
             for slot in 0..3 {
-                ticks = ticks + 1
+                ticks += 1
 
                 val value = sensor.reading(tick)
                 val grade = classify(value)
 
                 if value > limits[slot] {
-                    score = score + grade
+                    score += grade
                 }
 
                 println("tick {tick} slot {slot}: value {value} grade {grade} score {score}")
@@ -80,7 +80,7 @@ func main() -> i32 {
         val first_clear = 'search: loop {
             for slot in 0..2 {
                 if sensor.reading(probe) <= limits[slot] {
-                    probe = probe + 1
+                    probe += 1
                     continue 'search
                 }
             }

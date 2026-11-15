@@ -19,7 +19,7 @@ impl Window {
         mut total: i32 = 0
         mut peak: i32 = samples[0]
         for s in samples {
-            total = total + s
+            total += s
             if s > peak { peak = *s }
         }
         Window { count: samples.len(), total: total, peak: peak }
@@ -46,9 +46,9 @@ func clamp_each(samples: &mut [i32], ceiling: i32) -> u64 {
     while i < samples.len() {
         if samples[i] > ceiling {
             samples[i] = ceiling
-            clamped = clamped + 1
+            clamped += 1
         }
-        i = i + 1
+        i += 1
     }
     clamped
 }

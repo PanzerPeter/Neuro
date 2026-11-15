@@ -22,7 +22,7 @@ func main() -> i32 {
     mut i: i32 = 0
     while i < 3 {
         report.push_str("..")
-        i = i + 1
+        i += 1
     }
     report.push_str(")")
 

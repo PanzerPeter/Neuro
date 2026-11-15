@@ -35,7 +35,7 @@ func main() -> i32 {
     // displaces, which is why the new value is built before the old one is released.
     mut banner: string = "neuro" + "-report"
     println("banner           = {banner}")
-    banner = banner + " v2"
+    banner += " v2"
     println("banner           = {banner}")
     // A literal points into `.rodata`, so the binding is left owning nothing.
     banner = "done"

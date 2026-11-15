@@ -43,8 +43,8 @@ func main() -> i32 {
     val defaulted = unwrap_or(absent, 5)
     println("Option::Some(20)        -> {got}")
     println("Option::None, else 5    -> {defaulted}")
-    total = total + got                        // + 20 = 20
-    total = total + defaulted                  // +  5 = 25
+    total += got                        // + 20 = 20
+    total += defaulted                  // +  5 = 25
 
     val divided = match divide(30, 3) {
         Result::Ok(v) => v,                    // + 10 = 35
@@ -56,8 +56,8 @@ func main() -> i32 {
     }
     println("divide(30, 3) Ok        -> {divided}")
     println("divide(4, 0)  Err       -> {failed}")
-    total = total + divided
-    total = total + failed
+    total += divided
+    total += failed
 
     // A second instance of the same template: `Option<char>` has its own payload type.
     val letter: Option<char> = Option::Some('n')
@@ -67,15 +67,15 @@ func main() -> i32 {
     }
     println("Option<char> Some       -> {c}")
     if c == 'n' {
-        total = total + 3                      // +  3 = 40
+        total += 3                      // +  3 = 40
     }
 
     val filled = slot_or(Slot::Filled(2), 0)   // 2
     val vacant = slot_or(Slot::Vacant, 0)      // 0
     println("Slot::Filled(2)         -> {filled}")
     println("Slot::Vacant, else 0    -> {vacant}")
-    total = total + filled
-    total = total + vacant
+    total += filled
+    total += vacant
 
     println("total                   -> {total}")
     return total

@@ -223,7 +223,7 @@ func main() -> i32 {
 
 ### Reading through a borrow
 
-Arithmetic, comparison, bitwise and logical operators accept a borrowed operand wherever they accept an owned one. The same holds for `+` and `==` on strings, tensor operators, compound assignment and string interpolation. The result is what the owned operands would give, and the operand stays borrowed. A bare literal next to a borrowed operand takes the referent's type:
+Arithmetic, comparison, bitwise and logical operators accept a borrowed operand wherever they accept an owned one. The same holds for `+` and `==` on strings, tensor operators, compound assignment and string interpolation. The result is what the owned operands would give, and the operand stays borrowed. That borrow ends with the operator, as an argument's ends with its call, unless the result holds a reference, so a later operand may move the value: `&y * 2.0 + (1.0 - y)`. A bare literal next to a borrowed operand takes the referent's type:
 
 ```neuro
 func clamp_add(x: &i64, step: &mut i64) -> i64 {

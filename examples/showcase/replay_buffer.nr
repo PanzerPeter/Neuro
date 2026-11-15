@@ -39,14 +39,14 @@ func main() -> i32 {
     mut weighted = 0
     for (rank, index) in (0..6).rev().enumerate() {
         val frame = Frame { reward: replay[rank as i32], step: index }
-        weighted = weighted + frame.weighted()
+        weighted += frame.weighted()
     }
     println("weighted replay    = {weighted}")
 
     // Adapters ride above the reversal: descending frames, odd ones dropped.
     mut kept = ""
     for v in (0..6).rev().filter(|n: i32| -> bool { n % 2 == 0 }) {
-        kept = kept + "{v} "
+        kept += "{v} "
     }
     println("even frames        = {kept}")
 
@@ -68,7 +68,7 @@ func main() -> i32 {
     mut sampled = 0
     for i in (0..6).step(2) {
         val frame = Frame { reward: episode[i], step: i }
-        sampled = sampled + frame.weighted()
+        sampled += frame.weighted()
     }
     println("sampled weighted   = {sampled}")
 

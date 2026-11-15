@@ -56,6 +56,7 @@ mod enumerate;
 mod enums;
 mod error_propagation;
 mod expression_returns;
+mod first_training_run;
 mod float_int_cast_saturation;
 mod float_methods;
 mod float_suffixes;

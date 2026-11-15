@@ -32,7 +32,7 @@ func main() -> i32 {
 
     mut names = ""
     for fruit in stock.keys() {
-        names = names + "{fruit} "
+        names += "{fruit} "
     }
     println("keys in order: {names}")
 

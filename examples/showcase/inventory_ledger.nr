@@ -69,7 +69,7 @@ func main() -> i32 {
         }
         items.push(item)
         index.insert(name, slot)
-        slot = slot + 1
+        slot += 1
     }
 
     // Total weight, and a weight-keyed report the ordered map keeps sorted.
@@ -77,7 +77,7 @@ func main() -> i32 {
     mut total_weight: i32 = 0
     for item in &items {
         val w = item.weight()
-        total_weight = total_weight + w
+        total_weight += w
         by_weight.insert(w, item.quantity)
     }
     // bolt 24, girder 45, washer 4 -> total 73
@@ -106,7 +106,7 @@ func main() -> i32 {
     // Surcharges, driven by the enum classifier.
     mut fees: i32 = 0
     for item in &items {
-        fees = fees + surcharge(item.shelf())
+        fees += surcharge(item.shelf())
     }
     // bulk(3) + heavy(5) + light(1) = 9
 

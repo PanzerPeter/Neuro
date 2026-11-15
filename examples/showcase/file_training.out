@@ -1,0 +1,15 @@
+host step 0: loss 2.226562
+host step 1: loss 1.101490
+host step 2: loss 0.692905
+host step 3: loss 0.530029
+host step 4: loss 0.454766
+host step 5: loss 0.413121
+gpu  step 6: loss 0.386054
+gpu  step 7: loss 0.366436
+gpu  step 8: loss 0.351311
+gpu  step 9: loss 0.339256
+gpu  step 10: loss 0.329470
+gpu  step 11: loss 0.321430
+the GPU half matches the host bit for bit: true
+largest miss 0.890, mean 0.528
+w = [0.9627, 0.0717, 0.4014], b = 0.1287

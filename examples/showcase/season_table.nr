@@ -30,7 +30,7 @@ impl AddAssign<i32> for Record {
 
 impl SubAssign<i32> for Record {
     func sub_assign(&mut self, rhs: i32) {
-        self.bonus = self.bonus - rhs
+        self.bonus -= rhs
     }
 }
 

@@ -14,7 +14,7 @@ impl Accumulator {
 
     // Mutates in place: the write to `self.total` propagates to the caller.
     func add(&mut self, n: i32) {
-        self.total = self.total + n
+        self.total += n
     }
 
     // Read-only query over the accumulated state.

@@ -103,7 +103,7 @@ in each program has the full description. The three module files under
 - [`composed_loss.nr`](showcase/composed_loss.nr): Two `@grad` losses built from helper functions, one shape-generic and one branching, evaluated in a `pool` over candidate weights.
 - [`frozen_features.nr`](showcase/frozen_features.nr): Fine-tuning only a model's head with `@grad(wrt: [...])`, so `.backward()` fills the head's gradients while the feature layer stays fixed.
 - [`gradient_loss.nr`](showcase/gradient_loss.nr): A least-squares fit by gradient descent: `@grad`, `.backward()`, `.grad()`, `.zero_grad()` and `.item()` in a `pool` per step.
-- [`logistic_fit.nr`](showcase/logistic_fit.nr): Logistic regression with an elastic-net penalty, trained by its own gradient, with `.tanh()`, `.log()`, `.abs()` and `.pow(2.0)` in the loss.
+- [`logistic_fit.nr`](showcase/logistic_fit.nr): Logistic regression with an elastic-net penalty that leaves the bias alone, trained by its own gradient, with `.tanh()`, `.log()`, `.abs()` and `.pow(2.0)` in the loss and a perplexity taken from the likelihood alone.
 - [`newton_fit.nr`](showcase/newton_fit.nr): One logistic fit solved by Newton's method (`@grad(order: 2)` and `.hessian()`) and by gradient descent, for comparison.
 - [`ridge_objective.nr`](showcase/ridge_objective.nr): A training objective carried as a value, whose `@grad` loss method reads a ridge penalty from a constant receiver.
 - [`robust_fit.nr`](showcase/robust_fit.nr): A `@grad` loss with a `while` loop and an `if` expression, where the derivative follows the path each call took.
@@ -113,6 +113,7 @@ in each program has the full description. The three module files under
 
 - [`gpu_fallback.nr`](showcase/gpu_fallback.nr): A two-layer classifier with `@gpu(fallback: true)` layers that run as kernels where a GPU is usable and on the CPU otherwise, with identical output.
 - [`gpu_layer.nr`](showcase/gpu_layer.nr): A dense layer whose forward pass runs as `@gpu` kernels on device-resident weights, checked against the host. Stops without a usable NVIDIA GPU.
+- [`file_training.nr`](showcase/file_training.nr): A linear model trained from a batch read with `std::safetensors`, checkpointed with its step count, then resumed on the GPU from device tensors, landing on the same bits as the host and scored by a `@gpu` function. Stops without a usable NVIDIA GPU.
 - [`heat_diffusion.nr`](showcase/heat_diffusion.nr): Heat along a rod, one GPU thread per cell in a `@kernel` with `partition` writes, checked against a host run. Stops without a usable NVIDIA GPU.
 - [`train_predict.nr`](showcase/train_predict.nr): A `@grad` fit trained on the CPU, then a `@gpu` prediction from the learned weights. The program in the README demo. Stops without a usable NVIDIA GPU.
 
@@ -177,7 +178,7 @@ in each program has the full description. The three module files under
 - [`season_table.nr`](showcase/season_table.nr): A league table of non-`Copy` records: `+` moves two half-seasons into one, `+=` and `-=` update a `Vec` element, a field and a `&mut` parameter in place, and one `lt` supplies `<=`, `>` and a generic `T: Comparable`, beside closures and `Option`.
 - [`simulation.nr`](showcase/simulation.nr): A bit-flag state machine on a struct field, using `|=`, `&=`, `^=` and `<<=`, and `~` through a `BitNot` impl.
 - [`unit_types.nr`](showcase/unit_types.nr): Newtype units of measure (`Meters` and `Seconds` both wrap `i32`) that the compiler keeps apart.
-- [`vector_physics.nr`](showcase/vector_physics.nr): Operator traits (`+`, `-`, unary `-`, `==`, and `+=` through `Add`) on a `Copy` struct, driving a physics step.
+- [`vector_physics.nr`](showcase/vector_physics.nr): Operator traits (`+`, `-`, unary `-`, `==`, `!=` through the provided `ne`, `+=` through `Add` and `-=` through a `SubAssign` impl) on a `Copy` struct, driving a physics step.
 
 ### Control flow and errors
 

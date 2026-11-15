@@ -20,7 +20,7 @@ func main() -> i32 {
     val x: i32 = 10
     val a: &i32 = &x
     val b: &i32 = &x
-    total = total + sum2(a, b)        // 0 + 20 = 20
+    total += sum2(a, b)        // 0 + 20 = 20
     println("two shared &i32 of x  -> {total}")
 
     // A `&mut` passed to a call is released when the call returns, so the next
@@ -28,7 +28,7 @@ func main() -> i32 {
     mut counter: i32 = 0
     inc(&mut counter)                 // 1
     inc(&mut counter)                 // 2
-    total = total + counter           // 20 + 2 = 22
+    total += counter           // 20 + 2 = 22
     println("two &mut calls        -> counter {counter}, total {total}")
 
     // A mutable borrow confined to an inner scope ends at the closing brace,
@@ -43,7 +43,7 @@ func main() -> i32 {
         *rd = *rd + 1                 // value = 9
     }
     // Both borrows have ended, so `value` is readable through its own name again.
-    total = total + value             // 22 + 9 = 31
+    total += value             // 22 + 9 = 31
     println("scoped &mut, then new -> value {value}, total {total}")
 
     return total

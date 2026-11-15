@@ -19,7 +19,7 @@ impl Token {
         buffer.push_str(view)
         mut count = 0
         for c in view.chars() {
-            count = count + 1
+            count += 1
         }
         Token { text: buffer.to_string(), scalars: count }
     }
@@ -71,7 +71,7 @@ func main() -> i32 {
     // Codepoint length: what `.len()` is not.
     mut scalars = 0
     for c in line.chars() {
-        scalars = scalars + 1
+        scalars += 1
     }
     println("scalars     = {scalars}")
 
@@ -82,9 +82,9 @@ func main() -> i32 {
     mut letters = 0
     for (position, w) in (&words).enumerate() {
         val token = Token::of(w.slice(0..w.len()))
-        letters = letters + token.scalars
+        letters += token.scalars
         if token.is_wide() {
-            wide = wide + 1
+            wide += 1
         }
         println("  {position}: {token.text:>6}  bytes {token.text.len():>2}  scalars {token.scalars:>2}")
     }
@@ -93,7 +93,7 @@ func main() -> i32 {
     // A `.filter(p)` head over the scalar stream: the same walk, one adapter deep.
     mut accented = 0
     for c in line.chars().filter(|c: char| (c as u32) > 127) {
-        accented = accented + 1
+        accented += 1
     }
     println("accented    = {accented}")
 

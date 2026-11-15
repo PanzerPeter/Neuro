@@ -44,7 +44,7 @@ func main() -> i32 {
         pool {
             mut w: Tensor<f32, [2, 1]> = Tensor::from([[1.0f32], [2.0f32]])
             val loss = robust_fit(&mut w, 1.0f32, sweeps)
-            measured = loss.sum()
+            measured = loss.item()
         }
         trials.push(Trial { sweeps: sweeps, loss: measured })
     }

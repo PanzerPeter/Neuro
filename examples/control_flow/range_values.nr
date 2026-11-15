@@ -12,7 +12,7 @@ func evens_below(limit: i32) -> Step<i32> {
 func total<I: Iterator<Item = i32>>(values: I) -> i32 {
     mut sum = 0
     for value in values {
-        sum = sum + value
+        sum += value
     }
     sum
 }
@@ -20,7 +20,7 @@ func total<I: Iterator<Item = i32>>(values: I) -> i32 {
 func show<I: Iterator<Item = i32>>(label: string, values: I) {
     mut text = ""
     for value in values {
-        text = text + "{value} "
+        text += "{value} "
     }
     println("{label}{text}")
 }
@@ -35,7 +35,7 @@ func main() -> i32 {
     val top: Range<u8> = 252..=255
     mut bytes = ""
     for b in top {
-        bytes = bytes + "{b} "
+        bytes += "{b} "
     }
     println("252..=255 as u8  = {bytes}")
 
@@ -47,7 +47,7 @@ func main() -> i32 {
         if i == 4 {
             break
         }
-        first_part = first_part + "{i} "
+        first_part += "{i} "
     }
     println("walked first     = {first_part}")
     show("rest, newest     = ", pending.rev())

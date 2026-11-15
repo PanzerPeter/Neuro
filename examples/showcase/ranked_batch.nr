@@ -30,7 +30,7 @@ impl Batch {
         val (top, _) = self.logits.topk(k: 2, axis: classes)
         mut total = 0.0
         for row in 0..3 {
-            total = total + (top[row, 0] - top[row, 1])
+            total += (top[row, 0] - top[row, 1])
         }
         total / 3.0
     }
@@ -71,7 +71,7 @@ func main() -> i32 {
         for row in 0..3 {
             val at = row as u64
             if picks[at] == class {
-                rows = rows + 1
+                rows += 1
             }
         }
         println("class {class}: {rows} row(s)")

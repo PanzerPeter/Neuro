@@ -53,7 +53,7 @@ impl Objective {
                 b -= 0.05f32 * b.grad()
                 w.zero_grad()
                 b.zero_grad()
-                measured = loss.sum()
+                measured = loss.item()
             }
             step += 1
         }

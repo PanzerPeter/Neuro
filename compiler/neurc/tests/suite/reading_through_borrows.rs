@@ -342,3 +342,28 @@ func main() -> i32 {
 "#;
     assert_eq!(run(source), 26);
 }
+
+/// A borrowed operand ends with its operator when the result holds no borrow, so the same
+/// expression may move the value afterwards. `1.0 - y` reuses `y`'s buffer, after the product
+/// has read it.
+#[test]
+fn a_borrowed_operand_may_be_moved_later_in_the_expression() {
+    let source = r#"
+func main() -> i32 {
+    mut total = 0.0f32
+    for _ in 0..50 {
+        val y: Tensor<f32, [3]> = [1.0, 2.0, 4.0]
+        total += (&y * 2.0 + (1.0 - y)).sum()
+        val z: Tensor<f32, [3]> = [1.0, 2.0, 4.0]
+        val e: Tensor<f32, [3]> = [1.0, 1.0, 1.0]
+        total += (&z * e.abs() - (z - 1.0)).sum()
+    }
+    return total as i32
+}
+"#;
+    // Per round: 2y + (1 - y) = [2, 3, 5] sums to 10, and z - (z - 1) is three ones.
+    assert_eq!(
+        CompileTest::new().run_leak_checked("moved.nr", source),
+        650 % 256
+    );
+}

@@ -99,7 +99,7 @@ func second<T, U>(a: T, b: U) -> U {
 func sum_all<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
     mut total: i32 = 0
     for x in a {
-        total = total + x
+        total += x
     }
     total
 }

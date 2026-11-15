@@ -40,7 +40,7 @@ func newton() -> Fit {
         pool {
             val l = logistic_loss(&mut theta)
             l.backward()
-            loss = l.sum()
+            loss = l.item()
             val (g0, g1) = (theta.grad()[0], theta.grad()[1])
             val (a, b) = (theta.hessian()[0, 0], theta.hessian()[0, 1])
             val (c, d) = (theta.hessian()[1, 0], theta.hessian()[1, 1])
@@ -64,7 +64,7 @@ func descent(rate: f32) -> Fit {
         pool {
             val l = logistic_loss(&mut theta)
             l.backward()
-            loss = l.sum()
+            loss = l.item()
             slope = theta.grad()[0].abs() + theta.grad()[1].abs()
             theta -= rate * theta.grad()
             theta.zero_grad()

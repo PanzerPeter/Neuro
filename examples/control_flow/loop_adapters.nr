@@ -7,7 +7,7 @@ func main() -> i32 {
     mut doubled = 0
     for value in [1, 2, 3, 4].map(|x: i32| -> i32 { x * 2 }) {
         println("doubled: {value}")
-        doubled = doubled + value
+        doubled += value
     }
 
     // One over a range. A range needs parentheses, because `..` binds looser
@@ -15,7 +15,7 @@ func main() -> i32 {
     mut multiples = 0
     for value in (0..12).filter(|x: i32| -> bool { x % 4 == 0 }) {
         println("multiple of four: {value}")
-        multiples = multiples + value
+        multiples += value
     }
 
     // A chain. The filter sees what the map before it produced, and the second
@@ -26,14 +26,14 @@ func main() -> i32 {
         .filter(|x: i32| -> bool { x > 4 })
         .map(|x: i32| -> i32 { x - 1 }) {
         println("shaped: {value}")
-        shaped = shaped + value
+        shaped += value
     }
 
     // `.map` may change the element type, so the loop binding is whatever the
     // function returns.
     mut mean = 0.0
     for value in [2, 4, 6].map(|x: i32| -> f64 { x as f64 / 2.0 }) {
-        mean = mean + value
+        mean += value
     }
     println("halves total {mean}")
 
@@ -48,7 +48,7 @@ func main() -> i32 {
     val scale = |x: i32| -> i32 { x * 10 }
     mut scaled = 0
     for value in [1, 2].map(scale) {
-        scaled = scaled + value
+        scaled += value
     }
     println("scaled total {scaled}, one more {scale(3)}")
 

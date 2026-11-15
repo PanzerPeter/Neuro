@@ -48,7 +48,7 @@ func main() -> i32 {
     // Each heading is an interpolation's buffer, measured and then unreachable.
     mut header_bytes: u64 = 0
     for column in &columns {
-        header_bytes = header_bytes + column.heading().len()
+        header_bytes += column.heading().len()
     }
     if header_bytes != 21 {
         return 91
@@ -61,10 +61,10 @@ func main() -> i32 {
     mut named: i32 = 0
     for column in &columns {
         if column.matches(&wanted) {
-            named = named + 1
+            named += 1
         }
         if "[" + column.title + "]" == "[gamma]" {
-            named = named + 1
+            named += 1
         }
     }
     if named != 2 {
@@ -78,8 +78,8 @@ func main() -> i32 {
     pool {
         mut i: i32 = 0
         while i < ROUNDS {
-            pooled = pooled + ("row " + "{i}" + " ok").len()
-            i = i + 1
+            pooled += ("row " + "{i}" + " ok").len()
+            i += 1
         }
     }
     if pooled != 1890 {
@@ -92,7 +92,7 @@ func main() -> i32 {
     mut i: i32 = 0
     while i < ROUNDS {
         append_row(&mut rows, &label, i)
-        i = i + 1
+        i += 1
     }
     val transcript: string = rows.to_string()
     if transcript.len() != rows.len() {
@@ -108,13 +108,13 @@ func main() -> i32 {
     mut viewed: u64 = 0
     mut k: i32 = 0
     while k < ROUNDS {
-        viewed = viewed + ("row " + "{k}").slice(0..3).len()
+        viewed += ("row " + "{k}").slice(0..3).len()
         for c in (label + "{k}").chars() {
             if c == 'n' {
-                viewed = viewed + 1
+                viewed += 1
             }
         }
-        k = k + 1
+        k += 1
     }
     if viewed != 800 {
         return 96

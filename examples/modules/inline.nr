@@ -14,7 +14,7 @@ module counter {
         }
 
         func record(&mut self, amount: i32) {
-            self.hits = self.hits + step(amount)
+            self.hits += step(amount)
         }
     }
 

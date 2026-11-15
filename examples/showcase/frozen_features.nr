@@ -48,7 +48,7 @@ impl Model {
                 self.head.b -= 0.05f32 * self.head.b.grad()
                 self.head.w.zero_grad()
                 self.head.b.zero_grad()
-                last = l.sum()
+                last = l.item()
             }
             step += 1
         }

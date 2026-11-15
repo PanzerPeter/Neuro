@@ -31,7 +31,7 @@ impl Iterator for ReadingsIter {
             return Option::None
         }
         val sample = self.samples[self.position]
-        self.position = self.position + 1
+        self.position += 1
         Option::Some(sample)
     }
 }
@@ -43,7 +43,7 @@ impl Readings {
         mut sum = 0
         for sample in self.samples {
             if sample > floor {
-                sum = sum + sample
+                sum += sample
             }
         }
         sum
@@ -160,7 +160,7 @@ func spikes(samples: &[i32], floor: i32) -> impl Iterator<Item = i32> {
 func stream_total<S: Iterator<Item = i32>>(stream: S) -> i32 {
     mut total = 0
     for value in stream {
-        total = total + value
+        total += value
     }
     total
 }
@@ -181,7 +181,7 @@ func main() -> i32 {
     // The container in a `for` head: `into_iter()` once, `next()` per step.
     mut raw_total = 0
     for sample in readings {
-        raw_total = raw_total + sample
+        raw_total += sample
     }
     println("raw samples total {raw_total}")
 
@@ -190,7 +190,7 @@ func main() -> i32 {
     mut counted = 0
     for (position, sample) in readings.enumerate() {
         println("sample {position:>2}: {sample:>3}")
-        counted = counted + 1
+        counted += 1
     }
     println("walked {counted} samples")
 
@@ -208,7 +208,7 @@ func main() -> i32 {
     mut kept_total = 0
     for value in &kept {
         println("kept {value}")
-        kept_total = kept_total + value
+        kept_total += value
     }
     println("kept {kept.len()} of {counted}, totalling {kept_total}")
 
@@ -219,7 +219,7 @@ func main() -> i32 {
     }
     mut remainders = 0
     for value in shaped {
-        remainders = remainders + value
+        remainders += value
     }
     println("sample remainders mod 5 total {remainders}")
 
@@ -231,7 +231,7 @@ func main() -> i32 {
     for value in readings
         .map(|sample: i32| -> i32 { sample * 3 })
         .filter(|scaled: i32| -> bool { scaled > 20 }) {
-        inline_total = inline_total + value
+        inline_total += value
     }
     println("inline pipeline totals {inline_total}, matching {kept_total}")
 
@@ -262,7 +262,7 @@ func main() -> i32 {
     mut flagged = 0
     for (rank, value) in labels.filter(|v: i32| -> bool { v > 10 }).enumerate() {
         println("rank {rank:>2} flagged {value:>3}")
-        flagged = flagged + value
+        flagged += value
     }
     println("flagged {flagged} across the run")
 

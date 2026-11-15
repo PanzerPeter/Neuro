@@ -14,8 +14,9 @@ use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
-/// `%.16g` round-trips an `f64` while still printing `0.1` as `0.1`, so it is the
-/// default rendering; `__neuro_point` restores the fraction `%g` drops.
+/// `%.16g` prints `0.1` as `0.1` where `%.17g` would print `0.10000000000000001`, so it is
+/// the default rendering, at the cost of a few `f64` values printing as a neighbour;
+/// `__neuro_point` restores the fraction `%g` drops.
 const DEFAULT_FLOAT_CONVERSION: &str = ".16g";
 
 /// Significant digits for a `{x:e}` hole that named no precision: 16, matching

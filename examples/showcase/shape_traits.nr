@@ -142,7 +142,7 @@ func main() -> i32 {
     val weights: [i32; 3] = [2, 3, 5]
     mut acc: i32 = 0
     for w in weights {
-        acc = acc + w               // 10
+        acc += w               // 10
     }
 
     // Static dispatch through `impl Trait`: 25 + 1 = 26.

@@ -7,7 +7,7 @@ func sum_range(start: i32, end: i32) -> i32 {
 
     for i in start..end {
         println("visit {i}")
-        sum = sum + i
+        sum += i
     }
 
     return sum

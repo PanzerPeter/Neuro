@@ -48,7 +48,7 @@ func main() -> i32 {
         loss.backward()
         scaled -= RATE * scaled.grad()
         scaled.zero_grad()
-        trial.last = loss.sum()
+        trial.last = loss.item()
         if step == 0 { trial.first = trial.last }
     }
     trials.push(trial)
@@ -60,7 +60,7 @@ func main() -> i32 {
         loss.backward()
         softened -= RATE * softened.grad()
         softened.zero_grad()
-        trial.last = loss.sum()
+        trial.last = loss.item()
         if step == 0 { trial.first = trial.last }
     }
     trials.push(trial)

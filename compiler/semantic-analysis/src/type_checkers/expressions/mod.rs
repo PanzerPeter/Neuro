@@ -232,7 +232,17 @@ impl TypeChecker {
                 op,
                 right,
                 span,
-            } => self.check_binary_expr(left, op, right, span, expected),
+            } => {
+                // As for a call: an operator's borrowed operands end with it unless its
+                // result can carry one out, so `&y * 2.0 + (1.0 - y)` moves `y` after
+                // the product no longer needs it.
+                let borrows_before = self.symbols.transient_borrows();
+                let ty = self.check_binary_expr(left, op, right, span, expected);
+                if ty.as_ref().is_some_and(|ty| self.carries_no_borrow(ty)) {
+                    self.symbols.set_transient_borrows(&borrows_before);
+                }
+                ty
+            }
 
             Expr::Unary { op, operand, span } => self.check_unary_expr(op, operand, span, expected),
 

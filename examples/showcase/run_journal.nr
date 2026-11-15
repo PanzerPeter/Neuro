@@ -63,7 +63,7 @@ func load(path: &string) -> Result<(i32, Vec<f64>), RunError> {
 func mean(values: &Vec<f64>) -> f64 {
     mut total = 0.0
     for v in values.iter() {
-        total = total + *v
+        total += *v
     }
     total / values.len() as f64
 }

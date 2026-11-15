@@ -129,7 +129,7 @@ func main() -> i32 {
         if val Result::Err(_) = priced(cost) {
             retry.push(cost)
         }
-        total = total + points
+        total += points
     }
     // scores: 1*4=4, 2*12=24, cost 0 -> -7, cost 60 -> -3, 5*9=45  => total 63
 
@@ -137,7 +137,7 @@ func main() -> i32 {
 
     mut settled: i32 = 0
     for points in &accepted {
-        settled = settled + settle(*points)
+        settled += settle(*points)
     }
     println("settled (val-else |verdict|) = {settled}")
     // 4 -> Accept 4, 24 -> Accept 24, 45 -> Accept 45  => settled 73
@@ -147,7 +147,7 @@ func main() -> i32 {
     mut drained: i32 = 0
     loop {
         val Option::Some(top) = accepted.pop() else { break }
-        drained = drained + 1
+        drained += 1
     }
     // three entries were pushed => drained 3
 
@@ -159,7 +159,7 @@ func main() -> i32 {
     while val Some(cost) = retry.pop() {
         val halved = cost / 2
         if val Result::Ok(valid) = priced(halved) {
-            recovered = recovered + valid
+            recovered += valid
         } else if halved == 0 {
             println("retry: cost {cost} has nothing to halve")
             continue
@@ -173,7 +173,7 @@ func main() -> i32 {
     // Nested patterns read each slot past the end of the queue: 8 + 12 + 7 + 3 + 18 + 0.
     mut audit_total: i32 = 0
     for i in 0..6 {
-        audit_total = audit_total + audited(audit_slot(costs, i))
+        audit_total += audited(audit_slot(costs, i))
     }
     println("audited (nested patterns)  = {audit_total}")
 

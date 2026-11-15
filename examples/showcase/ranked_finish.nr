@@ -33,7 +33,7 @@ func out_of_order(runners: [Runner; 4]) -> i32 {
     for (rank, runner) in runners.enumerate() {
         if rank + 1 < runners.len() {
             if runner.seconds > runners[rank + 1].seconds {
-                inversions = inversions + 1
+                inversions += 1
             }
         }
     }
@@ -56,7 +56,7 @@ func main() -> i32 {
         val award = medal(place)
         val pace = runner.half_pace()
         println("rank {place}: bib {runner.bib}, half-pace {pace}, award {award}")
-        points = points + award
+        points += award
         splits.push(pace - place)
     }
 
@@ -64,7 +64,7 @@ func main() -> i32 {
     mut adjusted: i32 = 0
     for (lane, split) in splits.enumerate() {
         println("lane {lane} split {split}")
-        adjusted = adjusted + split
+        adjusted += split
     }
 
     // Over a range, the position is a count from zero: NOT the value yielded.

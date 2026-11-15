@@ -65,8 +65,8 @@ func drain(limit: i32) -> i32 {
     mut i: i32 = 0
     loop {
         val Option::Some(v) = next(i, limit) else { break }
-        total = total + v
-        i = i + 1
+        total += v
+        i += 1
     }
     total
 }

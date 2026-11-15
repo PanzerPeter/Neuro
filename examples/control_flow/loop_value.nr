@@ -6,7 +6,7 @@
 func main() -> i32 {
     mut i: i32 = 0
     val first_even = loop {
-        i = i + 1
+        i += 1
         if i % 2 == 0 {
             break i
         }
@@ -15,7 +15,7 @@ func main() -> i32 {
 
     mut j: i32 = 0
     val scaled = loop {
-        j = j + 1
+        j += 1
         if j >= 5 {
             break j * 10
         }

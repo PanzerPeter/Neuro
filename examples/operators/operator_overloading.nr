@@ -1,6 +1,7 @@
 // Operator overloading through operator traits. Operators on a user type are sugar for
 // trait method calls. A `Copy` struct implementing `Add`, `Sub`, `Neg` and `PartialEq` gets
-// `+`, `-`, unary `-`, `==` and `!=`, each monomorphized to a plain call. Each operator's
+// `+`, `-`, unary `-`, `==` and `!=` (the trait's provided `ne` negates `eq`), each
+// monomorphized to a plain call. Each operator's
 // result is printed as a vector, so the dispatch shows component by component.
 
 @derive(Copy, Clone)
@@ -34,9 +35,6 @@ impl PartialEq for Vec2 {
     func eq(&self, rhs: &Vec2) -> bool {
         self.x == rhs.x && self.y == rhs.y
     }
-    func ne(&self, rhs: &Vec2) -> bool {
-        self.x != rhs.x || self.y != rhs.y
-    }
 }
 
 func main() -> i32 {
@@ -59,10 +57,10 @@ func main() -> i32 {
 
     mut total = sum.x + sum.y + diff.x + diff.y + neg.x + neg.y   // 7+12+3+6-2-3 = 23
     if a == b {
-        total = total + 100
+        total += 100
     }
     if a != b {
-        total = total + 1   // -> 24
+        total += 1   // -> 24
     }
     println("total    = {total}")
     total

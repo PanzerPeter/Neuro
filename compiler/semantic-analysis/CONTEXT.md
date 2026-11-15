@@ -731,7 +731,8 @@ its old borrow first. Transient borrows are dropped at the end of every statemen
 result provably holds no borrow (`carries_no_borrow`: no reference inside, and not a function
 value, type parameter or `dyn`) restores the transient counts it found, so the borrows its
 arguments took end when it returns: `take(len_of(&key), key)` moves `key` after `len_of` returned
-a `u64`. A result that may carry a borrow keeps them for the statement.
+a `u64`. A binary operator does the same, so `&y * 2.0 + (1.0 - y)` moves `y` after the product
+has read it. A result that may carry a borrow keeps them for the statement.
 
 A borrow's provenance records the scope index of the binding it targets, and its release goes
 to that binding, never to whatever the name resolves to later: once an inner shadow dies, its

@@ -416,6 +416,7 @@ func main() -> i32 {
 
 ## See also
 
+- [Your First Training Run](first-training-run.md): the next tutorial, training a model on data from a file
 - [Types](../language-reference/types.md): the type system
 - [Functions](../language-reference/functions.md): declarations, closures and calls
 - [Generics and traits](../language-reference/generics-and-traits.md): generic functions and trait bounds

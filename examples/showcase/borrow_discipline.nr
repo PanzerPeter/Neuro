@@ -16,8 +16,8 @@ impl Accumulator {
     }
 
     func add(&mut self, sample: i32) {
-        self.total = self.total + sample
-        self.count = self.count + 1
+        self.total += sample
+        self.count += 1
     }
 
     func mean(&self) -> i32 {

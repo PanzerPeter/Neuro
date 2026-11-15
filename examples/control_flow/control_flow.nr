@@ -31,8 +31,8 @@ func sum_to(limit: i32) -> i32 {
     mut acc: i32 = 0
 
     while i < limit {
-        acc = acc + i
-        i = i + 1
+        acc += i
+        i += 1
     }
 
     return acc
@@ -46,8 +46,8 @@ func sum_until_break(limit: i32) -> i32 {
         if i == limit {
             break
         }
-        acc = acc + i
-        i = i + 1
+        acc += i
+        i += 1
     }
 
     return acc
@@ -58,11 +58,11 @@ func sum_skipping_three(limit: i32) -> i32 {
     mut acc: i32 = 0
 
     while i < limit {
-        i = i + 1
+        i += 1
         if i == 3 {
             continue
         }
-        acc = acc + i
+        acc += i
     }
 
     return acc

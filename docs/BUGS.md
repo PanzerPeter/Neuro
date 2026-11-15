@@ -5,6 +5,63 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-163: a `()` pattern does not parse
+
+- **Status**: open, confirmed
+- **Area**: `syntax-parsing` (patterns)
+- **Severity**: minor. Valid source is refused, and `_` is a workaround
+
+**Minimal repro**
+
+```neuro
+func run() -> Result<(), i32> { Ok(()) }
+
+func main() -> i32 {
+    match run() {
+        Ok(()) => 0,
+        Err(code) => code
+    }
+}
+```
+
+Expected: exit code 0. Observed: `unexpected token LeftParen, expected a literal or variant
+pattern` at the inner `(`. The unit type is the zero-element tuple and `()` is its value, so the
+zero-element tuple pattern should match it as `(a, b)` matches a pair.
+
+**Workaround**: write `Ok(_)`.
+
+**Fix sketch**: accept `()` wherever a tuple pattern is accepted, matching only the unit value,
+and let exhaustiveness count it as covering `()`.
+
+## BUG-162: `??` refuses a fallback that returns nothing when the payload is `()`
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`??` typing, the unit type)
+- **Severity**: minor. Valid source is refused with a message naming a type the language does not have
+
+**Minimal repro**
+
+```neuro
+func noop() {}
+
+func main() -> i32 {
+    val r: Result<(), i32> = Ok(())
+    r ?? noop()
+    0
+}
+```
+
+Expected: exit code 0. Observed: `type mismatch: expected (), found void`, also for a callee
+declared `-> ()` and for `?? println("...")`. A function with no return type returns `()`, and
+`-> ()` says the same, but the checker keeps two unit types: a written `()` is the empty
+tuple, a call to a function returning nothing is `void`, and `is_compatible_with` never equates
+them. The `??` fallback check is where `Result<(), E>` from `std::fs` meets a call.
+
+**Workaround**: a diverging fallback (`?? panic("...")`), or `if r.is_err() { ... }`.
+
+**Fix sketch**: make the empty tuple and `void` one type in the checker, or compatible in both
+directions, then check that lowering gives a `??` over a `()` payload no value to merge.
+
 ## BUG-161: a struct field cannot name a struct declared after it
 
 - **Status**: open, confirmed

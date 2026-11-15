@@ -1346,6 +1346,37 @@ mod tests {
     }
 
     #[test]
+    fn an_operators_borrowed_operand_ends_with_the_operator() {
+        // `&y * 2.0` is a fresh tensor holding no borrow, so `y` may move after it in the
+        // same expression; a borrow a binding holds still blocks the move.
+        let ok = errors(
+            r#"
+            func main() -> i32 {
+                val y: Tensor<f32, [2]> = [1.0, 2.0]
+                val a = &y * 2.0 + (1.0 - y)
+                return 0
+            }
+            "#,
+        );
+        assert!(ok.is_empty(), "the product holds no borrow; got {ok:?}");
+        let held = errors(
+            r#"
+            func main() -> i32 {
+                val y: Tensor<f32, [2]> = [1.0, 2.0]
+                val r = &y
+                val a = r * 2.0 + (1.0 - y)
+                return 0
+            }
+            "#,
+        );
+        assert!(
+            held.iter()
+                .any(|e| e.contains("cannot move out of 'y' while it is borrowed")),
+            "a held borrow must still block the move; got {held:?}"
+        );
+    }
+
+    #[test]
     fn reassigning_a_mut_revives_the_binding() {
         let errs = errors(
             r#"

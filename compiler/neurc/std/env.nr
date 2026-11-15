@@ -8,10 +8,8 @@ const NOT_SET: i32 = 5
 export func args() -> Vec<string> {
     val count = __arg_count()
     mut all: Vec<string> = Vec::with_capacity(count)
-    mut index: u64 = 0
-    while index < count {
+    for index in 0..count {
         all.push(__arg(index))
-        index = index + 1
     }
     all
 }

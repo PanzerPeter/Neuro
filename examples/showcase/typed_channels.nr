@@ -108,7 +108,7 @@ impl Backlog {
         if self.pending <= 0 {
             return None
         }
-        self.pending = self.pending - 1
+        self.pending -= 1
         Some(self.pending + 1)
     }
 }
@@ -142,7 +142,7 @@ func main() -> i32 {
     mut sum: i32 = 0
     for item in drained {
         println("drained {item}")
-        sum = sum + item
+        sum += item
     }
 
     // The constrained bound: two implementors, one monomorphized body each.

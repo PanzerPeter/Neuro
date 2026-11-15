@@ -63,7 +63,7 @@ func count_zeros(diff: &Tensor<i32, [4]>) -> i32 {
     mut zeros = 0
     for i in 0..4 {
         if diff[i] == 0 {
-            zeros = zeros + 1
+            zeros += 1
         }
     }
     return zeros

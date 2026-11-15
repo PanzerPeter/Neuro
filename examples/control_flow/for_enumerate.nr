@@ -7,7 +7,7 @@ func label_scores(scores: [i32; 4]) -> i32 {
 
     for (place, score) in scores.enumerate() {
         println("place {place}: {score} (also readable as scores[{place}] = {scores[place]})")
-        weighted = weighted + (place as i32) * score
+        weighted += (place as i32) * score
     }
 
     return weighted
@@ -23,7 +23,7 @@ func main() -> i32 {
     mut offsets: i32 = 0
     for (step, value) in (10..14).enumerate() {
         println("step {step} reaches {value}")
-        offsets = offsets + (value - (step as i32))
+        offsets += (value - (step as i32))
     }
     println("value minus position, summed = {offsets}")
 

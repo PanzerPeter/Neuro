@@ -13,7 +13,7 @@ func main() -> i32 {
     // A codepoint walk. The count differs from the byte length on any non-ASCII text.
     mut scalars = 0
     for c in text.chars() {
-        scalars = scalars + 1
+        scalars += 1
     }
     println("scalars     = {scalars}")
 
@@ -42,11 +42,11 @@ func main() -> i32 {
     println("stepped     = {first}{second}{past_end}")
 
     mut score: i32 = 0
-    if scalars == 4 { score = score + 1 }
-    if text.len() == 10 { score = score + 2 }
-    if cut == 3 { score = score + 4 }
-    if tail == "漢🎉" { score = score + 8 }
-    if past_end == '!' { score = score + 16 }
+    if scalars == 4 { score += 1 }
+    if text.len() == 10 { score += 2 }
+    if cut == 3 { score += 4 }
+    if tail == "漢🎉" { score += 8 }
+    if past_end == '!' { score += 16 }
 
     println("score       = {score}")
     return score                              // 1 + 2 + 4 + 8 + 16 = 31

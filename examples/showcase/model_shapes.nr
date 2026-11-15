@@ -157,29 +157,29 @@ func main() -> i32 {
 
     val projection_line = projection.describe()
     println("{projection_line:<32}= {projection.parameters():>6} params")
-    total = total + projection.parameters()
+    total += projection.parameters()
 
     val dense_line = dense.describe()
     println("{dense_line:<32}= {dense.parameters():>6} params")
-    total = total + dense.parameters()
+    total += dense.parameters()
 
     val hidden_line = hidden.describe()
     println("{hidden_line:<32}= {hidden.parameters():>6} params")
-    total = total + hidden.parameters()
+    total += hidden.parameters()
 
     for width in widths {
-        total = total + width
+        total += width
     }
 
     // `on_host` is still ours: the borrow above read it without taking it.
-    total = total + embedding_width(&on_host)
+    total += embedding_width(&on_host)
 
     // Two shapes that share only their second axis, read by one signature. Neither
     // borrow moves anything, and neither call needed the height written down.
     val wide = Tensor::<f32, [5, 4]>::zeros()
     val row_widths = row_width(&on_host) + row_width(&wide)
     println("row_width over [3,4] and [5,4]  = {row_widths:>6} wide")
-    total = total + row_widths
+    total += row_widths
 
     // A reduction READS its receiver, so the same table is summarised here and still
     // owned afterwards. `on_host` is one-hot, so the column sums say which columns any
@@ -187,7 +187,7 @@ func main() -> i32 {
     val columns_set: Tensor<f32, [4]> = on_host.sum(axis: 0)
     val rows_set = on_host.sum() as i32
     println("one-hot columns set             = {columns_set[0]:.0}{columns_set[1]:.0}{columns_set[2]:.0}{columns_set[3]:.0}")
-    total = total + rows_set
+    total += rows_set
 
     // The identity projection's weights are read straight out of the struct field that
     // owns them: 4 ones on the diagonal, a largest element of 1, a smallest of 0.

@@ -45,12 +45,10 @@ export struct File {
 impl File {
     // The `__metadata__` entry named `key`, which the format keeps as text.
     func metadata(&self, key: &string) -> Option<string> {
-        mut index: u64 = 0
-        while index < self.meta.len() {
+        for index in 0..self.meta.len() {
             if &self.meta[index].0 == key {
                 return Option::Some(self.meta[index].1.clone())
             }
-            index = index + 1
         }
         Option::None
     }
@@ -92,10 +90,8 @@ func read_header(bytes: &Vec<u8>) -> Result<Header, string> {
         return Result::Err("the file is {size} bytes, too short for the 8-byte header length")
     }
     mut length: u64 = 0
-    mut index: u64 = 0
-    while index < LENGTH_BYTES {
+    for index in 0..LENGTH_BYTES {
         length = length | ((bytes[index] as u64) << (8 * index))
-        index = index + 1
     }
     if length > HEADER_LIMIT {
         return Result::Err("the header length {length} is over the 100 MB limit")
@@ -121,8 +117,7 @@ func read_header(bytes: &Vec<u8>) -> Result<Header, string> {
 // file with tens of thousands of tensors shows it.
 func check_layout(tensors: &Vec<Stored>, data_size: u64) -> Result<(), string> {
     mut order: Vec<u64> = Vec::with_capacity(tensors.len())
-    mut index: u64 = 0
-    while index < tensors.len() {
+    for index in 0..tensors.len() {
         if tensors[index].end > data_size {
             return Result::Err("the tensor `{tensors[index].name}` ends at byte {tensors[index].end} of {data_size} bytes of data")
         }
@@ -130,14 +125,12 @@ func check_layout(tensors: &Vec<Stored>, data_size: u64) -> Result<(), string> {
         mut slot = order.len() - 1
         while slot > 0 && before(&tensors[index], &tensors[order[slot - 1]]) {
             order[slot] = order[slot - 1]
-            slot = slot - 1
+            slot -= 1
         }
         order[slot] = index
-        index = index + 1
     }
     mut covered: u64 = 0
-    mut position: u64 = 0
-    while position < order.len() {
+    for position in 0..order.len() {
         val stored = &tensors[order[position]]
         if stored.begin > covered {
             return Result::Err("no tensor covers bytes {covered} to {stored.begin} of the data")
@@ -146,7 +139,6 @@ func check_layout(tensors: &Vec<Stored>, data_size: u64) -> Result<(), string> {
             return Result::Err("the tensor `{stored.name}` overlaps another at byte {stored.begin} of the data")
         }
         covered = stored.end
-        position = position + 1
     }
     if covered != data_size {
         return Result::Err("no tensor covers bytes {covered} to {data_size} of the data")
@@ -179,13 +171,11 @@ func dtype_size(dtype: &string) -> u64 {
 func shape_text(shape: &Vec<u64>) -> string {
     mut text = StringBuilder::new()
     text.push_str("[")
-    mut index: u64 = 0
-    while index < shape.len() {
+    for index in 0..shape.len() {
         if index > 0 {
             text.push_str(", ")
         }
         text.push_str("{shape[index]}")
-        index = index + 1
     }
     text.push_str("]")
     text.to_string()
@@ -202,7 +192,7 @@ struct Reader {
 impl Reader {
     func skip_space(&mut self) {
         while self.at < self.end && is_space(self.bytes[self.at]) {
-            self.at = self.at + 1
+            self.at += 1
         }
     }
 
@@ -219,14 +209,14 @@ impl Reader {
         if self.peek()? != byte {
             return Result::Err("expected {what} at byte {self.at}")
         }
-        self.at = self.at + 1
+        self.at += 1
         Result::Ok(())
     }
 
     // After a member or an element: true at the closing `close`, false at a comma.
     func closes(&mut self, close: u8) -> Result<bool, string> {
         val next = self.peek()?
-        self.at = self.at + 1
+        self.at += 1
         if next == close {
             return Result::Ok(true)
         }
@@ -242,7 +232,7 @@ impl Reader {
         mut seen_metadata = false
         self.expect('{' as u8, "the header's JSON object")?
         if self.peek()? == '}' as u8 {
-            self.at = self.at + 1
+            self.at += 1
             return Result::Ok(Header { data_start: data_start, tensors: tensors, metadata: metadata })
         }
         loop {
@@ -255,12 +245,10 @@ impl Reader {
                 seen_metadata = true
                 metadata = self.metadata()?
             } else {
-                mut index: u64 = 0
-                while index < tensors.len() {
+                for index in 0..tensors.len() {
                     if tensors[index].name == name {
                         return Result::Err("the tensor `{name}` appears twice")
                     }
-                    index = index + 1
                 }
                 tensors.push(self.entry(name)?)
             }
@@ -275,7 +263,7 @@ impl Reader {
         mut pairs: Vec<(string, string)> = Vec::new()
         self.expect('{' as u8, "the `__metadata__` object")?
         if self.peek()? == '}' as u8 {
-            self.at = self.at + 1
+            self.at += 1
             return Result::Ok(pairs)
         }
         loop {
@@ -285,12 +273,10 @@ impl Reader {
                 return Result::Err("the metadata value of `{key}` is not a string")
             }
             val value = self.text()?
-            mut index: u64 = 0
-            while index < pairs.len() {
+            for index in 0..pairs.len() {
                 if pairs[index].0 == key {
                     return Result::Err("the metadata key `{key}` appears twice")
                 }
-                index = index + 1
             }
             pairs.push((key, value))
             if self.closes('}' as u8)? {
@@ -310,7 +296,7 @@ impl Reader {
         self.expect('{' as u8, "the object describing `{name}`")?
         mut done = false
         if self.peek()? == '}' as u8 {
-            self.at = self.at + 1
+            self.at += 1
             done = true
         }
         while !done {
@@ -341,13 +327,11 @@ impl Reader {
             return Result::Err("the tensor `{name}`'s `data_offsets` is not a range [begin, end]")
         }
         mut size = width
-        mut index: u64 = 0
-        while index < shape.len() {
+        for index in 0..shape.len() {
             if shape[index] != 0 && size > (TENTH_OF_MAX * 10 + 5) / shape[index] {
                 return Result::Err("the tensor `{name}` is too large to hold")
             }
-            size = size * shape[index]
-            index = index + 1
+            size *= shape[index]
         }
         val text = shape_text(&shape)
         if offsets[1] - offsets[0] != size {
@@ -361,7 +345,7 @@ impl Reader {
         mut all: Vec<u64> = Vec::new()
         self.expect('[' as u8, "an array of integers")?
         if self.peek()? == ']' as u8 {
-            self.at = self.at + 1
+            self.at += 1
             return Result::Ok(all)
         }
         loop {
@@ -385,7 +369,7 @@ impl Reader {
                 return Result::Err("the integer at byte {start} does not fit 64 bits")
             }
             value = value * 10 + digit
-            self.at = self.at + 1
+            self.at += 1
         }
         if first == '0' as u8 && self.at - start > 1 {
             return Result::Err("the integer at byte {start} has a leading zero")
@@ -412,7 +396,7 @@ impl Reader {
             }
             val byte = self.bytes[self.at]
             if byte == '"' as u8 {
-                self.at = self.at + 1
+                self.at += 1
                 return Result::Ok(out.to_string())
             }
             if byte < 32 {
@@ -432,7 +416,7 @@ impl Reader {
     func scalar(&mut self) -> Result<char, string> {
         val lead = self.bytes[self.at] as u32
         if lead < 128 {
-            self.at = self.at + 1
+            self.at += 1
             return Result::Ok(lead as char)
         }
         mut width: u64 = 0
@@ -456,19 +440,17 @@ impl Reader {
         if width > self.end - self.at {
             return Result::Err("invalid UTF-8 at byte {self.at}")
         }
-        mut index: u64 = 1
-        while index < width {
+        for index in 1..width {
             val next = self.bytes[self.at + index] as u32
             if (next & 192) != 128 {
                 return Result::Err("invalid UTF-8 at byte {self.at}")
             }
             code = (code << 6) | (next & 63)
-            index = index + 1
         }
         if code < least || code > 1114111 || (code >= 55296 && code <= 57343) {
             return Result::Err("invalid UTF-8 at byte {self.at}")
         }
-        self.at = self.at + width
+        self.at += width
         Result::Ok(code as char)
     }
 
@@ -479,7 +461,7 @@ impl Reader {
             return Result::Err("a string runs past the end of the header")
         }
         val kind = self.bytes[self.at + 1] as char
-        self.at = self.at + 2
+        self.at += 2
         match kind {
             '"' => Result::Ok('"'),
             '\\' => Result::Ok('\\'),
@@ -500,7 +482,7 @@ impl Reader {
                 if self.end - self.at < 6 || self.bytes[self.at] != '\\' as u8 || self.bytes[self.at + 1] != 'u' as u8 {
                     return Result::Err("a high surrogate escape without its low half at byte {at}")
                 }
-                self.at = self.at + 2
+                self.at += 2
                 val low = self.hex4()?
                 if low < 56320 || low > 57343 {
                     return Result::Err("a high surrogate escape without its low half at byte {at}")
@@ -516,8 +498,7 @@ impl Reader {
             return Result::Err("a `\\u` escape runs past the end of the header")
         }
         mut value: u32 = 0
-        mut index: u64 = 0
-        while index < 4 {
+        for index in 0u64..4 {
             val byte = self.bytes[self.at + index] as u32
             mut digit: u32 = 16
             if byte >= 48 && byte <= 57 {
@@ -531,9 +512,8 @@ impl Reader {
                 return Result::Err("a `\\u` escape with a non-hex digit at byte {self.at + index}")
             }
             value = value * 16 + digit
-            index = index + 1
         }
-        self.at = self.at + 4
+        self.at += 4
         Result::Ok(value)
     }
 }
@@ -549,8 +529,7 @@ func is_digit(byte: u8) -> bool {
 // Called by `file.tensor(name)`: the stored bytes of `name`, after checking its dtype and shape
 // against the ones the read was annotated with.
 func locate(file: &File, name: &string, dtype: &string, shape: &string) -> Result<&[u8], IoError> {
-    mut index: u64 = 0
-    while index < file.tensors.len() {
+    for index in 0..file.tensors.len() {
         val stored = &file.tensors[index]
         if &stored.name == name {
             if &stored.dtype != dtype || &stored.shape != shape {
@@ -561,20 +540,17 @@ func locate(file: &File, name: &string, dtype: &string, shape: &string) -> Resul
             }
             val bytes = file.bytes.slice((file.data_start + stored.begin)..(file.data_start + stored.end))
             if dtype == "BOOL" {
-                mut at: u64 = 0
-                while at < bytes.len() {
+                for at in 0..bytes.len() {
                     if bytes[at] > 1 {
                         return Result::Err(IoError {
                             kind: IoErrorKind::InvalidData,
                             message: "cannot read the tensor `{name}` from {file.path}: a BOOL element holds {bytes[at]}"
                         })
                     }
-                    at = at + 1
                 }
             }
             return Result::Ok(bytes)
         }
-        index = index + 1
     }
     Result::Err(IoError {
         kind: IoErrorKind::NotFound,
@@ -604,7 +580,7 @@ impl Writer {
     func add_metadata(&mut self, key: &string, value: &string) {
         mut index: u64 = 0
         while index < self.metadata.len() && &self.metadata[index].0 != key {
-            index = index + 1
+            index += 1
         }
         if index < self.metadata.len() {
             self.metadata[index] = (key.clone(), value.clone())
@@ -624,22 +600,19 @@ impl Writer {
         mut first = true
         if self.metadata.len() > 0 {
             header.push_str("\"__metadata__\":\{")
-            mut index: u64 = 0
-            while index < self.metadata.len() {
+            for index in 0..self.metadata.len() {
                 if index > 0 {
                     header.push_str(",")
                 }
                 header.push_str(json_text(&self.metadata[index].0))
                 header.push_str(":")
                 header.push_str(json_text(&self.metadata[index].1))
-                index = index + 1
             }
             header.push_str("\}")
             first = false
         }
         mut offset: u64 = 0
-        mut index: u64 = 0
-        while index < self.tensors.len() {
+        for index in 0..self.tensors.len() {
             val pending = &self.tensors[index]
             if pending.name == "__metadata__" {
                 return Result::Err(IoError {
@@ -655,35 +628,26 @@ impl Writer {
             header.push_str(json_text(&pending.name))
             header.push_str(":\{\"dtype\":\"{pending.dtype}\",\"shape\":{pending.shape},\"data_offsets\":[{offset},{end}]\}")
             offset = end
-            index = index + 1
         }
         header.push_str("\}")
         val text = header.to_string()
         mut bytes: Vec<u8> = Vec::with_capacity(LENGTH_BYTES + text.len() + HEADER_ALIGN + offset)
-        mut slot: u64 = 0
-        while slot < LENGTH_BYTES {
+        for slot in 0..LENGTH_BYTES {
             bytes.push(0)
-            slot = slot + 1
         }
         push_utf8(&mut bytes, &text)
         while bytes.len() % HEADER_ALIGN != 0 {
             bytes.push(' ' as u8)
         }
         val length = bytes.len() - LENGTH_BYTES
-        slot = 0
-        while slot < LENGTH_BYTES {
+        for slot in 0..LENGTH_BYTES {
             bytes[slot] = (length.shr(8 * slot) & 255) as u8
-            slot = slot + 1
         }
-        index = 0
-        while index < self.tensors.len() {
+        for index in 0..self.tensors.len() {
             val data = &self.tensors[index].data
-            mut at: u64 = 0
-            while at < data.len() {
+            for at in 0..data.len() {
                 bytes.push(data[at])
-                at = at + 1
             }
-            index = index + 1
         }
         std::fs::write_bytes(path, &bytes)
     }
@@ -694,7 +658,7 @@ impl Writer {
 func append(out: &mut Writer, name: &string, dtype: &string, shape: &string, data: Vec<u8>) {
     mut index: u64 = 0
     while index < out.tensors.len() && &out.tensors[index].name != name {
-        index = index + 1
+        index += 1
     }
     val pending = Pending { name: name.clone(), dtype: dtype.clone(), shape: shape.clone(), data: data }
     if index < out.tensors.len() {

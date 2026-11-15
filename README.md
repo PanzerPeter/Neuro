@@ -325,7 +325,7 @@ MLIR GPU dialects to NVIDIA or AMD kernels. Stage by stage:
 
 | | |
 |---|---|
-| [Getting started](docs/getting-started/quick-start.md) | Installation, first program, workflow |
+| [Getting started](docs/getting-started/quick-start.md) | Installation, first program, workflow, a first training run from a Python-written file |
 | [Language reference](docs/README.md#language-reference) | One page per feature area, from types to modules |
 | [CLI guide](docs/guides/cli-usage.md) | Commands, flags, environment variables, interop |
 | [Compiler internals](docs/README.md#compiler-architecture) | Pipeline and one page per slice |

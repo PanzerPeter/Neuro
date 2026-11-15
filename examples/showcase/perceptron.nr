@@ -37,8 +37,8 @@ func main() -> i32 {
         val h = hidden.activate(x)
         val y = output.activate(h)
         println("x {x:.1} -> hidden {h:.2} -> output {y:.2}")
-        total = total + y
-        x = x + 1.0
+        total += y
+        x += 1.0
     }
 
     println("summed output        = {total:.2}")

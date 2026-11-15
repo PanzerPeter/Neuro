@@ -49,7 +49,7 @@ impl Iterator for Ids {
             return Option::None
         }
         val v = self.values[self.pos]
-        self.pos = self.pos + 1
+        self.pos += 1
         return Option::Some(v)
     }
 }

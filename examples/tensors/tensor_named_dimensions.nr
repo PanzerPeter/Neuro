@@ -13,7 +13,7 @@ func total_pixels(image: &Tensor<i32, [channels: 3, height: 2, width: 4]>) -> i3
     for c in 0..3 {
         for h in 0..2 {
             for w in 0..4 {
-                total = total + image[c, h, w]
+                total += image[c, h, w]
             }
         }
     }

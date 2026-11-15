@@ -31,7 +31,7 @@ func repeat<T: Copy>(v: T, n: i32) -> Vec<T> {
     mut i = 0
     while i < n {
         out.push(v)
-        i = i + 1
+        i += 1
     }
     out
 }

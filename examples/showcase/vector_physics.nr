@@ -1,7 +1,9 @@
 // Showcase: operator traits driving a vector physics step. Integration example: `+`, `-`,
-// unary `-` and `==` on a `Copy` struct, an `impl` block with an `&self` method, `+=`
-// through the `Add` impl, `if` expressions, and a `while` loop. The operators dispatch to
-// trait methods and are monomorphized to plain calls.
+// unary `-`, `==` and `!=` on a `Copy` struct, an `impl` block with an `&self` method, `+=`
+// through the `Add` impl where no `AddAssign` is written, `-=` through a `SubAssign` impl,
+// `if` expressions, and a `while` loop. The operators dispatch to trait methods and are
+// monomorphized to plain calls. `PartialEq` is written by hand rather than derived, to show
+// that an impl giving only `eq` gets `!=` from the trait's provided `ne`.
 
 @derive(Copy, Clone)
 struct Vec2 {
@@ -34,8 +36,12 @@ impl PartialEq for Vec2 {
     func eq(&self, rhs: &Vec2) -> bool {
         self.x == rhs.x && self.y == rhs.y
     }
-    func ne(&self, rhs: &Vec2) -> bool {
-        self.x != rhs.x || self.y != rhs.y
+}
+
+impl SubAssign for Vec2 {
+    func sub_assign(&mut self, rhs: Vec2) {
+        self.x -= rhs.x
+        self.y -= rhs.y
     }
 }
 
@@ -64,7 +70,7 @@ func main() -> i32 {
     mut result = 0
     val target = Vec2 { x: 8, y: 12 }
     if pos == target {
-        result = result + pos.manhattan()   // 8 + 12 = 20
+        result += pos.manhattan()   // 8 + 12 = 20
     }
 
     val back = pos - vel      // (6, 9)
@@ -73,7 +79,11 @@ func main() -> i32 {
     println("pos - vel     (Sub impl)    = ({back.x}, {back.y})")
     println("-back         (Neg impl)    = ({flipped.x}, {flipped.y})")
 
-    result = result + flipped.manhattan()   // 20 + 15 = 35
+    result += flipped.manhattan()   // 20 + 15 = 35
+
+    // One step back in place: `-=` dispatches through the `SubAssign` impl.
+    pos -= vel
+    println("pos -= vel    (SubAssign)   = ({pos.x}, {pos.y}), back: {pos == back}, off target: {pos != target}")
     println("total                       = {result}")
     result
 }

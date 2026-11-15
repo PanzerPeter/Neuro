@@ -10,7 +10,7 @@
 func trace(m: &Tensor<i32, [3, 3]>) -> i32 {
     mut total = 0
     for i in 0..3 {
-        total = total + m[i, i]
+        total += m[i, i]
     }
     return total
 }

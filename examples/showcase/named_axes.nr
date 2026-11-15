@@ -50,7 +50,7 @@ where N > 0
     // The extent is a `const N: u32`, so the range it drives is cast to the `i32`
     // the running total is written in.
     for i in 0..(N as i32) {
-        total = total + row[i]
+        total += row[i]
     }
     return total
 }
@@ -64,7 +64,7 @@ func batch_total(batch: &Tensor<i32, [batch: 2, seq: 3, embed: 4]>) -> i32 {
             // Two positions drop two axes, so this slice is the `[embed: 4]`
             // vector for one token, and `row_sum` reads it by borrow.
             val token: Tensor<i32, [embed: 4]> = batch[b, s, ..]
-            total = total + row_sum(&token)
+            total += row_sum(&token)
         }
     }
     return total
@@ -78,7 +78,7 @@ func tokens_per_batch(batch: Tensor<i32, [batch: 2, seq: 3, embed: 4]>) -> i32 {
     val tokens = batch.flatten(dims: [seq, embed])
     mut total = 0
     for t in 0..12 {
-        total = total + tokens[0, t]
+        total += tokens[0, t]
     }
     return total
 }
@@ -147,7 +147,7 @@ func main() -> i32 {
     val widths = [4, 2]
     mut declared = 0
     for width in widths {
-        declared = declared + width
+        declared += width
     }
 
     val total = batch_total(&batch)

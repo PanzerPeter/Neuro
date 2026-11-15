@@ -5,20 +5,20 @@
 func main() -> i32 {
     mut exclusive = ""
     for i in (0..5).rev() {
-        exclusive = exclusive + "{i} "
+        exclusive += "{i} "
     }
     println("(0..5).rev()      = {exclusive}")
 
     mut inclusive = ""
     for i in (0..=5).rev() {
-        inclusive = inclusive + "{i} "
+        inclusive += "{i} "
     }
     println("(0..=5).rev()     = {inclusive}")
 
     // An empty range is empty in either direction.
     mut ran = 0
     for i in (3..3).rev() {
-        ran = ran + 1
+        ran += 1
     }
     println("(3..3).rev() runs = {ran}")
 
@@ -26,7 +26,7 @@ func main() -> i32 {
     // from zero while the value it is paired with descends.
     mut pairs = ""
     for (position, value) in (10..14).rev().enumerate() {
-        pairs = pairs + "{position}:{value} "
+        pairs += "{position}:{value} "
     }
     println("(10..14).rev()    = {pairs}")
 
@@ -34,7 +34,7 @@ func main() -> i32 {
     // one is then filtered and mapped.
     mut doubled = ""
     for v in (0..6).rev().filter(|n: i32| -> bool { n % 2 == 1 }).map(|n: i32| -> i32 { n * 2 }) {
-        doubled = doubled + "{v} "
+        doubled += "{v} "
     }
     println("odds doubled      = {doubled}")
 

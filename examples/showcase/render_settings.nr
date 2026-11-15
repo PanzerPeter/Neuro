@@ -103,14 +103,14 @@ func main() -> i32 {
     val thumb_label = thumb.label()
     println("hero.label()  = [{hero_label}]")
     println("thumb.label() = [{thumb_label}]")
-    matched = matched + check(hero_label, "  12x   8")
-    matched = matched + check(thumb_label, "  15x  12")
+    matched += check(hero_label, "  12x   8")
+    matched += check(thumb_label, "  15x  12")
 
     // The block ends at its last content line, so the separator before the next
     // section is written here rather than smuggled in by the delimiter.
     val report = header() + "\n" + "frames checked: {matched}"
     println(report)
-    matched = matched + check(report, "render report\n-------------\nframes checked: 2")
+    matched += check(report, "render report\n-------------\nframes checked: 2")
 
     // The same three arguments, named in three different orders.
     val a = budget(frame: hero, per_pixel: 2, quality: Quality::Draft)

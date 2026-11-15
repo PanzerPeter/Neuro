@@ -66,7 +66,7 @@ func main() -> i32 {
         val label = "{key:<8}"
         val result = setting_int(&settings, key)
         if result.is_err() {
-            failed = failed + 1
+            failed += 1
         }
         println(label + render(result))
     }
@@ -79,7 +79,7 @@ func main() -> i32 {
 
     mut loaded = 0
     for i in 0..5 {
-        loaded = loaded + (setting_int(&settings, keys[i].clone()) ?? continue)
+        loaded += (setting_int(&settings, keys[i].clone()) ?? continue)
     }
 
     println("workers {workers}, batch {batch}, depth {depth}, seeded {seeded}")

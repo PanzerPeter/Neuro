@@ -37,8 +37,8 @@ func main() -> i32 {
     // Accumulate the samples 1.0, 2.0, ... 10.0 (sum 55, count 10).
     mut i: i32 = 1
     while i <= 10 {
-        stats.sum = stats.sum + (i as f64)
-        stats.count = stats.count + 1
+        stats.sum += (i as f64)
+        stats.count += 1
         val running = stats.mean()
         println("sample {i:>2} -> mean {running:.3}")
         i += 1
@@ -52,8 +52,8 @@ func main() -> i32 {
     if bad.is_nan() {
         println("rejected a non-finite sample; accumulator untouched")
     } else {
-        stats.sum = stats.sum + bad
-        stats.count = stats.count + 1
+        stats.sum += bad
+        stats.count += 1
     }
     println("accumulator trustworthy = {stats.is_trustworthy()}")
 
@@ -75,8 +75,8 @@ func empty_mean_is_zero() {
 func mean_of_one_to_ten() {
     mut stats = RunningStats::new()
     for i in 1..11 {
-        stats.sum = stats.sum + (i as f64)
-        stats.count = stats.count + 1
+        stats.sum += (i as f64)
+        stats.count += 1
     }
     assert_close(stats.mean(), 5.5, 1.0e-12)
 }

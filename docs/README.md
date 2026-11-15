@@ -27,6 +27,7 @@ Design goals:
 - [Installation Guide](getting-started/installation.md): install Neuro on Linux, macOS or Windows
 - [Quick Start](getting-started/quick-start.md): basic usage and workflow
 - [Your First Program](getting-started/first-program.md): step-by-step tutorial
+- [Your First Training Run](getting-started/first-training-run.md): read a batch Python wrote, train on the CPU and the GPU, save, resume, and check the result against NumPy
 - [examples/](../examples/): runnable programs, each pinned to its exact exit code and output
 
 ## Language Reference

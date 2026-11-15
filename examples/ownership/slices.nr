@@ -8,7 +8,7 @@
 func sum(xs: &[i32]) -> i32 {
     mut total: i32 = 0
     for x in xs {
-        total = total + x
+        total += x
     }
     total
 }
@@ -19,7 +19,7 @@ func largest(xs: &[i32]) -> i32 {
     mut i: u64 = 1
     while i < xs.len() {
         if xs[i] > best { best = xs[i] }
-        i = i + 1
+        i += 1
     }
     best
 }
@@ -30,7 +30,7 @@ func double_each(xs: &mut [i32]) {
     mut i: u64 = 0
     while i < xs.len() {
         xs[i] = xs[i] * 2
-        i = i + 1
+        i += 1
     }
 }
 

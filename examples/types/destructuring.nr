@@ -23,7 +23,7 @@ func main() -> i32 {
     val [first, ..rest] = nums           // first = 4, rest = [5, 6, 7, 8]
     mut rest_sum: i32 = 0
     for r in rest {
-        rest_sum = rest_sum + r          // 5 + 6 + 7 + 8 = 26
+        rest_sum += r          // 5 + 6 + 7 + 8 = 26
     }
 
     // A bare `..` ignores the remainder; `_` discards a single element.

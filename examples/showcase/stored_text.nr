@@ -79,7 +79,7 @@ func main() -> i32 {
         // Built for the call and released by the callee.
         ledger.record(width(kind + "-probe"))
 
-        i = i + 1
+        i += 1
     }
 
     // Once, outside the loop: `wrap` STORES its argument in the value it hands

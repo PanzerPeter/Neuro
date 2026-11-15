@@ -5,7 +5,7 @@
 func sum(xs: [i32; 5]) -> i32 {
     mut total: i32 = 0
     for x in xs {
-        total = total + x
+        total += x
     }
     total
 }
@@ -22,7 +22,7 @@ func main() -> i32 {
 
     mut borrowed: i32 = 0
     for x in &data {
-        borrowed = borrowed + x  // 24
+        borrowed += x  // 24
     }
     println("for x in &data -> {borrowed}")
 

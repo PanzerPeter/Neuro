@@ -25,7 +25,7 @@ func main() -> i32 {
     first
     second
     """
-    passed = passed + check(basic, "first\nsecond")
+    passed += check(basic, "first\nsecond")
 
     // Indentation deeper than the closing delimiter survives: only the common
     // prefix goes away, so nested structure inside the block is preserved.
@@ -33,7 +33,7 @@ func main() -> i32 {
     root
         child
     """
-    passed = passed + check(nested, "root\n    child")
+    passed += check(nested, "root\n    child")
 
     // A blank line needs no indentation of its own and normalizes to empty. It is
     // also how a trailing newline is written: put one before the closing line and
@@ -43,7 +43,7 @@ func main() -> i32 {
 
     two
     """
-    passed = passed + check(paragraphs, "one\n\ntwo")
+    passed += check(paragraphs, "one\n\ntwo")
 
     // Interpolation and the format mini-language work inside a block.
     val name = "Neuro"
@@ -52,19 +52,19 @@ func main() -> i32 {
     engine: {name}
     ratio:  {ratio:.3}
     """
-    passed = passed + check(report, "engine: Neuro\nratio:  0.500")
+    passed += check(report, "engine: Neuro\nratio:  0.500")
 
     // A `"` needs no escaping inside a block: only `"""` ends it.
     val quoted = """
     he said "yes"
     """
-    passed = passed + check(quoted, "he said \"yes\"")
+    passed += check(quoted, "he said \"yes\"")
 
     // Escape sequences decode as usual.
     val escaped = """
     tab\there
     """
-    passed = passed + check(escaped, "tab\there")
+    passed += check(escaped, "tab\there")
 
     return passed
 }

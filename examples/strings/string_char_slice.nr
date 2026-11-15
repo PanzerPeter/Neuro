@@ -30,12 +30,12 @@ func main() -> i32 {
     println("nested             = {nested}")
 
     mut score: i32 = 0
-    if by_char == "hél" { score = score + 1 }
-    if by_byte == "hé" { score = score + 2 }
-    if by_char != by_byte { score = score + 4 }
-    if nested == "é" { score = score + 8 }
+    if by_char == "hél" { score += 1 }
+    if by_byte == "hé" { score += 2 }
+    if by_char != by_byte { score += 4 }
+    if nested == "é" { score += 8 }
 
-    score = score + (by_char.len() as i32)   // + 4 bytes for those 3 characters
+    score += (by_char.len() as i32)   // + 4 bytes for those 3 characters
 
     println("score              = {score}")
     return score                              // 1 + 2 + 4 + 8 + 4 = 19

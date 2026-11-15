@@ -8,7 +8,7 @@
 func sum_to(n: u64) -> u64 {
     mut total: u64 = 0
     for i in 0..n {
-        total = total + i
+        total += i
     }
     total
 }

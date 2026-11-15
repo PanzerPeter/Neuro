@@ -28,7 +28,7 @@ func train(start: Tensor<f32, [3, 1]>, count: i32) -> (Tensor<f32, [3, 1]>, f32)
         l.backward()
         w -= RATE * w.grad()
         w.zero_grad()
-        last = l.sum()
+        last = l.item()
     }
     (w, last)
 }

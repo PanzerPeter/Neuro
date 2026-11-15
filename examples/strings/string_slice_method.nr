@@ -15,12 +15,12 @@ func main() -> i32 {
     println("s.slice(0..0)  = {empty}   (empty slice)")
 
     mut score: i32 = 0
-    if hello == "hello" { score = score + 1 }
-    if world == "world" { score = score + 2 }
-    if s.slice(0..0) == "" { score = score + 4 }   // empty slice
+    if hello == "hello" { score += 1 }
+    if world == "world" { score += 2 }
+    if s.slice(0..0) == "" { score += 4 }   // empty slice
 
     // A slice is itself a `&string`, so `.len()` reads its byte span (O(1)).
-    score = score + (s.slice(0..5).len() as i32)   // + 5
+    score += (s.slice(0..5).len() as i32)   // + 5
 
     println("score          = {score}")
     return score                                    // 1 + 2 + 4 + 5 = 12

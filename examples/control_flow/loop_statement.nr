@@ -8,7 +8,7 @@ func main() -> i32 {
     mut sum: i32 = 0
 
     loop {
-        i = i + 1
+        i += 1
         if i == 3 {
             println("continue past {i}")
             continue
@@ -17,7 +17,7 @@ func main() -> i32 {
             println("break at {i}")
             break
         }
-        sum = sum + i
+        sum += i
         println("add {i}, sum = {sum}")
     }
 
