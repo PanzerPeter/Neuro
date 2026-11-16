@@ -17,7 +17,7 @@ func squared_error(w: &mut Tensor<f32, [2, 1]>, b: &mut Tensor<f32, [1]>, scale:
 }
 ```
 
-This function comes from [`examples/showcase/gradient_loss.nr`](../../examples/showcase/gradient_loss.nr),
+This function comes from [`examples/integration/training/gradient_loss.nr`](../../examples/integration/training/gradient_loss.nr),
 which trains it by gradient descent.
 
 ## What `@grad` produces
@@ -41,7 +41,7 @@ from the loss, adding each value's contribution wherever that value was used. Sh
 The derivative runs when the loss returned by a `@grad` call is asked for it. `.backward()` runs it
 and moves each gradient into a slot beside the tensor it belongs to. `.grad()` reads that gradient,
 and `.zero_grad()` empties the slot. A training step from
-[`examples/showcase/gradient_loss.nr`](../../examples/showcase/gradient_loss.nr):
+[`examples/integration/training/gradient_loss.nr`](../../examples/integration/training/gradient_loss.nr):
 
 ```neuro
         pool {
@@ -113,7 +113,7 @@ An entry is either a parameter's name or, on a method, a path from `self` to a t
 through **exported** fields, because naming a private one would tie the annotation to a layout the
 type does not promise. A method whose `wrt:` names a path must take `&mut self`. `.backward()` writes
 that field's gradient slot after the call returns, and the receiver stays mutably borrowed until then.
-From [`examples/showcase/frozen_features.nr`](../../examples/showcase/frozen_features.nr), where only
+From [`examples/integration/training/frozen_features.nr`](../../examples/integration/training/frozen_features.nr), where only
 the head of a model learns:
 
 ```neuro
@@ -169,7 +169,7 @@ impl Objective {
 }
 ```
 
-This method comes from [`examples/showcase/ridge_objective.nr`](../../examples/showcase/ridge_objective.nr),
+This method comes from [`examples/integration/training/ridge_objective.nr`](../../examples/integration/training/ridge_objective.nr),
 where an ordinary method of the same type trains it with `self.loss(&mut w, &mut b)` and
 `loss.backward()`.
 
@@ -278,7 +278,7 @@ func td_no_grad(w: &mut Tensor<f32, [2, 1]>) -> Tensor<f32, []> {
 }
 ```
 
-Both come from [`examples/showcase/td_value_fit.nr`](../../examples/showcase/td_value_fit.nr). There
+Both come from [`examples/integration/training/td_value_fit.nr`](../../examples/integration/training/td_value_fit.nr). There
 the two train to the same weights bit for bit. The same loss without a fence (the residual gradient)
 settles on a different line.
 
@@ -350,7 +350,7 @@ func robust_fit(w: &mut Tensor<f32, [2, 1]>, limit: f32, sweeps: i32) -> Tensor<
 }
 ```
 
-This function comes from [`examples/showcase/robust_fit.nr`](../../examples/showcase/robust_fit.nr).
+This function comes from [`examples/integration/training/robust_fit.nr`](../../examples/integration/training/robust_fit.nr).
 
 ### Calls
 
@@ -376,7 +376,7 @@ func fit(w: &mut Tensor<f32, [2, 1]>) -> Tensor<f32, []> {
 }
 ```
 
-These functions come from [`examples/showcase/composed_loss.nr`](../../examples/showcase/composed_loss.nr),
+These functions come from [`examples/integration/training/composed_loss.nr`](../../examples/integration/training/composed_loss.nr),
 which also calls a shape-generic helper that branches.
 
 A callee may read a `&mut` parameter but not write through it, and it must return a value. Every call
@@ -426,7 +426,7 @@ func activated_error(w: &mut Tensor<f32, [2, 1]>, activate: (f32) -> f32) -> Ten
 
 `activated_error(&mut w, |v: f32| -> f32 { v * gain })` and
 `activated_error(&mut w, lift >> soften)` each run a derivative made for the function they pass. Both
-calls come from [`examples/showcase/activation_fit.nr`](../../examples/showcase/activation_fit.nr).
+calls come from [`examples/integration/training/activation_fit.nr`](../../examples/integration/training/activation_fit.nr).
 
 The function passed there must be written at the call: a closure or a composition, or a local bound
 to one that captures nothing. A function chosen at run time is refused. That includes a binding set by

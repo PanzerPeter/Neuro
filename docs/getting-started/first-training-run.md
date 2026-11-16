@@ -232,7 +232,7 @@ Python's own `safetensors`, so the file Neuro wrote is one PyTorch and NumPy can
 
 ## See also
 
-- [`examples/showcase/file_training.nr`](../../examples/showcase/file_training.nr): the same run,
+- [`examples/integration/gpu/file_training.nr`](../../examples/integration/gpu/file_training.nr): the same run,
   with the GPU half checked step by step against the CPU and the result scored by a `@gpu`
   function
 - [Tensors](../language-reference/tensors.md): devices, operators and reductions

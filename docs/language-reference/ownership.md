@@ -357,7 +357,7 @@ Three stores are refused:
 | A value holding a borrow of a local, returned | `cannot return a reference to 's'` |
 | The same value stored through a `&mut` parameter or `self` | `cannot store a borrow of 's' through a reference` |
 
-A call is judged conservatively: a signature does not say what the callee keeps, so a `&mut` argument whose type can hold a reference takes every borrow the call's other arguments carry. [`borrowed_records.nr`](../../examples/showcase/borrowed_records.nr) shows these rules working together.
+A call is judged conservatively: a signature does not say what the callee keeps, so a `&mut` argument whose type can hold a reference takes every borrow the call's other arguments carry. [`borrowed_records.nr`](../../examples/integration/ownership/borrowed_records.nr) shows these rules working together.
 
 ## Destructors (`impl Drop`)
 

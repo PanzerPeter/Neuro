@@ -15,7 +15,7 @@
 //
 //   mkdir -p /tmp/tmscopes && cd /tmp/tmscopes
 //   npm init -y && npm install vscode-textmate vscode-oniguruma
-//   node <repo>/tools/tmlanguage_scopes.mjs <repo>/examples/showcase/generic_toolkit.nr
+//   node <repo>/tools/tmlanguage_scopes.mjs <repo>/examples/integration/traits_generics/generic_toolkit.nr
 //
 // Every token is printed as `text  scope…`; a token with no scope prints `(none)`,
 // which is the usual sign of a rule that never ran.

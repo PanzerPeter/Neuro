@@ -299,12 +299,15 @@ fn test_rejects_a_signature_the_harness_cannot_call() {
     );
 }
 
-/// The example and the showcase that carry `@test` functions pass them. The example harness
+/// The example and the integration program that carry `@test` functions pass them. The example harness
 /// runs only their `main`.
 #[test]
 fn the_examples_with_tests_pass_them() {
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    for program in ["basics/unit_tests.nr", "showcase/running_stats.nr"] {
+    for program in [
+        "basics/unit_tests.nr",
+        "integration/records_numbers/running_stats.nr",
+    ] {
         let output = Command::new(neurc_path())
             .arg("test")
             .arg(examples.join(program))

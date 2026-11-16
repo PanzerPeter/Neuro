@@ -176,80 +176,103 @@ modules/reexports.nr    10
 modules/shapes/area.nr  module
 modules/shapes/mod.nr   module
 
-# --- showcase: bigger programs proving features work together ---------------
-showcase/activation_fit.nr           22
-showcase/attention_head.nr           7
-showcase/batch_arena.nr              4
-showcase/bin_tally.nr                53
-showcase/borrow_discipline.nr        48
-showcase/borrowed_records.nr         48
-showcase/borrowed_text.nr            34
-showcase/buffered_report.nr          40
-showcase/checkpoint_resume.nr        5
-showcase/closures.nr                 236
-showcase/composed_loss.nr            13
-showcase/config_manifest.nr          80
-showcase/derived_records.nr          122
-showcase/displaced_owners.nr         8
-showcase/enum_records.nr             46
-showcase/field_report.nr             63
-showcase/file_training.nr            12  gpu
-showcase/frozen_features.nr          23
-showcase/generic_toolkit.nr          96
-showcase/gpu_fallback.nr             3
-showcase/gpu_layer.nr                3  gpu
-showcase/heat_diffusion.nr           100  gpu
-showcase/shared_views.nr             43
-showcase/train_predict.nr            3  gpu
-showcase/gradient_loss.nr            45
-showcase/grid_update.nr              50
-showcase/held_destruction.nr         5
-showcase/incident_desk.nr            33
-showcase/inventory_ledger.nr         249
-showcase/job_queue.nr                169
-showcase/log_builder.nr              64
-showcase/logistic_fit.nr             6
-showcase/mixed_precision.nr          6
-showcase/model_shapes.nr             232
-showcase/mutable_borrows.nr          47
-showcase/named_axes.nr               70
-showcase/newton_fit.nr               240
-showcase/num_algorithms.nr           33
-showcase/optimizer_step.nr           32
-showcase/owned_aggregates.nr         34
-showcase/owned_catalog.nr            15
-showcase/perceptron.nr               8
-showcase/precision_sweep.nr          2
-showcase/quantized_readings.nr       3
-showcase/rank_free_layers.nr         22
-showcase/ranked_batch.nr             130
-showcase/ranked_finish.nr            176
-showcase/render_settings.nr          99
-showcase/replay_buffer.nr            79
-showcase/run_journal.nr              5
-showcase/ridge_objective.nr          23
-showcase/robust_fit.nr               23
-showcase/running_stats.nr            5
-showcase/sample_audit.nr             177
-showcase/scan_guard.nr               160
-showcase/score_sheet.nr              183
-showcase/season_table.nr             116
-showcase/sensor_pipeline.nr          57
-showcase/sensor_windows.nr           85
-showcase/settings_loader.nr          77
-showcase/shape_traits.nr             143
-showcase/simulation.nr               2
-showcase/status_report.nr            34
-showcase/stored_text.nr              95
-showcase/stream_pipeline.nr          189
-showcase/td_value_fit.nr             9
-showcase/telemetry/main.nr           85
-showcase/telemetry/report/format.nr  module
-showcase/telemetry/report/mod.nr     module
-showcase/telemetry/stats.nr          module
-showcase/transient_text.nr           86
-showcase/typed_channels.nr           108
-showcase/unit_types.nr               94
-showcase/vector_physics.nr           35
-showcase/word_scanner.nr             27
+# --- showcase: a few flagship programs, each worth reading on its own --------
+showcase/attention_head.nr                          7
+showcase/borrow_discipline.nr                       48
+showcase/checkpoint_resume.nr                       5
+showcase/gpu_fallback.nr                            3
+showcase/heat_diffusion.nr                          100  gpu
+showcase/named_axes.nr                              70
+showcase/newton_fit.nr                              240
+showcase/rank_free_layers.nr                        22
+showcase/train_predict.nr                           3  gpu
+showcase/trainer/main.nr                            20
+showcase/trainer/data.nr                            module
+showcase/trainer/model.nr                           module
+showcase/trainer/optim/mod.nr                       module
+showcase/trainer/optim/schedule.nr                  module
+showcase/trainer/train.nr                           module
 
+# --- integration/training: autodiff and training loops ----------------------
+integration/training/activation_fit.nr              22
+integration/training/composed_loss.nr               13
+integration/training/frozen_features.nr             23
+integration/training/gradient_loss.nr               45
+integration/training/logistic_fit.nr                6
+integration/training/ridge_objective.nr             23
+integration/training/robust_fit.nr                  23
+integration/training/run_journal.nr                 5
+integration/training/td_value_fit.nr                9
+
+# --- integration/gpu: GPU kernels and device tensors ------------------------
+integration/gpu/file_training.nr                    12  gpu
+integration/gpu/gpu_layer.nr                        3  gpu
+
+# --- integration/tensors: tensor surface beyond the feature examples --------
+integration/tensors/mixed_precision.nr              6
+integration/tensors/model_shapes.nr                 232
+integration/tensors/optimizer_step.nr               32
+integration/tensors/precision_sweep.nr              2
+integration/tensors/ranked_batch.nr                 130
+integration/tensors/replay_buffer.nr                79
+
+# --- integration/ownership: moves, borrows, Drop and owned text -------------
+integration/ownership/batch_arena.nr                4
+integration/ownership/borrowed_records.nr           48
+integration/ownership/borrowed_text.nr              34
+integration/ownership/displaced_owners.nr           8
+integration/ownership/grid_update.nr                50
+integration/ownership/held_destruction.nr           5
+integration/ownership/incident_desk.nr              33
+integration/ownership/mutable_borrows.nr            47
+integration/ownership/owned_aggregates.nr           34
+integration/ownership/owned_catalog.nr              15
+integration/ownership/stored_text.nr                95
+integration/ownership/transient_text.nr             86
+
+# --- integration/text_collections: strings, collections and iteration -------
+integration/text_collections/buffered_report.nr     40
+integration/text_collections/config_manifest.nr     80
+integration/text_collections/field_report.nr        63
+integration/text_collections/inventory_ledger.nr    249
+integration/text_collections/log_builder.nr         64
+integration/text_collections/ranked_finish.nr       176
+integration/text_collections/score_sheet.nr         183
+integration/text_collections/sensor_windows.nr      85
+integration/text_collections/status_report.nr       34
+integration/text_collections/stream_pipeline.nr     189
+integration/text_collections/word_scanner.nr        27
+
+# --- integration/traits_generics: traits, generics and closures -------------
+integration/traits_generics/bin_tally.nr            53
+integration/traits_generics/closures.nr             236
+integration/traits_generics/derived_records.nr      122
+integration/traits_generics/generic_toolkit.nr      96
+integration/traits_generics/shape_traits.nr         143
+integration/traits_generics/shared_views.nr         43
+integration/traits_generics/typed_channels.nr       108
+
+# --- integration/records_numbers: structs, enums and numbers ----------------
+integration/records_numbers/enum_records.nr         46
+integration/records_numbers/num_algorithms.nr       33
+integration/records_numbers/perceptron.nr           8
+integration/records_numbers/quantized_readings.nr   3
+integration/records_numbers/render_settings.nr      99
+integration/records_numbers/running_stats.nr        5
+integration/records_numbers/season_table.nr         116
+integration/records_numbers/simulation.nr           2
+integration/records_numbers/unit_types.nr           94
+integration/records_numbers/vector_physics.nr       35
+
+# --- integration/errors_flow: errors and control flow -----------------------
+integration/errors_flow/job_queue.nr                169
+integration/errors_flow/sample_audit.nr             177
+integration/errors_flow/scan_guard.nr               160
+integration/errors_flow/sensor_pipeline.nr          57
+integration/errors_flow/settings_loader.nr          77
+
+# --- integration/multi_file: modules, imports and visibility ----------------
+integration/multi_file/telemetry/main.nr            85
+integration/multi_file/telemetry/report/format.nr   module
+integration/multi_file/telemetry/report/mod.nr      module
+integration/multi_file/telemetry/stats.nr           module

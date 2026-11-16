@@ -185,6 +185,6 @@ println("took {start.elapsed().as_secs_f64():.3} s")
   typed by their annotations, and a read that does not match
 - [`examples/showcase/checkpoint_resume.nr`](../../examples/showcase/checkpoint_resume.nr): a training
   run that checkpoints its weights and resumes to the same result
-- [`examples/showcase/run_journal.nr`](../../examples/showcase/run_journal.nr): a run that saves its
+- [`examples/integration/training/run_journal.nr`](../../examples/integration/training/run_journal.nr): a run that saves its
   journal, reloads it and resumes
 - [Strings](strings.md#parsing-text): `.parse::<T>()`, for turning text read from a file into values

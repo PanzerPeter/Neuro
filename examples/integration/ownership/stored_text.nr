@@ -1,0 +1,117 @@
+// Text that is built, stored, and released by whoever stored it. Integration
+// example: a struct with `impl` methods, `[T; N]` arrays iterated with `for x in &a`,
+// tuples, place expressions (`self.total += n`, `entry.label = ...`), `StringBuilder`,
+// interpolation, and `&string` parameters. Every buffer here reaches a position that
+// outlives the expression that built it, so its holder releases it: a struct field, an
+// array or tuple element, a function's return value (released by the caller), or a by-value
+// argument (released by the callee). A literal in the same position owns nothing, which the
+// string itself records, so its release frees nothing. `transient_text.nr` covers buffers no
+// position ever stores.
+
+const ROUNDS: i32 = 300
+
+struct Entry {
+    label: string,
+    weight: i32
+}
+
+struct Ledger {
+    total: u64,
+    rows: i32
+}
+
+impl Ledger {
+    // A place expression on a field: the compound assignment reads and writes
+    // the same storage.
+    func record(&mut self, n: u64) {
+        self.total += n
+        self.rows += 1
+    }
+}
+
+// Hands back a buffer it allocated, which the caller then owns.
+func tagged(kind: &string, id: i32) -> string {
+    return kind + "-" + "{id}"
+}
+
+// Takes its argument by value and keeps none of it, so a buffer built for this
+// call is released when it returns.
+func width(text: string) -> u64 {
+    return text.len()
+}
+
+// Stores its argument in the value it hands back, so the buffer outlives the
+// call and leaves with the result.
+func wrap(text: string, weight: i32) -> Entry {
+    return Entry { label: text, weight: weight }
+}
+
+func main() -> i32 {
+    val kind: string = "row"
+
+    // A field, an array element and a tuple element each take a fresh buffer and
+    // release it when their holder is destroyed. The literal in the same shape
+    // owns nothing, so the same release leaves it alone.
+    mut ledger = Ledger { total: 0, rows: 0 }
+    mut i: i32 = 0
+    while i < ROUNDS {
+        val entries: [Entry; 2] = [
+            Entry { label: kind + "-a", weight: 1 },
+            Entry { label: "static", weight: 2 }
+        ]
+        for entry in &entries {
+            ledger.record(entry.label.len())
+        }
+
+        val pair: (string, i32) = (kind + "-pair", i)
+        ledger.record(pair.0.len())
+
+        // Reassignment through a field place: the displaced buffer goes, and the
+        // field owns the replacement.
+        mut current = Entry { label: kind + "-first", weight: 0 }
+        current.label = kind + "-second"
+        ledger.record(current.label.len())
+
+        // The callee allocated the result, so this binding owns it.
+        val label: string = tagged(&kind, i)
+        ledger.record(label.len())
+
+        // Built for the call and released by the callee.
+        ledger.record(width(kind + "-probe"))
+
+        i += 1
+    }
+
+    // Once, outside the loop: `wrap` STORES its argument in the value it hands
+    // back, so the buffer outlives the call, and the binding that takes the
+    // holder releases it with the holder.
+    val kept = wrap(kind + "-kept", 3)
+    ledger.record(kept.label.len())
+
+    // Six positions per round: the two array labels (5 and 6 bytes), the tuple
+    // element (8), the reassigned field (10) and the call's argument (9) are
+    // fixed at 38; the tagged label grows with the round's digits, for 1990 over
+    // the range. The one `wrap` afterwards adds its row and its 8 bytes.
+    if ledger.rows != ROUNDS * 6 + 1 {
+        return 91
+    }
+    if ledger.total != 13398 {
+        return 92
+    }
+
+    // The same shapes feeding a builder, to show the stored buffers and the
+    // transient ones coexist.
+    mut report = StringBuilder::new()
+    report.push_str(tagged(&kind, 1))
+    report.push_str(";")
+    report.push_str(tagged(&kind, 2))
+    val transcript: string = report.to_string()
+    if transcript != "row-1;row-2" {
+        return 93
+    }
+
+    println("rows: {ledger.rows}")
+    println("bytes: {ledger.total}")
+    println("transcript: {transcript}")
+    return (ledger.total % 251) as i32
+}

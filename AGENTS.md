@@ -180,7 +180,9 @@ Where tests go:
   two ways: its `main` return value is its process exit code, registered in
   `examples/expected.txt`, and its stdout is fixed byte for byte in a sibling
   `.out` file. `compiler/neurc/tests/examples.rs` checks both. Adding an
-  example means adding both pins.
+  example means adding both pins. Programs that combine features live under
+  `examples/integration/<theme>/`. `examples/showcase/` is a curated handful
+  of flagships: nothing is added there without the maintainer's say.
 - **Architecture tests**: `compiler/neurc/tests/architecture_tests.rs`
   enforces the VSA dependency rules. If it fails, the fix is the dependency,
   not the test.

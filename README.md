@@ -111,8 +111,8 @@ input 1.0 -> 0.40  fires: true
 ```
 
 More programs, each pinned to its exact exit code and printed output, are in
-[examples/](examples/); [examples/showcase/](examples/showcase/) holds the ones that combine
-several features at once.
+[examples/](examples/); [examples/showcase/](examples/showcase/) holds the few worth reading first, and
+[examples/integration/](examples/integration/) the larger ones that combine several features at once.
 
 ---
 

@@ -376,7 +376,10 @@ whichever module it was raised. A panic inside a prelude body names `<std>/prelu
   variants named with no import at all, exit code `25`
 - [`examples/modules/no_prelude.nr`](../../examples/modules/no_prelude.nr), the `@no_prelude` opt-out and
   imports from `std::prelude`, exit code `42`
-- [`examples/showcase/telemetry/`](../../examples/showcase/telemetry/), file modules, an inline block, an
+- [`examples/showcase/trainer/`](../../examples/showcase/trainer/main.nr), a training project split over
+  `data`, `model`, `train` and a directory module `optim` with a child and a re-export, with private
+  fields and tensor shapes that cross every module boundary in the types
+- [`examples/integration/multi_file/telemetry/`](../../examples/integration/multi_file/telemetry/), file modules, an inline block, an
   `export import` re-export, `export` visibility, the implicit prelude, one module opting out with
   `@no_prelude` and importing `Option` from `std::prelude`, and a root `Range` beside the library's,
   working alongside structs, generics, `Vec<T>`, `Option`, and enums

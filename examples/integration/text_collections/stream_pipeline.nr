@@ -1,0 +1,300 @@
+// The iteration protocol carrying a small stream pipeline. Integration example:
+// `IntoIterator` and `Iterator` with associated types, `.map` and `.filter` both as head
+// adapters and as adapter values a function returns, a range value strided and reversed
+// into the same adapters, an array walked by borrow with `.iter()` into an adapter chain a
+// function returns as `impl Iterator<Item = i32>`, a bound `S: Iterator<Item = i32>`,
+// generic structs, closures in a struct field, `|>` and `>>` over every function-value
+// spelling, `Option`, and `for`-in. A source, a transform and a filter are three types,
+// each an `Iterator`, and one `for` head drives the chain one element at a time. No
+// intermediate array is built.
+
+// A container. It holds no cursor, so it may be walked more than once: each `for`
+// head asks it for a fresh iterator through `into_iter()`.
+
+@derive(Copy, Clone)
+struct Readings {
+    samples: [i32; 6]
+}
+
+// The cursor `Readings` hands out. `Copy`, so it can be an adapter's type argument.
+@derive(Copy, Clone)
+struct ReadingsIter {
+    samples: [i32; 6],
+    position: u64
+}
+
+impl Iterator for ReadingsIter {
+    type Item = i32
+
+    func next(&mut self) -> Option<i32> {
+        if self.position >= self.samples.len() {
+            return Option::None
+        }
+        val sample = self.samples[self.position]
+        self.position += 1
+        Option::Some(sample)
+    }
+}
+
+impl Readings {
+    // A whole-container reduction, so it reads naturally as a pipeline stage taking
+    // the floor as its argument.
+    func total_above(&self, floor: i32) -> i32 {
+        mut sum = 0
+        for sample in self.samples {
+            if sample > floor {
+                sum += sample
+            }
+        }
+        sum
+    }
+
+    // An associated function: `Readings::cap` is a function value like any other.
+    func cap(total: i32) -> i32 {
+        if total > 99 { 99 } else { total }
+    }
+}
+
+impl IntoIterator for Readings {
+    type Item = i32
+    type Iter = ReadingsIter
+
+    func into_iter(self) -> ReadingsIter {
+        ReadingsIter { samples: self.samples, position: 0 }
+    }
+}
+
+// A transform. The `Iterator<Item = i32>` bound is what lets the body call
+// `self.inner.next()` and know an `i32` comes back.
+@derive(Copy, Clone)
+struct Scaled<S> {
+    inner: S,
+    factor: i32
+}
+
+impl<S: Iterator<Item = i32>> Iterator for Scaled<S> {
+    type Item = i32
+
+    func next(&mut self) -> Option<i32> {
+        match self.inner.next() {
+            Option::Some(value) => Option::Some(value * self.factor),
+            Option::None => Option::None
+        }
+    }
+}
+
+// A filter. One `next()` may pull several from the source, which is exactly why a
+// filter has to be an iterator of its own rather than a shape the loop can special-case.
+@derive(Copy, Clone)
+struct Above<S> {
+    inner: S,
+    floor: i32
+}
+
+impl<S: Iterator<Item = i32>> Iterator for Above<S> {
+    type Item = i32
+
+    func next(&mut self) -> Option<i32> {
+        loop {
+            match self.inner.next() {
+                Option::Some(value) => {
+                    if value > self.floor {
+                        break Option::Some(value)
+                    }
+                }
+                Option::None => { break Option::None }
+            }
+        }
+    }
+}
+
+// A transform carrying a closure instead of a constant. The closure is stored in the
+// struct and called per element, so the adapter is reusable for any i32 → i32 rule.
+struct Shaped<S> {
+    inner: S,
+    rule: (i32) -> i32
+}
+
+impl<S: Iterator<Item = i32>> Iterator for Shaped<S> {
+    type Item = i32
+
+    func next(&mut self) -> Option<i32> {
+        match self.inner.next() {
+            Option::Some(value) => {
+                val apply = self.rule
+                Option::Some(apply(value))
+            }
+            Option::None => Option::None
+        }
+    }
+}
+
+// Two ordinary functions, used below as pipeline stages. Nothing marks them as such:
+// a function name is already a function value.
+func widen(total: i32) -> i32 {
+    total * 2
+}
+
+func describe(total: i32) -> string {
+    "piped total {total}"
+}
+
+// `Scaled` + `Above` again, built by the adapter methods instead of two hand-written types.
+// On an iterator value `.map` and `.filter` return the prelude's `Map` and `Filter`, so the
+// whole chain is a value with a type a signature can name. The closures copy `factor` and
+// `floor` in, so the returned chain owns everything it reads.
+func boosted(readings: Readings, factor: i32, floor: i32) -> Filter<Map<ReadingsIter, i32, i32>, i32> {
+    readings.into_iter().map(|sample| sample * factor).filter(|scaled| *scaled > floor)
+}
+
+// The samples walked by borrow. `.iter()` is the library's `Iter<i32>`, yielding `&i32`,
+// so the chain over it may leave the function: it borrows the caller's samples, not a
+// copy of them. The closures read through each borrow, so neither needs a `*`. Its type,
+// `Map<Filter<Iter<i32>, &i32>, &i32, i32>`, is long to write, so the signature promises
+// only what a caller uses: some iterator of `i32`. The compiler fills in the rest.
+func spikes(samples: &[i32], floor: i32) -> impl Iterator<Item = i32> {
+    samples.iter().filter(|sample| sample > floor).map(|sample| sample * 2)
+}
+
+// Any stream of `i32`, an adapter chain included, consumed through the bound alone.
+func stream_total<S: Iterator<Item = i32>>(stream: S) -> i32 {
+    mut total = 0
+    for value in stream {
+        total += value
+    }
+    total
+}
+
+func keep<T>(value: T) -> T {
+    value
+}
+
+// A higher-order function taking the composed stage as an ordinary `(i32) -> string`
+// value: nothing in the signature knows the argument was built with `>>`.
+func describe_widest(readings: Readings, summarize: (i32) -> string) -> string {
+    summarize(readings.total_above(8))
+}
+
+func main() -> i32 {
+    val readings = Readings { samples: [3, 8, 1, 12, 5, 9] }
+
+    // The container in a `for` head: `into_iter()` once, `next()` per step.
+    mut raw_total = 0
+    for sample in readings {
+        raw_total += sample
+    }
+    println("raw samples total {raw_total}")
+
+    // `readings` is Copy and stateless, so the second walk starts over. The position
+    // an enumerated head binds is the loop's own count, not anything the source holds.
+    mut counted = 0
+    for (position, sample) in readings.enumerate() {
+        println("sample {position:>2}: {sample:>3}")
+        counted += 1
+    }
+    println("walked {counted} samples")
+
+    // Two adapters stacked over one source, driven by a single `for` head. Nothing
+    // between the source and the loop is ever materialized.
+    val pipeline = Above {
+        inner: Scaled { inner: readings.into_iter(), factor: 3 },
+        floor: 20
+    }
+    mut kept: Vec<i32> = Vec::new()
+    for value in pipeline {
+        kept.push(value)
+    }
+
+    mut kept_total = 0
+    for value in &kept {
+        println("kept {value}")
+        kept_total += value
+    }
+    println("kept {kept.len()} of {counted}, totalling {kept_total}")
+
+    // The same source through a closure-carrying adapter.
+    val shaped = Shaped {
+        inner: readings.into_iter(),
+        rule: |sample: i32| -> i32 { sample % 5 }
+    }
+    mut remainders = 0
+    for value in shaped {
+        remainders += value
+    }
+    println("sample remainders mod 5 total {remainders}")
+
+    // The same pipeline written with the compiler's own adapters. In a `for` head
+    // `.map` and `.filter` fold into the loop instead of building values, so one head
+    // expresses what `Scaled` + `Above` needed two types for, and the head they
+    // decorate is the very same `IntoIterator` container.
+    mut inline_total = 0
+    for value in readings
+        .map(|sample: i32| -> i32 { sample * 3 })
+        .filter(|scaled: i32| -> bool { scaled > 20 }) {
+        inline_total += value
+    }
+    println("inline pipeline totals {inline_total}, matching {kept_total}")
+
+    // The pipeline as a value: built by one function, driven by another that knows only
+    // that it yields `i32`. Bound, `.enumerate()` is a value too, yielding position-value
+    // pairs; written straight into a `for` head it would be the head form instead.
+    val value_total = stream_total(boosted(readings, 3, 20))
+    println("value pipeline totals {value_total}, matching {kept_total}")
+    val ranked = boosted(readings, 3, 20).enumerate()
+    for entry in ranked {
+        println("boosted {entry.0}: {entry.1}")
+    }
+
+    // A range is a value too: the sample positions, newest first and every other one, are
+    // a `Step<u64>` that the same `.map` and the same consumer take. Unbound, the bounds
+    // and the stride would have been a `for`-head form, and nothing could have returned it.
+    val every_other = (0..readings.samples.len()).rev().step(2)
+    val alternate = every_other.map(|i| readings.samples[i])
+    println("every other sample, newest first, totals {stream_total(alternate)}")
+
+    // The same samples borrowed in place rather than copied into an iterator: the chain
+    // `spikes` returns reads `readings.samples` itself, through the same consumer.
+    println("spikes above 8, doubled, total {stream_total(spikes(&readings.samples, 8))}")
+
+    // An adapted head over an array, enumerated. The position counts what the
+    // chain YIELDED, so it stays dense however much the filter drops.
+    val labels: [i32; 6] = [4, 11, 6, 15, 2, 19]
+    mut flagged = 0
+    for (rank, value) in labels.filter(|v: i32| -> bool { v > 10 }).enumerate() {
+        println("rank {rank:>2} flagged {value:>3}")
+        flagged += value
+    }
+    println("flagged {flagged} across the run")
+
+    // The same container driven by the pipeline operator instead of a `for` head.
+    // `value |> f` is `f(value)`: the chain reads top to bottom in the order the
+    // stages run, where the nested spelling `describe(widen(readings.total_above(4)))`
+    // has to be read inside out. A closure literal stage takes its parameter type
+    // from the value piped into it, so it needs no annotation.
+    val report = 4
+        |> readings.total_above
+        |> widen
+        |> (|total| total - flagged)
+        |> describe
+    println("{report}")
+
+    // `>>` names the chain instead of pushing a value through it. The composed
+    // value is an ordinary function, so it is applied twice here and handed to a
+    // higher-order function the third time, over the very same free functions the
+    // pipeline above used as stages.
+    val summarize = widen >> describe
+    println("{summarize(raw_total)}")
+    println("{summarize(kept_total)}")
+    println("{describe_widest(readings, summarize)}")
+
+    // Every function value composes. The first stage, a bound method, fixes the
+    // composed function's parameter type; each later stage is called with the one
+    // before it, so the closure needs no annotation and `keep` no turbofish. The
+    // composition borrows `readings` for the bound method while it lives.
+    val audit = readings.total_above >> Readings::cap >> (|total| total - flagged) >> keep >> describe
+    println("{audit(4)}")
+    val doubled = keep::<i32> >> widen
+    println("{doubled(flagged) |> describe}")
+
+    return raw_total + counted + kept_total + remainders + flagged
+}

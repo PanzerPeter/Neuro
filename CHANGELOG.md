@@ -10,6 +10,17 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.53.1] - 2026-11-16
+
+### Changed
+
+- `examples/showcase/` now holds only ten hand-picked flagship programs, among them a new
+  multi-file one, `trainer/`, a small training project split into data, model, optimizer and
+  loop modules. The other programs, which prove features work together, moved to
+  `examples/integration/` in theme folders (`training`, `gpu`, `tensors`, `ownership`,
+  `text_collections`, `traits_generics`, `records_numbers`, `errors_flow`, `multi_file`). Pins,
+  docs links and the examples README index follow the new paths.
+
 ## [5.53.0] - 2026-11-16
 
 ### Added

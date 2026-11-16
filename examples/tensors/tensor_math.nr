@@ -5,7 +5,7 @@
 // moved. Out-of-domain inputs follow IEEE 754 and are not diagnosed: `.log()` of 0 is
 // `-inf`, and `.sqrt()` of a negative is NaN. `f16` and `bf16` compute in `f32` and round
 // once. In a `@grad` body each is differentiated by its own rule (see
-// `showcase/logistic_fit.nr`).
+// `integration/training/logistic_fit.nr`).
 
 // A borrowed receiver: `x` stays with the caller.
 

@@ -830,7 +830,7 @@ The mistakes below are the ones a user is likely to hit:
 | `x` used after `if val Some(x) = o { ... }` | ``undefined variable 'x'`` |
 | `while val Some(x) = v.pop() { break x }` | ``'break' with a value is only allowed in a 'loop'`` |
 
-Runnable programs: [`examples/control_flow/if_val.nr`](../../examples/control_flow/if_val.nr) and [`examples/showcase/job_queue.nr`](../../examples/showcase/job_queue.nr), which drains a queue with `while val`.
+Runnable programs: [`examples/control_flow/if_val.nr`](../../examples/control_flow/if_val.nr) and [`examples/integration/errors_flow/job_queue.nr`](../../examples/integration/errors_flow/job_queue.nr), which drains a queue with `while val`.
 
 ## Pool Blocks
 
@@ -989,7 +989,7 @@ A type with no destructor at all needs neither method: its memory goes back with
 | `PoolAware` (with or without `Drop`) | yes, `bulk_release` in reverse construction order at the block's exit |
 | `Drop` only | no, a compile error naming the pool |
 
-See [`examples/ownership/pool_arena.nr`](../../examples/ownership/pool_arena.nr) for a runnable program, and [`examples/showcase/batch_arena.nr`](../../examples/showcase/batch_arena.nr) for a batched forward pass built inside one.
+See [`examples/ownership/pool_arena.nr`](../../examples/ownership/pool_arena.nr) for a runnable program, and [`examples/integration/ownership/batch_arena.nr`](../../examples/integration/ownership/batch_arena.nr) for a batched forward pass built inside one.
 
 ## See also
 
