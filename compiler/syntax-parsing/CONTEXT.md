@@ -15,6 +15,9 @@ in an error names that file. `parse(source)` is `parse_at(source, 0)`.
 `ParseError::span()` gives the range an error points at, `None` for `UnexpectedEof` and
 `MaxDepthExceeded`, which have no token to point at. A wrapped `LexError` answers with its own.
 
+`kind_impl_extents(items: &mut [Item])` is the second pipeline entry point: the driver runs it
+over the resolved program (see **Size parameters are decided here** below).
+
 `parse_expr(source: &str) -> Result<Expr, ParseError>` is also public. It is not a second
 pipeline entry point: no slice and no driver calls it. It exists so `tests/error_tests.rs`
 can drive the Pratt parser over a bare expression and assert on the `ParseError` a fragment
@@ -238,15 +241,17 @@ the tuple-index parse, so it needs no expression grammar of its own.
   required method has no `{` to end its header, and `inject_trait_defaults` copies all three
   fields into the impl. An impl method's parameters shadow a `type` alias of the same name, as a
   function's do.
-- **Shape parameters are const parameters.** A bare name used as a tensor extent is sugar for
-  a `const NAME: u32` parameter, so `rekind_shape_params` (`parser/item_functions.rs`) rewrites
-  every bound-less `GenericParamKind::Type` a signature uses as an extent into
-  `GenericParamKind::Const(u32)` once the parameter list and return type are parsed. This is
-  the same shape of rewrite `desugar_impl_trait_params` does next to it, and for the same
-  reason: one representation reaches every later pass, so the checker, monomorphization, and
-  `where`-predicate evaluation all see an ordinary const parameter. A parameter carrying trait
-  bounds is left alone (a bound names a type), and its extent is then reported by the checker
-  as an unknown dimension.
+- **Size parameters are decided here.** A bare name used as an array length or a tensor
+  extent is a size parameter, so `rekind_size_params` (`parser/size_params.rs`) rewrites every
+  bound-less `GenericParamKind::Type` that a function or method signature, a struct's fields or
+  an enum's payloads use that way into `GenericParamKind::Extent`. This is the same shape of
+  rewrite `desugar_impl_trait_params` does, and for the same reason: one representation reaches
+  every later pass. A parameter carrying trait bounds is left alone (a bound names a type), and
+  so is a written `const` one, which the checker then refuses in the size position.
+  An `impl` header passes its names to a type declared elsewhere, so `kind_impl_extents` settles
+  it from that declaration's kinds: `parse_program` runs it over the file, skipping a name the
+  file declares twice, and `neurc` runs it again over the resolved program, where every name is
+  canonical and a type from another module is in reach.
 - **Tensor constructor turbofish.** `Tensor::<f32, [3, 3]>::zeros()` is the one turbofish that
   qualifies a *type* rather than a callee, so `parse_tensor_qualified_call` handles it in the
   identifier-primary arm instead of the general infix `::` arm (which still requires a `(`

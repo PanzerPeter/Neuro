@@ -24,14 +24,18 @@ pub const PRELUDE_MODULE: ModuleId = ModuleId::MAX;
 /// What a generic parameter binds.
 ///
 /// A `Type` parameter (`T`) is substituted with a concrete type at each instantiation.
-/// A `Const` parameter (`const N: u32`) is a compile-time *value* of the carried
-/// integer type, usable in value position and as an array length; each distinct
-/// value produces a distinct monomorphized instance.
+/// An `Extent` and a `Const` parameter are both compile-time *values*, and each distinct
+/// value produces a distinct monomorphized instance; only an extent may size anything.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GenericParamKind {
     /// A type parameter `T`.
     Type,
-    /// A const (value) parameter `const N: T`, carrying its declared integer type.
+    /// A size parameter declared by bare name and used as an array length or a tensor
+    /// extent (`[T; N]`, `[M, K]`), or passed to a type's extent in an `impl` header. Its
+    /// value is a `u64`. The parser decides it from how the declaration uses the name.
+    Extent,
+    /// A const (value) parameter `const N: T`, carrying its declared integer type. It
+    /// sizes nothing.
     Const(Type),
 }
 

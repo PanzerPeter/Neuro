@@ -47,7 +47,7 @@ func row_sum<N>(row: &Tensor<i32, [N]>) -> i32
 where N > 0
 {
     mut total = 0
-    // The extent is a `const N: u32`, so the range it drives is cast to the `i32`
+    // The extent is a `u64`, so the range it drives is cast to the `i32`
     // the running total is written in.
     for i in 0..(N as i32) {
         total += row[i]

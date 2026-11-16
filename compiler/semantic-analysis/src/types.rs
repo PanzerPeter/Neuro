@@ -211,7 +211,7 @@ pub enum Type {
     /// when they name the same trait (nominal).
     DynObject(std::string::String),
     /// The position `thread_id` or `block_id` names inside a `@kernel` body, read whole:
-    /// three `u32` fields, `.x`, `.y` and `.z`. It is `Copy`, no annotation can name it,
+    /// three `u64` fields, `.x`, `.y` and `.z`. It is `Copy`, no annotation can name it,
     /// and a value of it is only read by field or bound whole by a `val`.
     GridPosition,
     /// An unresolved generic type parameter `T` inside a generic function body.

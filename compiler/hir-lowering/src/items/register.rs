@@ -503,7 +503,7 @@ impl Lowerer {
             .unwrap_or_default()
     }
 
-    /// Resolve each const generic parameter's declared integer type, so a value
+    /// Resolve each value parameter's integer type (an extent's is `u64`), so a value
     /// reference to one in a monomorphized body lowers to a correctly-typed literal.
     pub(super) fn const_param_types(
         &mut self,
@@ -511,8 +511,14 @@ impl Lowerer {
     ) -> Result<std::collections::HashMap<String, HirType>, LoweringError> {
         let mut out = std::collections::HashMap::new();
         for gp in generics {
-            if let ast_types::GenericParamKind::Const(ty) = &gp.kind {
-                out.insert(gp.name.name.clone(), self.resolve_type(ty)?);
+            match &gp.kind {
+                ast_types::GenericParamKind::Const(ty) => {
+                    out.insert(gp.name.name.clone(), self.resolve_type(ty)?);
+                }
+                ast_types::GenericParamKind::Extent => {
+                    out.insert(gp.name.name.clone(), HirType::U64);
+                }
+                ast_types::GenericParamKind::Type => {}
             }
         }
         Ok(out)

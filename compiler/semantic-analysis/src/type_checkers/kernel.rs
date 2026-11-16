@@ -141,7 +141,7 @@ impl TypeChecker {
     }
 
     /// `thread_id.x` or `block_id.z` inside a kernel body, where no binding of that name
-    /// shadows it, or `t.x` on a local bound to either whole, as the `u32` it reads. `None`
+    /// shadows it, or `t.x` on a local bound to either whole, as the `u64` it reads. `None`
     /// when `object` is anything else.
     pub(crate) fn check_grid_position(
         &mut self,
@@ -161,7 +161,7 @@ impl TypeChecker {
             );
             self.kernel_error(&problem, field.span);
         }
-        Some(Type::U32)
+        Some(Type::U64)
     }
 
     /// Whether `name` is `thread_id` or `block_id` as the kernel body sees them: inside a

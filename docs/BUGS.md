@@ -5,6 +5,36 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-169: a float literal in a sized array field of an inferred generic struct is an `f64`
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`check_generic_struct_literal` in
+  `type_checkers/expressions/struct_exprs.rs`)
+- **Severity**: minor. Valid source is refused; nothing miscompiles
+
+**Minimal repro**
+
+```neuro
+struct History<CAP> { seen: [f32; CAP] }
+
+func main() -> i32 {
+    val h = History { seen: [0.0, 0.5] }
+    return 0
+}
+```
+
+Expected: `h` is a `History<2>`. Observed: `type mismatch: expected [f32; 2], found [f64; 2]`.
+
+**Root cause**: a field whose declared type names a parameter gets no expected type unless the
+context names the instance, so the literal falls back to `f64`. `[f32; CAP]` names only a size,
+and its element type is already concrete.
+
+**Workaround**: annotate the binding (`val h: History<2> = ...`) or suffix the literal
+(`0.0f32`).
+
+**Fix sketch**: give such a field the declared type with its length left to inference, so the
+array literal takes its element type from it and still binds `CAP` from its length.
+
 ## BUG-168: a `match` on a diverging scrutinee reports a template parameter
 
 - **Status**: open, confirmed
@@ -264,9 +294,9 @@ func main() -> i32 {
 ```
 
 Expected: exit code 13. Observed: `module verification failed: "Invalid InsertValueInst
-operands!"`. The literal's fields are lowered without their declared types, so `&a` stays a
-pointer instead of being unsized to the `{ ptr, i64 }` view, and `5` is typed `i32` for the `u64`
-field. A generic field that is not a slice (`struct G<A> { x: A, n: u64 }`) lowers correctly.
+operands!"`. A field whose type names a parameter is lowered without it, so `&a` stays a
+pointer instead of being unsized to the `{ ptr, i64 }` view. A generic field that is not a slice
+(`struct G<A> { x: A, n: u64 }`) lowers correctly.
 
 **Workaround**: annotate the binding (`val t: G<i32> = G { ... }`), which compiles and exits 13.
 
@@ -399,16 +429,16 @@ leaves any displaced value holding a tensor alone.
 memory, which the release can test as `__neuro_release` does. Regression tests: the repro in a
 loop under a leak check, and a tensor field inside and outside a `pool`.
 
-## BUG-027: a const generic parameter cannot be passed to another generic call
+## BUG-027: a size parameter cannot be passed to another generic call
 
 - **Status**: open, confirmed
 - **Area**: `semantic-analysis` (generic inference, `unify_array_len` / `seed_turbofish`)
-- **Severity**: major. A generic function cannot delegate to another over its own const
+- **Severity**: major. A generic function cannot delegate to another over its own size
   parameter, by inference or explicitly; the compiler rejects, it does not miscompile
 
-A generic function that takes a const parameter (including a tensor shape parameter, which
-the language reference makes sugar for one) cannot pass that parameter to another generic
-function. Type parameters forward correctly; only const parameters fail.
+A generic function that takes a size parameter (a tensor extent or an array length) cannot
+pass that parameter to another generic function. Type parameters forward correctly; only
+size and const parameters fail.
 
 **Minimal repro**
 
@@ -446,13 +476,15 @@ turbofish argument for parameter 'N' has the wrong kind: a const argument was ex
 so the parameter can be supplied neither way. Calling the same function from a *concrete*
 caller works, and the identical program over a type parameter (`func outer<T>(x: T) -> T {
 inner(x) }`) works, which is what isolates this to const parameters. Arrays hit it too: a
-`func delegate<const N: u32>(a: &[i32; N])` calling a `func sum_arr<const N: u32>` fails the
-same way.
+`func delegate<N>(a: &[i32; N])` calling a `func sum_arr<N>` fails the same way.
 
-A const parameter named as a generic *type's* argument fails the same way. Inside
-`impl<T, const CAP: u32> Buffer<T, CAP>`, `Self` and `Buffer<T, CAP>` both report
+A size parameter named as a generic *type's* argument fails the same way. Inside
+`impl<T, CAP> Buffer<T, CAP>`, `Self` and `Buffer<T, CAP>` both report
 `unknown type name 'CAP'`, because a generic argument that is a bare name resolves as a type.
-Type parameters work in that position, so `Self` in `impl<T> Cell<T>` is fine.
+Type parameters work in that position, so `Self` in `impl<T> Cell<T>` is fine. A signature or
+a field that passes a size to a type (`func f<N>(r: &Ring<N>)`) is one more case: the parser's
+`kind_impl_extents` re-kinds the names an `impl` header passes, but not these, so `N` is still a
+type parameter there.
 
 **Root cause**: two halves, both confirmed in the code.
 
@@ -476,7 +508,8 @@ caller's parameter `N`") not only a `Type::ConstValue`; `unify_array_len` then b
 callee's parameter to it, `substitute_array_len` maps it back to an `ArrayLen::Param` in the
 caller's frame, and the Copy check in `calls.rs` needs a carve-out for it the way
 `ConstValue` already has one. `seed_turbofish` separately has to resolve an identifier
-argument against the enclosing function's const parameters before deciding its kind. The
+argument against the enclosing function's size and const parameters before deciding its kind,
+and `kind_impl_extents` has to re-kind a name a signature or a field passes to a type's size. The
 part to settle first is monomorphization: an instantiation of the outer function has to
 resolve the inner call's symbolic binding to the concrete extent it was instantiated at, and
 whether the existing instantiation walk carries enough context to do that is the question

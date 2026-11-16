@@ -104,7 +104,7 @@ pub enum HirExprKind {
         stmts: Vec<HirStmt>,
     },
     /// `thread_id.x` / `block_id.z` in a `@kernel` body: the running thread's position
-    /// along grid axis `axis` (0 for `x`), a `u32`. Nothing outside a kernel body has one.
+    /// along grid axis `axis` (0 for `x`), a `u64`. Nothing outside a kernel body has one.
     GridPosition {
         of: HirGridIndex,
         axis: u8,

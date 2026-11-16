@@ -1,5 +1,6 @@
 // Feature slice for AST generation and syntax analysis.
-// Public API: the `parse()`, `parse_at()` and `parse_expr()` entry points.
+// Public API: the `parse()`, `parse_at()` and `parse_expr()` entry points, and
+// `kind_impl_extents()` for the resolved program.
 
 mod errors;
 mod parser;
@@ -16,6 +17,7 @@ pub use ast_types::{
     VariantPayload,
 };
 pub use errors::{ParseError, ParseResult};
+pub use parser::size_params::kind_impl_extents;
 
 use lexical_analysis::{tokenize, tokenize_at};
 use parser::Parser;

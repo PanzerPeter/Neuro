@@ -237,7 +237,9 @@ walkers.
   The parser accepts any name. Semantic analysis holds the fixed set some pass acts on
   (`@derive`, `@allow(...)`, `@grad`, `@gpu`, `@kernel`, ...) and rejects every other, so a
   misspelled attribute is an error rather than a silent no-op.
-- **Const generics.** `GenericParamKind` (`Type` / `Const`) on `GenericParam`, `ArraySize`
+- **Size and const generics.** `GenericParamKind` (`Type` / `Extent` / `Const`) on
+  `GenericParam`: `Extent` is a bare name the parser found sizing something (a `u64`),
+  `Const` a written `const NAME: T` that sizes nothing, `ArraySize`
   (`Literal` / `Const`) on `Type::Array`, `TensorExtent` (`Literal` / `Param` / `Dynamic`) inside each
   `TensorDim` of `Type::Tensor.shape`, `GenericArg` (`Type` / `Const`) in `Type::Generic.args`,
   `Expr::Call.type_args` for turbofish, and `where_predicates` on

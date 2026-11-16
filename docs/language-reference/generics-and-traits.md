@@ -101,7 +101,7 @@ func main() -> i32 {
 }
 ```
 
-The turbofish is the only call-site form for explicit generic arguments, and its arguments may be types or const values. A turbofish on a function that declares no type parameters is an error (`turbofish supplies 1 generic argument(s), but 'identity' declares 0`).
+The turbofish is the only call-site form for explicit generic arguments, and its arguments may be types or compile-time values. A turbofish on a function that declares no type parameters is an error (`turbofish supplies 1 generic argument(s), but 'identity' declares 0`).
 
 ```neuro
 func identity<T>(x: T) -> T { x }
@@ -109,17 +109,19 @@ func count<const N: u32>() -> u32 { N }
 
 func main() -> i32 {
     val a = identity::<i32>(5)   // explicit type argument
-    val b = count::<4>()         // explicit const argument
+    val b = count::<4>()         // explicit value argument
     return a + (b as i32)        // 5 + 4 = 9
 }
 ```
 
-## Const (Value) Parameters
+## Size and Const Parameters
 
-A parameter list may declare a **const parameter**, `const NAME: T`, which is a compile-time value of an integer type. It can size an array and be read as a value in the body. Each distinct value is monomorphized into its own specialized code. A function's const parameter is inferred from the length of an array argument:
+Besides types, a parameter list declares compile-time values, in two forms. Each distinct value is monomorphized into its own specialized code.
+
+A **size parameter** is declared by its bare name, like a type parameter. What makes it a size is how the declaration uses it: a name used as an array length or a tensor extent (`[T; N]`, `[M, K]`) is a size, a `u64` value. A function's size parameter is inferred from the length of an array argument:
 
 ```neuro
-func sum<const N: u32>(a: [i32; N]) -> i32 {
+func sum<N>(a: [i32; N]) -> i32 {
     mut total: i32 = 0
     for x in a {
         total = total + x
@@ -133,16 +135,16 @@ func main() -> i32 {
 }
 ```
 
-A struct takes a const parameter the same way, and its field array is sized per instance:
+A struct or enum decides its sizes from its fields, and an `impl` from the type it passes the name to. The field array is sized per instance:
 
 ```neuro
-struct Buffer<T, const CAP: u32> {
+struct Buffer<T, CAP> {
     data: [T; CAP],
-    count: u32
+    count: u64
 }
 
-impl<T, const CAP: u32> Buffer<T, CAP> {
-    func capacity(&self) -> u32 { CAP }
+impl<T, CAP> Buffer<T, CAP> {
+    func capacity(&self) -> u64 { CAP }
 }
 
 func main() -> i32 {
@@ -154,7 +156,11 @@ func main() -> i32 {
 }
 ```
 
-A `where` clause can constrain a const parameter; see [Trait Bounds and Where Clauses](#trait-bounds-and-where-clauses).
+A name used in neither way is a type parameter, and a misspelled size is an unknown-length error rather than a new parameter.
+
+A **const parameter**, `const NAME: T` with `T` an integer type, is a value that sizes nothing, such as the `N` of `count` above. Writing one in a size position is an error whose hint is the bare form, so every parameter has one spelling: `` const parameter 'N' sizes an array, but a `const` parameter is a value that sizes nothing; declare a size parameter by its bare name instead: `<N>` ``.
+
+A `where` clause can constrain a size or const parameter; see [Trait Bounds and Where Clauses](#trait-bounds-and-where-clauses).
 
 ## Generic Structs and Impls
 
@@ -383,10 +389,10 @@ A tensor's element may be a type parameter under any of these bounds, or under n
 
 ### Where clauses
 
-A constraint may move into a `where` clause after the return type. A `where` clause carries trait bounds (`where T: Shape`, enforced exactly as an inline bound) and **value predicates** over const parameters: a boolean expression checked at every instantiation and reported at the offending call.
+A constraint may move into a `where` clause after the return type. A `where` clause carries trait bounds (`where T: Shape`, enforced exactly as an inline bound) and **value predicates** over size and const parameters: a boolean expression checked at every instantiation and reported at the offending call.
 
 ```neuro
-func head<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
+func head<N>(a: [i32; N]) -> i32 where N > 0 {
     a[0]           // guaranteed non-empty by `where N > 0`
 }
 

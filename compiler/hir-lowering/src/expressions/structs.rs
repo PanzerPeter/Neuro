@@ -95,7 +95,12 @@ impl Lowerer {
         let cnames: std::collections::HashSet<String> = template
             .generics
             .iter()
-            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Const(_)))
+            .filter(|g| {
+                matches!(
+                    g.kind,
+                    ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent
+                )
+            })
             .map(|g| g.name.name.clone())
             .collect();
 
@@ -117,10 +122,26 @@ impl Lowerer {
                 .map(|f| f.ty.clone());
             // The instance the context names types the field value, mirroring the
             // checker; without one the value drives inference on its own.
+            // A field whose declared type names no parameter (`count: u64`) types its value
+            // either way, or an unsuffixed literal there would lower as an `i32`.
             let field_expected = instance_fields
                 .as_ref()
                 .and_then(|f| f.iter().find(|(n, _)| n == &fname.name))
-                .map(|(_, t)| t.clone());
+                .map(|(_, t)| t.clone())
+                .or_else(|| {
+                    let ft = field_ast_ty.as_ref()?;
+                    let unbound = Default::default();
+                    if crate::items::mentions_any(
+                        ft,
+                        &gnames,
+                        &cnames,
+                        &unbound,
+                        &Default::default(),
+                    ) {
+                        return None;
+                    }
+                    self.resolve_type(ft).ok()
+                });
             let lowered = self.lower_expr(value, field_expected.as_ref())?;
             if let Some(ft) = &field_ast_ty {
                 self.unify_ast_hir(
@@ -155,7 +176,7 @@ impl Lowerer {
                 .generics
                 .iter()
                 .map(|gp| match &gp.kind {
-                    ast_types::GenericParamKind::Const(_) => {
+                    ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent => {
                         crate::MonoArg::Const(const_subst.get(&gp.name.name).copied().unwrap_or(0))
                     }
                     ast_types::GenericParamKind::Type => crate::MonoArg::Type(

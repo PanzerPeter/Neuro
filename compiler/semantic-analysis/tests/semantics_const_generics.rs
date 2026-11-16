@@ -10,7 +10,7 @@ fn check(source: &str) -> Result<(), Vec<TypeError>> {
 #[test]
 fn const_param_inferred_from_array_argument() {
     let source = r#"
-func first<const N: u32>(a: [i32; N]) -> i32 { a[0] }
+func first<N>(a: [i32; N]) -> i32 { a[0] }
 func main() -> i32 {
     val xs: [i32; 3] = [1, 2, 3]
     first(xs)
@@ -21,7 +21,7 @@ func main() -> i32 {
 #[test]
 fn const_param_usable_as_value() {
     let source = r#"
-func cap<const N: u32>(a: [i32; N]) -> u32 { N }
+func cap<N>(a: [i32; N]) -> u64 { N }
 func main() -> i32 {
     val xs: [i32; 2] = [1, 2]
     cap(xs) as i32
@@ -32,7 +32,7 @@ func main() -> i32 {
 #[test]
 fn where_predicate_violation_is_an_error() {
     let source = r#"
-func head<const N: u32>(a: [i32; N]) -> i32 where N > 5 { a[0] }
+func head<N>(a: [i32; N]) -> i32 where N > 5 { a[0] }
 func main() -> i32 {
     val xs: [i32; 3] = [1, 2, 3]
     head(xs)
@@ -48,7 +48,7 @@ func main() -> i32 {
 #[test]
 fn where_predicate_satisfied_is_ok() {
     let source = r#"
-func head<const N: u32>(a: [i32; N]) -> i32 where N > 0 { a[0] }
+func head<N>(a: [i32; N]) -> i32 where N > 0 { a[0] }
 func main() -> i32 {
     val xs: [i32; 3] = [1, 2, 3]
     head(xs)
@@ -68,7 +68,7 @@ func main() -> i32 { identity::<i32>(5) }"#;
 fn turbofish_kind_mismatch_is_rejected() {
     // A type argument supplied where a const value is expected is a kind mismatch.
     let source = r#"
-func repeat<const N: u32>(a: [i32; N]) -> i32 { a[0] }
+func repeat<N>(a: [i32; N]) -> i32 { a[0] }
 func main() -> i32 {
     val xs: [i32; 2] = [1, 2]
     repeat::<i32>(xs)
@@ -84,7 +84,7 @@ func main() -> i32 {
 #[test]
 fn const_generic_struct_infers_capacity() {
     let source = r#"
-struct Buffer<T, const CAP: u32> { data: [T; CAP], count: u32 }
+struct Buffer<T, CAP> { data: [T; CAP], count: u32 }
 func main() -> i32 {
     val b = Buffer { data: [1, 2, 3, 4], count: 4 }
     b.data[0]
@@ -125,15 +125,15 @@ fn regression_lim_213_where_predicate_without_a_value_is_refused() {
     // refused at the instantiation rather than skipped as if it were still symbolic.
     for (source, operation) in [
         (
-            "func f<const N: u32>(a: [i32; N]) -> i32 where N / 0 > 1 { 0 }\nfunc main() -> i32 { f([1, 2]) }",
+            "func f<N>(a: [i32; N]) -> i32 where N / 0 > 1 { 0 }\nfunc main() -> i32 { f([1, 2]) }",
             "N / 0",
         ),
         (
-            "func f<const N: u32>(a: [i32; N]) -> i32 where N % (N - 2) == 0 { 0 }\nfunc main() -> i32 { f([1, 2]) }",
+            "func f<N>(a: [i32; N]) -> i32 where N % (N - 2) == 0 { 0 }\nfunc main() -> i32 { f([1, 2]) }",
             "N % (N - 2)",
         ),
         (
-            "func f<const N: u32>(a: [i32; N]) -> i32 where N * 10000000000000000000 * 10000000000000000000 > 0 { 0 }\nfunc main() -> i32 { f([1, 2]) }",
+            "func f<N>(a: [i32; N]) -> i32 where N * 10000000000000000000 * 10000000000000000000 > 0 { 0 }\nfunc main() -> i32 { f([1, 2]) }",
             "N * 10000000000000000000 * 10000000000000000000",
         ),
     ] {

@@ -10,6 +10,34 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.52.0] - 2026-11-16
+
+### Added
+
+- Structs, enums and `impl` blocks take size parameters by bare name, as functions already did:
+  `struct Dense<IN, OUT> { w: Tensor<f32, [IN, OUT]> }` with `impl<IN, OUT> Dense<IN, OUT>`, or
+  `struct Ring<T, CAP> { data: [T; CAP] }` with `impl<T, CAP> Ring<T, CAP>`. A name a struct's
+  fields or an enum's payloads use as an array length or a tensor extent is a size, and so is a
+  name an `impl` header passes to one, including for a type declared in another module.
+- An array length makes a bare name a size parameter too: `func sum<N>(a: [i32; N])`.
+
+### Changed
+
+- A size parameter reads as a `u64` in a body, not a `u32`: `func width<N>(t: &Tensor<f32, [N]>)
+  -> u64 { N }`. `thread_id` and `block_id` fields in a `@kernel` body are `u64` as well, so they
+  compare with an extent directly.
+- A `const NAME: T` parameter is a value that sizes nothing. Writing one as an array length, a
+  tensor extent or an `impl`'s argument for a type's size is an error whose hint is the bare
+  name. Programs that wrote `func f<const N: u32>(a: [i32; N])` now write `func f<N>(a: [i32; N])`.
+
+### Fixed
+
+- A generic struct literal with no annotation stored an unsuffixed literal in a field of a
+  concrete type such as `u64` as an `i32`, so `Tagged { tag: true, count: 3 }.count` read
+  garbage. BUG-160 keeps only its `&[T]` field.
+- `docs/BUGS.md` gains BUG-169: in an unannotated generic struct literal, a float literal in a
+  field typed `[f32; CAP]` is an `f64`.
+
 ## [5.51.0] - 2026-11-16
 
 ### Added

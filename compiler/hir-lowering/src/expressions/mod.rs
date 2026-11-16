@@ -419,7 +419,7 @@ impl Lowerer {
                 span,
             } => {
                 if let Some(position) = self.grid_position(object, &field.name) {
-                    return Ok(HirExpr::new(position, HirType::U32, *span));
+                    return Ok(HirExpr::new(position, HirType::U64, *span));
                 }
                 // Peeled to one `&` like a method receiver, so `rr.x` on a `& &P` is the
                 // checker's read of `P`'s field.

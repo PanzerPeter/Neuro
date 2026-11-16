@@ -1,0 +1,4 @@
+hidden(x) = [4.5, 4.5]
+head(h)   = 13.5
+parameters: 8 + 3 = 11
+history holds 4

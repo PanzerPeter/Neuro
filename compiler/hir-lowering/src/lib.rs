@@ -870,10 +870,12 @@ fn mangle_instance(
     let mut out = format!("{}{}", name, INSTANCE_MARKER);
     for gp in generics {
         let arg = match &gp.kind {
-            ast_types::GenericParamKind::Const(_) => const_subst
-                .get(&gp.name.name)
-                .map(|v| format!("c{}", v))
-                .unwrap_or_else(|| "unresolved".to_string()),
+            ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent => {
+                const_subst
+                    .get(&gp.name.name)
+                    .map(|v| format!("c{}", v))
+                    .unwrap_or_else(|| "unresolved".to_string())
+            }
             ast_types::GenericParamKind::Type => subst
                 .get(&gp.name.name)
                 .map(mangle_type)

@@ -33,7 +33,9 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    file (see **Source map** below). It renders a parse error with `render_parse_error`, so a
    syntax error prints with its line and column like a type error. The parser is **passed in rather than depended on**
    because `module-resolution` may not import a feature slice; neurc is the single place the
-   two meet.
+   two meet. On the merged list it then runs `syntax_parsing::kind_impl_extents`, so an `impl`
+   header naming a sized type from another module learns which of its names are extents; each
+   file could only settle the `impl`s of its own types.
 2. `argument_binding::bind_arguments`: after the merge and the prelude, before type checking.
    A call names a callee that may be declared in any file, so the table cannot be built until
    every module is merged; and the arguments must already sit in declaration order when the

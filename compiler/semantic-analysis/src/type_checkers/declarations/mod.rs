@@ -196,6 +196,7 @@ impl TypeChecker {
     ) {
         self.generic_scope.clear();
         self.const_scope.clear();
+        self.value_consts.clear();
         self.lifetime_scope.clear();
         self.generic_bounds.clear();
         self.add_generic_params(generics, lifetimes);
@@ -215,6 +216,7 @@ impl TypeChecker {
         let saved = GenericScope {
             types: self.generic_scope.clone(),
             consts: self.const_scope.clone(),
+            value_consts: self.value_consts.clone(),
             lifetimes: self.lifetime_scope.clone(),
             bounds: self.generic_bounds.clone(),
         };
@@ -242,6 +244,7 @@ impl TypeChecker {
         let Some(saved) = saved else { return };
         self.generic_scope = saved.types;
         self.const_scope = saved.consts;
+        self.value_consts = saved.value_consts;
         self.lifetime_scope = saved.lifetimes;
         self.generic_bounds = saved.bounds;
     }
@@ -266,7 +269,11 @@ impl TypeChecker {
                 ast_types::GenericParamKind::Type => {
                     self.generic_scope.insert(gp.name.name.clone());
                 }
+                ast_types::GenericParamKind::Extent => {
+                    self.const_scope.insert(gp.name.name.clone(), Type::U64);
+                }
                 ast_types::GenericParamKind::Const(ty) => {
+                    self.value_consts.insert(gp.name.name.clone());
                     let ity = self.resolve_type(ty).unwrap_or(Type::Unknown);
                     if !matches!(ity, Type::Unknown) && !ity.is_integer() {
                         self.record_error(TypeError::ConstParamNotInteger {
@@ -330,6 +337,7 @@ impl TypeChecker {
     fn exit_generic_scope(&mut self) {
         self.generic_scope.clear();
         self.const_scope.clear();
+        self.value_consts.clear();
         self.lifetime_scope.clear();
         self.generic_bounds.clear();
     }

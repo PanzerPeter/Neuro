@@ -1,4 +1,4 @@
-//! The numeric families `Numeric`, `Integer` and `Float` (§3.8).
+//! The numeric families `Numeric`, `Integer` and `Float`.
 //!
 //! The prelude declares them and the compiler implements them, for the scalars alone, so a
 //! body generic over its element type can compute. A type parameter bounded by one answers
@@ -18,7 +18,7 @@ pub(crate) fn is_numeric_family(trait_name: &str) -> bool {
 }
 
 /// Whether the concrete type `ty` implements the family `trait_name`. FP8 is in none of
-/// them, because it has no scalar arithmetic (§1.2).
+/// them, because it has no scalar arithmetic.
 pub(crate) fn scalar_in_family(ty: &Type, trait_name: &str) -> bool {
     match trait_name {
         NUMERIC_TRAIT => ty.is_numeric() || ty.is_half_float(),

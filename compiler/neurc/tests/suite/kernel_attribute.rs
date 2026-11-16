@@ -22,7 +22,7 @@ func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut
 }
 
 @kernel(threads: [4])
-func row_sums(m: Tensor<i64, [9, 7]>, out: KernelOut<Tensor<i64, [9]>>, blocks: KernelOut<Tensor<u32, [9]>>) {
+func row_sums(m: Tensor<i64, [9, 7]>, out: KernelOut<Tensor<i64, [9]>>, blocks: KernelOut<Tensor<u64, [9]>>) {
     val row = thread_id.x
     if row >= 9 {
         return
@@ -67,14 +67,14 @@ func main() -> i32 {
         }
     }
     mut sums: Tensor<i64, [9]> = Tensor::zeros()
-    mut blocks: Tensor<u32, [9]> = Tensor::zeros()
+    mut blocks: Tensor<u64, [9]> = Tensor::zeros()
     row_sums(m, &mut sums, &mut blocks)
     if sums[8] != 80 * 6 + 1 + 2 + 4 + 5 + 6 { return 2 }
-    if blocks[8] != 2u32 || blocks[3] != 0u32 { return 3 }
+    if blocks[8] != 2u64 || blocks[3] != 0u64 { return 3 }
 
     val on_device = m.to(Device::GPU(0))
     mut sums_on_device = Tensor::<i64, [9]>::zeros().to(Device::GPU(0))
-    mut blocks_on_device = Tensor::<u32, [9]>::zeros().to(Device::GPU(0))
+    mut blocks_on_device = Tensor::<u64, [9]>::zeros().to(Device::GPU(0))
     row_sums(on_device, &mut sums_on_device, &mut blocks_on_device)
     val back = sums_on_device.to(Device::CPU)
     if back[8] != sums[8] { return 4 }
@@ -690,13 +690,13 @@ if (n as f64).is_nan() { acc += 1 }
 fn a_grid_position_bound_whole_is_read_by_its_fields() {
     let source = r#"
 @kernel(threads: [4, 2])
-func k(out: KernelOut<Tensor<u32, [6, 5]>>, blocks: KernelOut<Tensor<u32, [6, 5]>>) {
+func k(out: KernelOut<Tensor<u64, [6, 5]>>, blocks: KernelOut<Tensor<u64, [6, 5]>>) {
     val t = thread_id
     val b = block_id
     val u = t
     if t.x < 6 && u.y < 5 {
         val v = {
-            val t = 100u32
+            val t = 100u64
             t + 1
         }
         unsafe {
@@ -707,28 +707,28 @@ func k(out: KernelOut<Tensor<u32, [6, 5]>>, blocks: KernelOut<Tensor<u32, [6, 5]
 }
 
 @kernel(threads: [4])
-func p(out: KernelOut<Tensor<u32, [8]>>) {
+func p(out: KernelOut<Tensor<u64, [8]>>) {
     val t = thread_id
     out.partition(|base, slice| {
         val inner = t
-        slice[0] = inner.x * 2 + base as u32
+        slice[0] = inner.x * 2 + base
     })
 }
 
 func main() -> i32 {
-    mut out: Tensor<u32, [6, 5]> = Tensor::zeros()
-    mut blocks: Tensor<u32, [6, 5]> = Tensor::zeros()
+    mut out: Tensor<u64, [6, 5]> = Tensor::zeros()
+    mut blocks: Tensor<u64, [6, 5]> = Tensor::zeros()
     k(&mut out, &mut blocks)
     for i in 0..6 {
         for j in 0..5 {
-            if out[i, j] != (i * 10 + j + 101) as u32 { return 1 }
-            if blocks[i, j] != ((i / 4) * 100 + (j / 2) * 10) as u32 { return 2 }
+            if out[i, j] != (i * 10 + j + 101) as u64 { return 1 }
+            if blocks[i, j] != ((i / 4) * 100 + (j / 2) * 10) as u64 { return 2 }
         }
     }
-    mut q: Tensor<u32, [8]> = Tensor::zeros()
+    mut q: Tensor<u64, [8]> = Tensor::zeros()
     p(&mut q)
     for i in 0..8 {
-        if q[i] != (i * 3) as u32 { return 3 }
+        if q[i] != (i * 3) as u64 { return 3 }
     }
     println("ok")
     0

@@ -10,6 +10,7 @@ use crate::precedence::Precedence;
 use ast_types::{Attribute, Expr, FieldDef, FieldInit, StructDef};
 
 use super::Parser;
+use super::size_params::rekind_size_params;
 
 impl Parser {
     /// Parse a struct definition: `struct Name { field: Type, ... }`,
@@ -96,6 +97,8 @@ impl Parser {
 
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
         self.lifetime_scope.truncate(lifetime_mark);
+        // A type sizes its fields the way a function sizes its parameters.
+        rekind_size_params(fields.iter().map(|f| &f.ty), &mut generics);
 
         Ok(StructDef {
             name,

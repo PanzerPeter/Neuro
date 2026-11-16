@@ -165,7 +165,7 @@ struct Sum {
 }
 
 impl Sum {
-    func over<const N: u32>(&self, xs: [i32; N]) -> i32 where N > 1 {
+    func over<N>(&self, xs: [i32; N]) -> i32 where N > 1 {
         mut t = self.base
         for x in xs {
             t = t + x

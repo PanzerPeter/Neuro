@@ -1,6 +1,6 @@
 // End-to-end tests for tensor shape generics and shape constraints.
 //
-// A bare name in a tensor shape is a compile-time `const NAME: u32` parameter, inferred
+// A bare name in a tensor shape is an extent parameter, a compile-time `u64`, inferred
 // from the argument tensors and monomorphized per distinct set of extents. A repeated
 // parameter must agree everywhere it is written, and a `where` predicate over one is
 // checked at the call that supplies the offending extent. These tests drive the whole
@@ -100,26 +100,6 @@ func main() -> i32 {
         .compile_and_run("shape_in_place.nr", source)
         .expect("compile/run failed");
     assert_eq!(exit, 63);
-}
-
-#[test]
-fn an_explicit_const_parameter_works_in_a_shape_position() {
-    let test = CompileTest::new();
-    // The bare name is sugar for this spelling, so both must name the same parameter.
-    let source = r#"
-func width<const K: u32>(t: &Tensor<i32, [K]>) -> i32 {
-    return K as i32
-}
-
-func main() -> i32 {
-    val v: Tensor<i32, [5]> = [1, 2, 3, 4, 5]
-    return width(&v)
-}
-"#;
-    let exit = test
-        .compile_and_run("shape_explicit_const.nr", source)
-        .expect("compile/run failed");
-    assert_eq!(exit, 5);
 }
 
 #[test]

@@ -906,7 +906,7 @@ impl<'f> BodyEmitter<'f> {
             HirGridIndex::Block => self.assign(&format!("gpu.block_id {}", GRID_DIMENSIONS[axis])),
             HirGridIndex::Thread => self.thread_position(axis),
         };
-        self.assign(&format!("arith.index_cast {position} : index to i32"))
+        self.assign(&format!("arith.index_cast {position} : index to i64"))
     }
 
     /// The thread's global position along grid axis `axis`, as an `index`. The block size

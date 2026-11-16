@@ -61,9 +61,18 @@ pub enum TypeError {
     },
 
     #[error(
-        "array length '{name}' is not a known constant; use an integer literal or an in-scope `const` generic parameter"
+        "array length '{name}' is not a known constant; use an integer literal or a size parameter declared in the enclosing generic list, e.g. `func f<{name}>(a: [i32; {name}])`"
     )]
     UnknownArrayLength { name: String, span: Span },
+
+    #[error(
+        "const parameter '{name}' sizes {what}, but a `const` parameter is a value that sizes nothing; declare a size parameter by its bare name instead: `<{name}>`"
+    )]
+    ConstParamSizes {
+        name: String,
+        what: &'static str,
+        span: Span,
+    },
 
     #[error("array length {length} is too large; an array holds at most {max} elements")]
     ArrayLengthTooLarge { length: u64, max: u32, span: Span },
@@ -1625,6 +1634,7 @@ impl TypeError {
             | Self::GenericParamNotInferable { span, .. }
             | Self::InstantiationTooDeep { span, .. }
             | Self::UnknownArrayLength { span, .. }
+            | Self::ConstParamSizes { span, .. }
             | Self::ArrayLengthTooLarge { span, .. }
             | Self::TensorTooLarge { span, .. }
             | Self::UndeclaredLifetime { span, .. }

@@ -183,7 +183,7 @@ tier, and an overflow (through LLVM's `with.overflow` intrinsics) and `MIN / -1`
 tier, where the release tier wraps; a failed one stops the kernel (`Failure::Stop`). The guard is `cf.assert` on NVIDIA and a trap block on AMD, whose ROCDL lowering
 has no `cf.assert`; the trap block branches on, since `gpu.launch` wants every exiting block to
 end in `gpu.terminator`. `thread_id` is `block_id * threads[axis] + gpu.thread_id` with the block
-size as a constant, because `gpu.block_dim` lowers to a ROCm device-library call. Float to integer
+size as a constant, cast from `index` to the `i64` its `u64` reads as, because `gpu.block_dim` lowers to a ROCm device-library call. Float to integer
 casts saturate through `llvm.call_intrinsic "llvm.fptosi.sat..."`, as on the host. A `KernelPartition` runs its body in each thread whose global position is
 inside the grid tensor; the thread's number is that position read row-major, and its run of
 `out` starts at `number * chunk`, `chunk` being `out`'s element count over the grid tensor's (a

@@ -117,7 +117,7 @@ items through `kernel_signatures`, which rewrites each kernel's `Tensor` input t
 call's input arguments in `&` (`borrow_kernel_inputs`), so the HIR of a kernel and its calls is
 the plain reference form. A call with a temporary input first becomes the checker's block,
 binding every argument that is not a place to a `$kernel_arg<i>` (`kernel_call_binding_temporaries`). `lower_function_body` marks the body so that
-`thread_id.x` / `block_id.z` lower to `HirExprKind::GridPosition` (`expressions/grid.rs`) unless a
+`thread_id.x` / `block_id.z` lower to a `u64` `HirExprKind::GridPosition` (`expressions/grid.rs`) unless a
 local of that name shadows it. `val t = thread_id` (or `= u` for another such local) lowers to an
 empty statement and records `t` in `grid_aliases` with its scope depth (`grid_binding`), so `t.x`
 is the same `GridPosition`; a later local of that name in that scope, or a deeper one, hides it. A kernel call inside a `@grad` body is refused like a `@gpu` one.
@@ -480,7 +480,8 @@ Generic structs and impls work the same way, through `generic_structs` / `generi
 `instantiate_generic_struct(base, args)`: called from `resolve_type` for a `Type::Generic`
 annotation and from `lower_generic_struct_literal` after inferring the arguments from field
 values, each lowered against the matching field of the instance the expected type names when it
-names one (mirroring the checker, so the literal's type and layout agree). Each instance registers concrete fields plus impl-method signatures and emits one
+names one (mirroring the checker, so the literal's type and layout agree), or else against its
+declared type when that names no parameter, so `count: 3` fills a `u64` field as a `u64`. Each instance registers concrete fields plus impl-method signatures and emits one
 `HirItem::Struct` plus one `HirItem::Impl` per generic impl whose bounds the instance meets
 (`instance_meets_impl_bounds`: a declared trait's impl, or for the five derivable traits the
 checker's builtin rule, `implements_derivable`), with method bodies lowered under the
@@ -532,10 +533,10 @@ receiver from the symbol's first segment only, and no user method name contains 
 checker: without it a generic iterator adapter would satisfy `Iterator` under its base name
 only, and a `for` head over an instance would find no protocol on the type it actually has.
 
-Const generics ride the same machinery: a `const_subst` (name → value) and `const_types`
-(name → int type) are active while an instance body lowers, parallel to `type_subst`. `MonoArg`
+Size and const generics ride the same machinery: a `const_subst` (name → value) and `const_types`
+(name → int type, `u64` for an extent) are active while an instance body lowers, parallel to `type_subst`. `MonoArg`
 (Type | Const) is the positional instance-argument kind and `split_mono_args` builds the two maps;
-`unify_ast_hir` binds a const param from an array-length position and from each axis of a
+`unify_ast_hir` binds a value param from an array-length position and from each axis of a
 tensor-argument's shape, `resolve_array_size` resolves
 `[T; N]` to a concrete length, `resolve_tensor_dim` resolves a `Tensor<T, [M, K]>` axis's extent to one (a dimension
 name is checked by semantic analysis and dropped here), a const-param reference lowers to a typed integer literal, and

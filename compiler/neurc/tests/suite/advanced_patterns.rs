@@ -197,13 +197,13 @@ func main() -> i32 {
 #[test]
 fn over_a_size_parameter_a_pattern_of_another_length_never_matches() {
     let source = r#"
-func first<const N: u64>(a: [i32; N]) -> i32 {
+func first<N>(a: [i32; N]) -> i32 {
     match a {
         [] => 1,
         [x, ..] => x
     }
 }
-func pair<const N: u64>(a: [i32; N]) -> i32 {
+func pair<N>(a: [i32; N]) -> i32 {
     match a {
         [x, y] => x + y,
         [_, _, ..rest] => rest[0],

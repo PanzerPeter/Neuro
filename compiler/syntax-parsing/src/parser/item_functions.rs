@@ -9,11 +9,12 @@ use crate::errors::{ParseError, ParseResult};
 use crate::precedence::Precedence;
 use ast_types::{
     Attribute, Expr, FunctionDef, GenericParam, GenericParamKind, MethodDef, ParamLabel, Parameter,
-    SelfParam, TensorExtent, TraitBound, Type,
+    SelfParam, TraitBound,
 };
 
 use super::Parser;
 use super::items::desugar_impl_trait_params;
+use super::size_params::rekind_size_params;
 
 /// The external label that suppresses a call-site name entirely (`_ value: f32`).
 const WILDCARD_LABEL: &str = "_";
@@ -79,11 +80,13 @@ impl Parser {
             param.ty = desugar_impl_trait_params(&param.ty, &mut impl_counter, &mut generics);
         }
 
-        // A bare name used as a tensor extent is a `const NAME: u32` parameter, so
-        // `func matmul<M, N, K>(...)` need not spell `const` on every dimension. The
-        // re-kinding happens here, where the whole signature is to hand, so every later
-        // pass sees one representation of a shape parameter.
-        rekind_shape_params(&params, return_type.as_ref(), &mut generics);
+        // A bare name used as an array length or a tensor extent is an extent parameter.
+        // The re-kinding happens here, where the whole signature is to hand, so every
+        // later pass sees one representation of a size parameter.
+        rekind_size_params(
+            params.iter().map(|p| &p.ty).chain(return_type.as_ref()),
+            &mut generics,
+        );
 
         let body = self.parse_block()?;
         self.lifetime_scope.truncate(lifetime_mark);
@@ -495,7 +498,10 @@ impl Parser {
         for param in &mut params {
             param.ty = desugar_impl_trait_params(&param.ty, &mut impl_counter, &mut generics);
         }
-        rekind_shape_params(&params, return_type.as_ref(), &mut generics);
+        rekind_size_params(
+            params.iter().map(|p| &p.ty).chain(return_type.as_ref()),
+            &mut generics,
+        );
         let body = self.parse_block()?;
         self.lifetime_scope.truncate(lifetime_mark);
 
@@ -553,84 +559,5 @@ impl Parser {
             }
             _ => Ok(None),
         }
-    }
-}
-
-/// The integer type a bare shape parameter takes: shape extents are `const u32` values,
-/// which is what makes an extent mismatch a compile-time error.
-const SHAPE_PARAM_TYPE: &str = "u32";
-
-/// Re-kind every bound-less type parameter that a signature uses as a tensor extent
-/// into a `const NAME: u32` parameter.
-///
-/// A parameter carrying trait bounds is left alone: a bound names a type, so the two
-/// readings cannot both be right, and leaving it makes the checker report the extent as
-/// an unknown dimension rather than silently changing what the bound meant.
-pub(super) fn rekind_shape_params(
-    params: &[Parameter],
-    return_type: Option<&Type>,
-    generics: &mut [GenericParam],
-) {
-    let mut named = Vec::new();
-    for param in params {
-        collect_shape_params(&param.ty, &mut named);
-    }
-    if let Some(ret) = return_type {
-        collect_shape_params(ret, &mut named);
-    }
-    for generic in generics.iter_mut() {
-        if !matches!(generic.kind, GenericParamKind::Type) || !generic.bounds.is_empty() {
-            continue;
-        }
-        if named.contains(&generic.name.name) {
-            generic.kind = GenericParamKind::Const(Type::Named(Identifier {
-                name: SHAPE_PARAM_TYPE.to_string(),
-                span: generic.name.span,
-            }));
-        }
-    }
-}
-
-/// Collect the names used as tensor extents anywhere in `ty`, including under
-/// references, sequences, tuples, and other generic applications.
-fn collect_shape_params(ty: &Type, out: &mut Vec<String>) {
-    match ty {
-        Type::Tensor {
-            element_type,
-            shape,
-            ..
-        } => {
-            for dim in shape {
-                // The dimension NAME is not a parameter: it lives in the tensor type's
-                // own namespace, so only the extent can re-kind a generic.
-                if let TensorExtent::Param(name) = &dim.extent {
-                    out.push(name.name.clone());
-                }
-            }
-            collect_shape_params(element_type, out);
-        }
-        Type::Reference { inner, .. } => collect_shape_params(inner, out),
-        Type::Array { element, .. } | Type::Slice { element, .. } => {
-            collect_shape_params(element, out)
-        }
-        Type::Tuple { elements, .. } => {
-            for element in elements {
-                collect_shape_params(element, out);
-            }
-        }
-        Type::Generic { args, .. } => {
-            for arg in args {
-                if let ast_types::GenericArg::Type(inner) = arg {
-                    collect_shape_params(inner, out);
-                }
-            }
-        }
-        Type::Function { params, ret, .. } => {
-            for param in params {
-                collect_shape_params(param, out);
-            }
-            collect_shape_params(ret, out);
-        }
-        Type::Named(_) | Type::ImplTrait { .. } | Type::DynTrait { .. } => {}
     }
 }

@@ -10,6 +10,7 @@ use crate::precedence::Precedence;
 use ast_types::{EnumDef, EnumVariant, Expr, FieldDef, FieldInit, VariantPayload};
 
 use super::Parser;
+use super::size_params::{payload_types, rekind_size_params};
 
 impl Parser {
     /// Parse an enum definition: `enum Name<T, ...> { Unit, Tuple(T, ...), Named { f: T, ... } }`.
@@ -26,7 +27,7 @@ impl Parser {
 
         self.skip_newlines();
         let lifetime_mark = self.lifetime_scope.len();
-        let (generics, lifetimes) = self.parse_generic_params()?;
+        let (mut generics, lifetimes) = self.parse_generic_params()?;
 
         self.skip_newlines();
         self.consume(TokenKind::LeftBrace, "'{'")?;
@@ -46,6 +47,10 @@ impl Parser {
 
         let close = self.consume(TokenKind::RightBrace, "'}'")?;
         self.lifetime_scope.truncate(lifetime_mark);
+        rekind_size_params(
+            variants.iter().flat_map(|v| payload_types(&v.payload)),
+            &mut generics,
+        );
 
         Ok(EnumDef {
             name,

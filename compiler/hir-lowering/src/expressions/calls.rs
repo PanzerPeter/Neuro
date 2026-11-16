@@ -490,7 +490,12 @@ impl Lowerer {
         let cnames: std::collections::HashSet<String> = template
             .generics
             .iter()
-            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Const(_)))
+            .filter(|g| {
+                matches!(
+                    g.kind,
+                    ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent
+                )
+            })
             .map(|g| g.name.name.clone())
             .collect();
 
@@ -790,10 +795,12 @@ impl Lowerer {
                 ast_types::GenericParamKind::Type => {
                     subst.get(&gp.name.name).cloned().map(crate::MonoArg::Type)
                 }
-                ast_types::GenericParamKind::Const(_) => const_subst
-                    .get(&gp.name.name)
-                    .copied()
-                    .map(crate::MonoArg::Const),
+                ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent => {
+                    const_subst
+                        .get(&gp.name.name)
+                        .copied()
+                        .map(crate::MonoArg::Const)
+                }
             };
             instance_args.push(arg.ok_or_else(|| LoweringError::UnresolvedType {
                 name: format!("{}::{} parameter '{}'", base, member, gp.name.name),

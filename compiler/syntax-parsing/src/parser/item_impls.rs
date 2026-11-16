@@ -9,8 +9,8 @@ use crate::errors::{ParseError, ParseResult};
 use ast_types::{ImplDef, TraitDef, TraitMethod};
 
 use super::Parser;
-use super::item_functions::rekind_shape_params;
 use super::items::desugar_impl_trait_params;
+use super::size_params::rekind_size_params;
 
 /// What a trait's `type` item must look like, for the diagnostic that rejects a binding
 /// where a declaration belongs.
@@ -239,7 +239,10 @@ impl Parser {
         for param in &mut params {
             param.ty = desugar_impl_trait_params(&param.ty, &mut impl_counter, &mut generics);
         }
-        rekind_shape_params(&params, return_type.as_ref(), &mut generics);
+        rekind_size_params(
+            params.iter().map(|p| &p.ty).chain(return_type.as_ref()),
+            &mut generics,
+        );
 
         // A brace on the same logical line begins a default-method body; anything else
         // (newline, next `func`, or `}`) means this is a required method with no body.

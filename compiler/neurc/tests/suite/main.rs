@@ -136,6 +136,7 @@ mod safetensors;
 mod self_type;
 mod shape_generics;
 mod short_circuit_runtime;
+mod size_parameters;
 mod slices;
 mod source_spans;
 mod statement_boundaries;

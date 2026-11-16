@@ -27,7 +27,7 @@ func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut
 // One thread per row, looping over its columns; a second output records which block
 // ran each row, 4 rows to a block.
 @kernel(threads: [4])
-func row_max(m: Tensor<i32, [10, 6]>, out: KernelOut<Tensor<i32, [10]>>, block_of: KernelOut<Tensor<u32, [10]>>) {
+func row_max(m: Tensor<i32, [10, 6]>, out: KernelOut<Tensor<i32, [10]>>, block_of: KernelOut<Tensor<u64, [10]>>) {
     val row = thread_id.x
     if row >= 10 {
         return
@@ -64,7 +64,7 @@ func main() -> i32 {
         }
     }
     mut maxima: Tensor<i32, [10]> = Tensor::zeros()
-    mut blocks: Tensor<u32, [10]> = Tensor::zeros()
+    mut blocks: Tensor<u64, [10]> = Tensor::zeros()
     row_max(m, &mut maxima, &mut blocks)
     println("row_max: row 0 = {maxima[0]}, row 9 = {maxima[9]}, row 9 ran in block {blocks[9]}")
 
@@ -75,6 +75,6 @@ func main() -> i32 {
     for j in 1..6 {
         if m[9, j] > host_max { host_max = m[9, j] }
     }
-    if maxima[9] == host_max && blocks[9] == 2u32 { agree += 1 }
+    if maxima[9] == host_max && blocks[9] == 2u64 { agree += 1 }
     return agree
 }

@@ -222,7 +222,10 @@ impl TypeChecker {
 
         let mut subst: HashMap<String, Type> = HashMap::new();
         for (gp, arg) in template.generics.iter().zip(args.iter()) {
-            let is_const = matches!(gp.kind, ast_types::GenericParamKind::Const(_));
+            let is_const = matches!(
+                gp.kind,
+                ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent
+            );
             match arg {
                 Type::ConstValue(_) if is_const => {}
                 Type::ConstValue(_) => self.record_error(TypeError::TurbofishKindMismatch {

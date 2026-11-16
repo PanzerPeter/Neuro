@@ -19,6 +19,7 @@ mod item_imports;
 mod item_structs;
 mod items;
 mod patterns;
+pub(crate) mod size_params;
 mod statements;
 mod stmt_assignments;
 mod stmt_destructure;

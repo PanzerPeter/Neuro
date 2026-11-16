@@ -282,7 +282,7 @@ An index that leaves an axis standing produces a fresh tensor rather than naming
 
 ## Shape generics
 
-A tensor extent may be a **generic parameter** rather than a literal, so one function serves every shape it is written for. A bare name in a shape position is sugar for a `const NAME: u32` parameter. It is a compile-time value, inferred from the shape of the argument the caller passes, and each distinct set of extents is monomorphized into its own specialization.
+A tensor extent may be a **generic parameter** rather than a literal, so one function serves every shape it is written for. A bare name in a shape position is a size parameter (see [Size and Const Parameters](generics-and-traits.md#size-and-const-parameters)). It is a compile-time `u64`, inferred from the shape of the argument the caller passes, and each distinct set of extents is monomorphized into its own specialization.
 
 ```neuro
 func corner<M, K>(t: &Tensor<i32, [M, K]>) -> i32 {
@@ -310,7 +310,7 @@ val y: Tensor<i32, [5, 6]> = Tensor::<i32, [5, 6]>::zeros()
 val z = pair(&x, &y)   // error: shape parameter 'K' is already 3 here, but this argument makes it 5
 ```
 
-A shape parameter is an ordinary const parameter, so everything const parameters do applies. It can be read as a value in the body, constrained by a `where` predicate that is checked at the call supplying the offending extent, or spelled out as `const K: u32` where that reads better.
+A shape parameter is an ordinary size parameter. It can be read as a `u64` value in the body, and constrained by a `where` predicate that is checked at the call supplying the offending extent. A `const K: u32` parameter sizes nothing, so writing one as an extent is an error whose hint is the bare `K`.
 
 ```neuro
 func last<N>(t: &Tensor<i32, [N]>) -> i32
@@ -331,7 +331,7 @@ func top_row<M, K>(t: &Tensor<i32, [M, K]>) -> Tensor<i32, [K]> {
 Some things a shape parameter does not do:
 
 - A tensor **literal** cannot be written against a symbolic extent, since one literal would have to serve every instantiation. Build the tensor with a constructor instead.
-- A name that no enclosing signature declares is an error naming the dimension, not a silently accepted extent: ``tensor dimension 'N' is not a known extent``. A struct, enum or `impl` with a symbolic extent declares it as a const parameter, as in `struct Dense<const IN: u32, const OUT: u32> { w: Tensor<f32, [IN, OUT]> }`.
+- A name that no enclosing signature declares is an error naming the dimension, not a silently accepted extent: ``tensor dimension 'N' is not a known extent``. A struct or enum declares its extents by bare name the same way, as in `struct Dense<IN, OUT> { w: Tensor<f32, [IN, OUT]> }`, and `impl<IN, OUT> Dense<IN, OUT>` passes them on.
 - `.reshape` and `.flatten` are not available on a receiver whose extent is a shape parameter, since there is no element count to check against. `.t()` and `.permute` are, because they only reorder axes.
 
 ## Element-type generics
@@ -824,7 +824,7 @@ func add_relu(a: Tensor<f32, [37, 45]>, b: Tensor<f32, [37, 45]>, out: KernelOut
 }
 ```
 
-Inside the body, `thread_id` is the thread's position in the whole grid and `block_id` is its block's. Each has three `u32` fields, `.x`, `.y` and `.z`. A field is read directly (`thread_id.x`), or through a `val` that binds the position whole (`val t = thread_id`, then `t.x`). Used as a value in any other way, either form is a compile error. `thread_id.x` is `block_id.x` times the block's `x` size, plus the thread's place in its block. It indexes the grid tensor directly, and an axis the grid does not have reads 0. Neither name exists outside a kernel body, and a local of the same name hides it.
+Inside the body, `thread_id` is the thread's position in the whole grid and `block_id` is its block's. Each has three `u64` fields, `.x`, `.y` and `.z`, so they compare with an extent directly. A field is read directly (`thread_id.x`), or through a `val` that binds the position whole (`val t = thread_id`, then `t.x`). Used as a value in any other way, either form is a compile error. `thread_id.x` is `block_id.x` times the block's `x` size, plus the thread's place in its block. It indexes the grid tensor directly, and an axis the grid does not have reads 0. Neither name exists outside a kernel body, and a local of the same name hides it.
 
 Each axis runs enough blocks to cover its extent, rounded up. The 37 × 45 tensor above gets a 3 × 3 grid of 16 × 16 blocks, and the threads past the edge have no element. A GPU runs at most 2^31 - 1 blocks along `x` and 65535 along `y` and `z`, so a grid that needs more along an axis is a compile error naming the axis. A body guards its writes, as `row < 37 && col < 45` does. Every index is still checked when the kernel runs. A thread that reads or writes past an extent, divides an integer by zero or, in a debug build, overflows an integer stops the kernel. The program then aborts at the call with a `panic:` naming the GPU error.
 
@@ -871,7 +871,6 @@ These are the limits a reader is most likely to hit. Each one is described in fu
 
 - A `?` axis is a widening only. Nothing that needs an extent works on it, and no run-time check narrows it back to a literal (see [Dynamic shapes](#dynamic-shapes)).
 - There is no `.filter`, and no operation produces a `Tensor<bool, S>` mask, so a mask is written by hand (see [Functional traversals](#functional-traversals)).
-- A bare-name shape parameter exists only in a function signature. A struct, enum or `impl` spells it as a const parameter (see [Shape generics](#shape-generics)).
 - `@gpu` is not accepted on a method (see [Running on a GPU](#running-on-a-gpu-gpu)).
 - Operations on `f16`, `bf16` and `bool` tensors have no device form (see [Device transfer](#device-transfer)).
 

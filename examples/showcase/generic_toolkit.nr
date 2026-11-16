@@ -1,9 +1,9 @@
-// Showcase: generics, const generics, turbofish and `where` clauses alongside earlier
-// features. Integration example: generic structs and functions, const parameters with
-// `where` predicates, a non-`Copy` type argument, `Drop` across a generic boundary,
+// Showcase: generics, size parameters, turbofish and `where` clauses alongside earlier
+// features. Integration example: generic structs and functions, size parameters with
+// `where` predicates, a generic impl over a size parameter, a non-`Copy` type argument, `Drop` across a generic boundary,
 // `Option` and `Result` at a generic parameter propagated with `?`, and generic methods
 // such as `Cell<T>::with<U>`. Each generic template is emitted once per concrete type or
-// const argument, so `T` and `N` cost nothing at run time.
+// size argument, so `T` and `N` cost nothing at run time.
 
 enum Shape {
     Circle(i32),
@@ -47,11 +47,23 @@ impl<T> Cell<T> {
     }
 }
 
-// A const-generic struct: `CAP` is a compile-time value, inferred from the field
-// array's length, so `[T; CAP]` is sized concretely per instance.
-struct Buffer<T, const CAP: u32> {
+// A size-generic struct: `CAP` sizes the field array, which makes it a size parameter,
+// inferred from the array's length, so `[T; CAP]` is sized concretely per instance.
+struct Buffer<T, CAP> {
     data: [T; CAP],
-    count: u32,
+    count: u64,
+}
+
+// The impl passes `CAP` to the struct's size parameter, so it is one here too, and the
+// body reads it as the `u64` it is.
+impl<T: Copy, CAP> Buffer<T, CAP> {
+    func spare(&self) -> u64 {
+        CAP - self.count
+    }
+
+    func last(&self) -> Option<T> {
+        if self.count == 0 { Option::None } else { Option::Some(self.data[self.count - 1]) }
+    }
 }
 
 // The classic identity template: reused here at i32, at a tuple type, and at the two
@@ -94,9 +106,9 @@ func second<T, U>(a: T, b: U) -> U {
     b
 }
 
-// A const-generic function: `N` is inferred from the array argument's length, and the
+// A size-generic function: `N` is inferred from the array argument's length, and the
 // `where` predicate guarantees the array is non-empty at every instantiation.
-func sum_all<const N: u32>(a: [i32; N]) -> i32 where N > 0 {
+func sum_all<N>(a: [i32; N]) -> i32 where N > 0 {
     mut total: i32 = 0
     for x in a {
         total += x
@@ -146,11 +158,13 @@ func main() -> i32 {
 
     val id2 = identity::<i32>(8)           // turbofish            -> 8
     val nums: [i32; 3] = [4, 5, 6]
-    val s = sum_all(nums)                  // const generic + where -> 15
+    val s = sum_all(nums)                  // size parameter + where -> 15
 
     val buf = Buffer { data: [1, 2, 3, 0], count: 3 }  // Buffer<i32, 4> (CAP inferred)
     val c = buf.count as i32               // -> 3
     val d = buf.data[1]                    // -> 2
+    val spare = buf.spare() as i32         // CAP - count            -> 1
+    val tail = buf.last() ?? 0             // Option<i32>            -> 3
 
     // Non-`Copy` type arguments. `lab` is moved into identity<Label> and back out; the
     // original binding is dead from here on, exactly as a plain `val moved = lab` would
@@ -200,6 +214,7 @@ func main() -> i32 {
     println("identity::<i32>(8)         = {id2}")
     println("sum_all<3> where N > 0     = {s}")
     println("Buffer<i32, 4> count/data  = {c}, {d}")
+    println("Buffer<i32, 4> spare/last  = {spare}, {tail}")
     println("identity<Label> (non-Copy) = {kept.text}")
     println("identity<string>           = {word}")
     println("Guard destructors run      = {destroyed}")
@@ -208,9 +223,9 @@ func main() -> i32 {
     println("Cell<i32>::with<string>    = ({tagged.first}, {tagged.second})")
     println("Cell<bool>::with::<i64>    = ({wide.first}, {wide.second})")
 
-    // 10 + 10 + 4 + 3 + 5 + 12 + 7 + 6 + 8 + 15 + 3 + 2 + 2 + 5 = 92
-    val total = pick + base + k + t.0 + t.1 + a + cv + bonus + id2 + s + c + d + destroyed
-        + tagged.first
+    // 10 + 10 + 4 + 3 + 5 + 12 + 7 + 6 + 8 + 15 + 3 + 2 + 1 + 3 + 2 + 5 = 96
+    val total = pick + base + k + t.0 + t.1 + a + cv + bonus + id2 + s + c + d + spare + tail
+        + destroyed + tagged.first
     println("total                      = {total}")
     return total
 }

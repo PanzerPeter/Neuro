@@ -384,13 +384,21 @@ impl TypeChecker {
     }
 
     /// Resolve one axis's extent. A literal is taken as written; a name is accepted
-    /// only when it is an in-scope shape parameter, which the parser has already
-    /// re-kinded to a `const NAME: u32` parameter; `?` is a dynamic extent.
+    /// only when it is an in-scope extent parameter, which the parser has already
+    /// re-kinded from a bare name; `?` is a dynamic extent.
     fn resolve_tensor_dim(&mut self, dim: &ast_types::TensorDim) -> Option<ArrayLen> {
         match &dim.extent {
             ast_types::TensorExtent::Literal(extent) => Some(ArrayLen::Fixed(*extent)),
             ast_types::TensorExtent::Dynamic(_) => Some(ArrayLen::Dynamic),
             ast_types::TensorExtent::Param(ident) => {
+                if self.value_consts.contains(&ident.name) {
+                    self.record_error(TypeError::ConstParamSizes {
+                        name: ident.name.clone(),
+                        what: "a tensor axis",
+                        span: ident.span,
+                    });
+                    return None;
+                }
                 if self.const_scope.contains_key(&ident.name) {
                     return Some(ArrayLen::Param(ident.name.clone()));
                 }
@@ -404,8 +412,8 @@ impl TypeChecker {
     }
 
     /// Resolve an array length annotation to a semantic [`ArrayLen`]. A
-    /// literal becomes `Fixed`; a name is accepted only when it is an in-scope const
-    /// generic parameter (becoming `Param`), else it is an unknown length.
+    /// literal becomes `Fixed`; a name is accepted only when it is an in-scope extent
+    /// parameter (becoming `Param`), else it is an unknown length.
     fn resolve_array_size(
         &mut self,
         size: &ArraySize,
@@ -424,7 +432,14 @@ impl TypeChecker {
             }
             ArraySize::Literal(n) => Some(ArrayLen::Fixed(*n as usize)),
             ArraySize::Const(ident) => {
-                if self.const_scope.contains_key(&ident.name) {
+                if self.value_consts.contains(&ident.name) {
+                    self.record_error(TypeError::ConstParamSizes {
+                        name: ident.name.clone(),
+                        what: "an array",
+                        span: ident.span,
+                    });
+                    None
+                } else if self.const_scope.contains_key(&ident.name) {
                     Some(ArrayLen::Param(ident.name.clone()))
                 } else {
                     self.record_error(TypeError::UnknownArrayLength {

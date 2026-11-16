@@ -1,5 +1,6 @@
 // Tensor shape generics: `func f<M, K>(t: Tensor<f32, [M, K]>)`. A bare name in a tensor
-// shape is a compile-time `u32` value, not a type, inferred from the argument's shape. One
+// shape is an extent, a compile-time `u64` value, not a type, inferred from the argument's
+// shape. One
 // template is specialized per distinct set of extents, so it costs nothing at run time over
 // a hand-written version. A parameter that appears twice must have the same extent both
 // times, so a shape mismatch is a compile error. A `where` clause states the rest, such as
@@ -37,9 +38,10 @@ where N > 0
     return out
 }
 
-// The bare name is sugar for this spelling; both declare the same `const K: u32`.
-func width<const K: u32>(t: &Tensor<i32, [K]>) -> i32 {
-    return K as i32
+// A `const` parameter is a value that sizes nothing: `SCALE` multiplies the extent but
+// names no axis. Written in the shape it would be an error whose hint is the bare form.
+func scaled_width<K, const SCALE: u32>(t: &Tensor<i32, [K]>) -> u64 {
+    return K * (SCALE as u64)
 }
 
 func main() -> i32 {
@@ -67,7 +69,7 @@ func main() -> i32 {
     val stepped = decayed(row, &step)
     println("decayed(row)[2]      = {stepped[2]}")
 
-    println("width(&pair)         = {width(&pair)}")
+    println("scaled_width::<2, 3> = {scaled_width::<2, 3>(&pair)}")
 
     return rank_two_size(&wide) + last(&pair) + stepped[2]
 }

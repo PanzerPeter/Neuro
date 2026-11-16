@@ -190,7 +190,12 @@ impl TypeChecker {
     ) -> MethodGenerics {
         let const_types = generics
             .iter()
-            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Const(_)))
+            .filter(|g| {
+                matches!(
+                    g.kind,
+                    ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent
+                )
+            })
             .map(|g| {
                 let ty = self.const_scope.get(&g.name.name).cloned();
                 (g.name.name.clone(), ty.unwrap_or(Type::Unknown))

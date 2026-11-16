@@ -137,7 +137,7 @@ module per declaration kind beside it. `tests/` is split by subject.
   (`kernel_call_binding_temporaries`): every argument that is not a place goes, in order, to a
   `$kernel_arg<i>` of its parameter's written type, and lowering rewrites the call the same way.
   `check_function` sets `in_kernel` for a `@kernel` body, where `thread_id` and `block_id` not
-  shadowed by a local read as `u32` through `.x` / `.y` / `.z` (`check_grid_position`, called
+  shadowed by a local read as `u64` through `.x` / `.y` / `.z` (`check_grid_position`, called
   first in field access). Read whole, either is `Type::GridPosition`, which only a `val`
   without annotation may bind (`check_grid_binding`, before the initializer is checked) and
   whose locals are read through the same fields; any other whole read is refused
@@ -954,8 +954,11 @@ template unified with the expected parameters. With no function type expected it
 base name matches the scrutinee's instance and binds payloads at the instance's concrete types.
 `Option` / `Result` are **not** special-cased anywhere here: `neurc` injects their declarations.
 
-**Const generics, `where`, turbofish.** `const_scope` holds const params (name → int type) and
-`enter/exit_generic_scope` sets both scopes. `Type::Array.size` and the `extent` of every
+**Size and const generics, `where`, turbofish.** `const_scope` holds every value parameter
+(name → int type, `u64` for an extent) and `value_consts` the ones written `const NAME: T`,
+which size nothing; `enter/exit_generic_scope` sets the scopes. An array length or tensor
+extent naming a `value_consts` entry, and an `impl` passing one to its type's extent
+(`register_generic_impl`), is `ConstParamSizes`, whose hint is the bare form. `Type::Array.size` and the `extent` of every
 `TensorAxis` in `Type::Tensor.shape` are an `ArrayLen`
 (`Fixed` / `Param` / `Dynamic`, the last reachable only from a tensor's `?`) and a
 `Type::ConstValue` marker carries a const argument through
@@ -966,10 +969,10 @@ predicates (`eval_const_predicate`); generic-struct instantiation does the same 
 A predicate whose arithmetic has no value (a zero divisor, an overflow) is `ConstHasNoValue`
 rather than skipped; only a still-symbolic one waits for the concrete instance. A constant `<<`
 outside its type's width is refused by `const_eval`'s `shift_left` with the operator's span.
-Errors: `UnknownArrayLength`, `ConstPredicateViolated`, `TurbofishCountMismatch`,
-`TurbofishKindMismatch`, `ConstParamNotInteger`.
+Errors: `UnknownArrayLength`, `ConstParamSizes`, `ConstPredicateViolated`,
+`TurbofishCountMismatch`, `TurbofishKindMismatch`, `ConstParamNotInteger`.
 
-**Shape generics.** A tensor extent written as a name is a const parameter the parser has
+**Shape generics.** A tensor extent written as a name is an extent parameter the parser has
 already re-kinded, so nothing here treats it specially except where a symbolic extent has no
 number to check against. `resolve_type` maps a `TensorExtent::Param` to `ArrayLen::Param` when
 `const_scope` knows the name and reports `UnknownTensorDimension` otherwise.

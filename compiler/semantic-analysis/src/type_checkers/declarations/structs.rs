@@ -377,13 +377,13 @@ impl TypeChecker {
         // template's own parameter names, so it can only stand for every instance and
         // must name the parameters as the declaration does. A concrete argument
         // (`impl Tr for W<i32>`) or a renamed one would fail inside the body instead.
-        let template: Vec<String> = if is_enum {
-            self.generic_enums.get(&base).map(|d| &d.generics)
+        let declared: Vec<ast_types::GenericParam> = if is_enum {
+            self.generic_enums.get(&base).map(|d| d.generics.clone())
         } else {
-            self.generic_structs.get(&base).map(|d| &d.generics)
+            self.generic_structs.get(&base).map(|d| d.generics.clone())
         }
-        .map(|generics| generics.iter().map(|g| g.name.name.clone()).collect())
         .unwrap_or_default();
+        let template: Vec<String> = declared.iter().map(|g| g.name.name.clone()).collect();
         let as_declared = def.type_args.len() == template.len()
             && def.type_args.iter().zip(&template).all(|(arg, name)| {
                 matches!(arg, ast_types::Type::Named(ident)
@@ -396,6 +396,24 @@ impl TypeChecker {
                 span: def.type_name.span,
             });
             return;
+        }
+        // A name passed to the type's extent is a size parameter, so it has the bare form.
+        for declared in declared
+            .iter()
+            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Extent))
+        {
+            if let Some(gp) = def
+                .generics
+                .iter()
+                .find(|g| g.name.name == declared.name.name)
+                && matches!(gp.kind, ast_types::GenericParamKind::Const(_))
+            {
+                self.record_error(TypeError::ConstParamSizes {
+                    name: gp.name.name.clone(),
+                    what: "the type's extent",
+                    span: gp.name.span,
+                });
+            }
         }
         self.enter_generic_scope(&def.generics, &def.lifetimes);
         // Read before the methods are registered, so these are the impl's bounds alone.
@@ -475,7 +493,10 @@ impl TypeChecker {
             for (gp, arg) in template.generics.iter().zip(args.iter()) {
                 // Validate each argument's kind: a const parameter takes a `ConstValue`,
                 // a type parameter takes a type.
-                let is_const = matches!(gp.kind, ast_types::GenericParamKind::Const(_));
+                let is_const = matches!(
+                    gp.kind,
+                    ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent
+                );
                 match arg {
                     Type::ConstValue(_) if is_const => {}
                     Type::ConstValue(_) => self.record_error(TypeError::TurbofishKindMismatch {

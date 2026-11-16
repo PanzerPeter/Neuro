@@ -156,7 +156,7 @@ trait Reg {
     func add(&self, n: impl Name) -> i32
     func add2<U>(&self, n: U) -> i32
         where U: Name
-    func head<const K: u32>(&self, xs: [i32; K]) -> i32 where K > 0
+    func head<K>(&self, xs: [i32; K]) -> i32 where K > 0
 }
 
 struct R { base: i32 }
@@ -164,7 +164,7 @@ struct R { base: i32 }
 impl Reg for R {
     func add<Z: Name>(&self, n: Z) -> i32 { self.base + n.name() }
     func add2(&self, n: impl Name) -> i32 { self.base + n.name() }
-    func head<const M: u32>(&self, xs: [i32; M]) -> i32 where M > 0 { xs[0] }
+    func head<M>(&self, xs: [i32; M]) -> i32 where M > 0 { xs[0] }
 }
 
 func go<T: Reg>(t: T) -> i32 {
@@ -181,10 +181,10 @@ fn a_where_predicate_is_checked_at_a_call_through_a_bound() {
     let err = compile_rejected(
         "where_call.nr",
         r#"
-trait Reg { func head<const K: u32>(&self, xs: [i32; K]) -> i32 where K > 1 }
+trait Reg { func head<K>(&self, xs: [i32; K]) -> i32 where K > 1 }
 struct R { base: i32 }
 impl Reg for R {
-    func head<const M: u32>(&self, xs: [i32; M]) -> i32 where M > 1 { xs[0] }
+    func head<M>(&self, xs: [i32; M]) -> i32 where M > 1 { xs[0] }
 }
 func go<T: Reg>(t: T) -> i32 { t.head([3]) }
 func main() -> i32 { go(R { base: 1 }) }

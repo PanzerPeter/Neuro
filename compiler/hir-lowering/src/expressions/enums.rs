@@ -124,10 +124,12 @@ impl Lowerer {
         for (index, gp) in generics.iter().enumerate() {
             let fallback = from_return.as_ref().and_then(|a| a.get(index).cloned());
             let arg = match &gp.kind {
-                ast_types::GenericParamKind::Const(_) => const_subst
-                    .get(&gp.name.name)
-                    .map(|v| crate::MonoArg::Const(*v))
-                    .or(fallback),
+                ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent => {
+                    const_subst
+                        .get(&gp.name.name)
+                        .map(|v| crate::MonoArg::Const(*v))
+                        .or(fallback)
+                }
                 ast_types::GenericParamKind::Type => subst
                     .get(&gp.name.name)
                     .cloned()
@@ -172,7 +174,12 @@ impl Lowerer {
         let consts = template
             .generics
             .iter()
-            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Const(_)))
+            .filter(|g| {
+                matches!(
+                    g.kind,
+                    ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent
+                )
+            })
             .map(|g| g.name.name.clone())
             .collect();
         (types, consts)

@@ -175,6 +175,10 @@ pub(crate) struct TypeChecker {
     /// reference to one resolves to that type; an array length naming one becomes an
     /// [`crate::types::ArrayLen::Param`]. Empty outside a generic definition.
     pub(crate) const_scope: HashMap<String, Type>,
+    /// The `const NAME: T` parameters among [`Self::const_scope`]: values that size
+    /// nothing, so an array length or a tensor extent naming one is an error. The rest
+    /// of that scope are extent parameters, declared by bare name.
+    pub(crate) value_consts: HashSet<String>,
     /// Explicit lifetime parameter names in scope while checking a definition's signature
     /// and body, e.g. `'a` from `func f<'a>(...)` (stored without the leading `'`).
     /// A reference annotation `&'a T` is well-formed only if `a` is present here. Empty
@@ -361,6 +365,7 @@ impl MethodGenerics {
 pub(crate) struct GenericScope {
     pub(crate) types: HashSet<String>,
     pub(crate) consts: HashMap<String, Type>,
+    pub(crate) value_consts: HashSet<String>,
     pub(crate) lifetimes: HashSet<String>,
     pub(crate) bounds: HashMap<String, Vec<BoundInfo>>,
 }
@@ -554,6 +559,7 @@ impl TypeChecker {
             struct_instances: HashMap::new(),
             generic_scope: HashSet::new(),
             const_scope: HashMap::new(),
+            value_consts: HashSet::new(),
             lifetime_scope: HashSet::new(),
             declared_lifetimes: HashMap::new(),
             self_borrowing_methods: HashSet::new(),

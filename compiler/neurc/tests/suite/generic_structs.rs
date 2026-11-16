@@ -368,3 +368,24 @@ func main() -> i32 {
 "#;
     assert_eq!(crate::compile_harness::run("bug_153.nr", source), 34);
 }
+
+/// Regression: with no annotation to name the instance, an unsuffixed literal in a field
+/// declared `u64` was lowered as an `i32`, so the field's top half read whatever was there.
+#[test]
+fn an_inferred_instance_types_a_concrete_field_from_its_declaration() {
+    let source = r#"
+struct Tagged<T> {
+    tag: T,
+    count: u64,
+}
+
+func main() -> i32 {
+    val t = Tagged { tag: true, count: 3 }
+    if t.count == 3 { 0 } else { 1 }
+}
+"#;
+    let exit = CompileTest::new()
+        .compile_and_run("concrete_field.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 0);
+}

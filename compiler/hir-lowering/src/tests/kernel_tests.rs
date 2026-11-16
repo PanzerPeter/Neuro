@@ -77,7 +77,7 @@ fn a_grid_field_is_a_position_of_the_thread_or_its_block() {
     ] {
         let init = binding_init(body, binding);
         assert_eq!(init.kind, HirExprKind::GridPosition { of, axis });
-        assert_eq!(init.ty, HirType::U32);
+        assert_eq!(init.ty, HirType::U64);
     }
 }
 

@@ -903,14 +903,14 @@ mod tests {
         assert_eq!(func.generics.len(), 1);
         assert!(matches!(
             func.generics[0].kind,
-            ast_types::GenericParamKind::Const(_)
+            ast_types::GenericParamKind::Extent
         ));
     }
 
-    /// A bare name used as an extent is a `const N: u32` parameter, so the signature
-    /// need not spell `const` on every dimension.
+    /// A bare name used as an extent is an extent parameter, so the signature need not
+    /// spell anything on every dimension.
     #[test]
-    fn a_shape_parameter_is_re_kinded_to_a_const_parameter() {
+    fn a_shape_parameter_is_re_kinded_to_an_extent() {
         let items = parse("func f<N>(x: Tensor<f32, [N, N]>) { }").expect("parses");
         let Some(Item::Function(func)) = items.first() else {
             panic!("expected a function item");
@@ -918,10 +918,7 @@ mod tests {
         let [param] = &func.generics[..] else {
             panic!("expected one generic parameter, got {:?}", func.generics);
         };
-        let ast_types::GenericParamKind::Const(ty) = &param.kind else {
-            panic!("expected a const parameter, got {:?}", param.kind);
-        };
-        assert!(matches!(ty, Type::Named(id) if id.name == "u32"));
+        assert_eq!(param.kind, ast_types::GenericParamKind::Extent);
     }
 
     /// A type parameter used only in ordinary positions keeps its kind: the re-kinding
