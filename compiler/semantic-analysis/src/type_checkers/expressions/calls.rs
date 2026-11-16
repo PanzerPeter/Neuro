@@ -456,6 +456,53 @@ impl TypeChecker {
         }
     }
 
+    /// Type `T::member(args)`, an associated function one of `T`'s bounds declares. Each
+    /// instance calls its type argument's own function, so the bound's signature is all a
+    /// body checked once can rely on. A method with a receiver is not reached this way.
+    fn check_bound_assoc_call(
+        &mut self,
+        param: &str,
+        member: &str,
+        type_args: &[ast_types::GenericArg],
+        args: &[ast_types::Expr],
+        span: Span,
+    ) -> Type {
+        let receiverless = self.param_bounds(param, span).iter().any(|bound| {
+            self.traits
+                .get(&bound.trait_name)
+                .and_then(|info| info.methods.get(member))
+                .is_some_and(|sig| sig.self_param.is_none())
+        });
+        match receiverless
+            .then(|| self.resolve_generic_trait_method(param, member, span))
+            .flatten()
+        {
+            Some(BoundMethod::Plain(params, ret)) => {
+                if !type_args.is_empty() {
+                    self.record_error(TypeError::TurbofishCountMismatch {
+                        name: member.to_string(),
+                        expected: 0,
+                        found: type_args.len(),
+                        span,
+                    });
+                }
+                self.check_call_args(args, &params, span);
+                ret
+            }
+            Some(BoundMethod::Generic(sig, _)) => {
+                self.check_generic_call_with(member, &sig, type_args, args, None, span)
+            }
+            None => {
+                self.record_error(TypeError::UnknownAssociatedFunction {
+                    type_name: param.to_string(),
+                    member: member.to_string(),
+                    span,
+                });
+                Type::Unknown
+            }
+        }
+    }
+
     /// Verify each bounded type parameter's concrete argument implements every required
     /// trait. A concrete struct or enum satisfies `T: Tr` when an `impl Tr for Type`
     /// exists; a type parameter passed through from an enclosing generic satisfies it
@@ -1003,6 +1050,17 @@ impl TypeChecker {
                         {
                             return Some(ty);
                         }
+                        // `x.exp()` on a `T: Float`, `x.wrapping_add(y)` on a `T: Integer`.
+                        if let Some(ty) = self.resolve_builtin_method(
+                            &obj_ty,
+                            object,
+                            &field.name,
+                            type_args,
+                            args,
+                            *span,
+                        ) {
+                            return Some(ty);
+                        }
                         self.record_error(missing_method(param.clone(), &field.name, *fa_span));
                         return Some(Type::Unknown);
                     }
@@ -1218,6 +1276,16 @@ impl TypeChecker {
                         args,
                         *path_span,
                         expected,
+                    ));
+                }
+                // `T::zero()`: an associated function reached through a bound on `T`.
+                if self.generic_scope.contains(&type_name.name) {
+                    return Some(self.check_bound_assoc_call(
+                        &type_name.name,
+                        &member.name,
+                        type_args,
+                        args,
+                        *path_span,
                     ));
                 }
                 if !is_enum

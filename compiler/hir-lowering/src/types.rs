@@ -199,8 +199,14 @@ impl Lowerer {
                 for dim in shape {
                     extents.push(crate::resolve_tensor_dim(dim, &self.const_subst)?);
                 }
+                let element = self.resolve_type(element_type)?;
+                if !is_tensor_scalar(&element) {
+                    return Err(LoweringError::NonScalarTensorElement {
+                        ty: element.to_string(),
+                    });
+                }
                 Ok(HirType::Tensor {
-                    element: Box::new(self.resolve_type(element_type)?),
+                    element: Box::new(element),
                     shape: extents,
                     names: AxisNames(
                         shape
@@ -212,6 +218,26 @@ impl Lowerer {
             }
         }
     }
+}
+
+/// Whether `ty` may be a tensor's element: a scalar with a fixed width.
+fn is_tensor_scalar(ty: &HirType) -> bool {
+    matches!(
+        ty,
+        HirType::I8
+            | HirType::I16
+            | HirType::I32
+            | HirType::I64
+            | HirType::U8
+            | HirType::U16
+            | HirType::U32
+            | HirType::U64
+            | HirType::F16
+            | HirType::BF16
+            | HirType::F32
+            | HirType::F64
+            | HirType::Bool
+    )
 }
 
 /// The HIR type denoted by an integer-literal suffix.

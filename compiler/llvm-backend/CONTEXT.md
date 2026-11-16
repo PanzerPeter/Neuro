@@ -1304,7 +1304,9 @@ user-declared and emits a private constant global `[N x ptr]` per `(trait, type)
 `HirTrait.methods` slot order, filled with per-method **thunks**. A slot can be a supertrait's, so
 it is filled from every method the type has, not the one impl. A type with no method for a slot
 gets no table: the supertrait is derived, and its methods exist only once a coercion asks
-hir-lowering to supply them, so nothing can read a table left out here. A thunk is needed because a `&self` method
+hir-lowering to supply them, so nothing can read a table left out here. A trait with a
+receiverless associated function gets none either: it is not object-safe, so no trait object of it
+exists, and a thunk would pass a receiver the function does not take. A thunk is needed because a `&self` method
 takes its struct by value while a trait object holds only a pointer, so the thunk loads the
 receiver and forwards; a `&mut self` method is already pointer-passed and forwards directly.
 A derived or builtin implementor has no method of the trait's name: hir-lowering emits the impl

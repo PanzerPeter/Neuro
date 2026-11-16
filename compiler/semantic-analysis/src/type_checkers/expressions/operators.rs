@@ -155,7 +155,12 @@ impl TypeChecker {
                     return Some(Type::Unknown);
                 }
 
-                if !left_ty.is_numeric() && !left_ty.is_half_float() {
+                let has_op = if matches!(op, BinaryOp::Modulo) {
+                    self.is_integral(&left_ty) || left_ty.is_numeric() || left_ty.is_half_float()
+                } else {
+                    self.is_arithmetic(&left_ty)
+                };
+                if !has_op {
                     self.record_error(TypeError::InvalidBinaryOperator {
                         op: op.to_string(),
                         left: left_ty.clone(),
@@ -231,11 +236,7 @@ impl TypeChecker {
                 // as a template, and each instance's real operator is found at lowering.
                 let ordered_param = matches!(left_ty.referent(), Type::Generic(_))
                     && self.satisfies_bound(left_ty.referent(), COMPARABLE_TRAIT);
-                if !left_ty.is_numeric()
-                    && !left_ty.is_half_float()
-                    && !left_ty.is_char()
-                    && !ordered_param
-                {
+                if !self.is_arithmetic(&left_ty) && !left_ty.is_char() && !ordered_param {
                     self.record_error(TypeError::InvalidBinaryOperator {
                         op: op.to_string(),
                         left: left_ty.clone(),
@@ -250,7 +251,7 @@ impl TypeChecker {
 
             // Bitwise operators: require integer types, return same type
             BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl => {
-                if !left_ty.is_integer() {
+                if !self.is_integral(&left_ty) {
                     self.record_error(TypeError::InvalidBinaryOperator {
                         op: op.to_string(),
                         left: left_ty.clone(),
@@ -558,9 +559,9 @@ impl TypeChecker {
 
         // For unary operations, propagate expected type to operand if appropriate
         let expected_operand = match op {
-            UnaryOp::Negate => expected.filter(|t| t.is_numeric() || t.is_half_float()),
+            UnaryOp::Negate => expected.filter(|t| self.is_arithmetic(t)),
             UnaryOp::Not => None,
-            UnaryOp::BitNot => expected.filter(|t| t.is_integer()),
+            UnaryOp::BitNot => expected.filter(|t| self.is_integral(t)),
         };
 
         let operand_ty = self
@@ -583,7 +584,7 @@ impl TypeChecker {
 
         match op {
             UnaryOp::Negate => {
-                if !operand_ty.is_numeric() && !operand_ty.is_half_float() {
+                if !self.is_arithmetic(&operand_ty) {
                     self.record_error(TypeError::InvalidOperator {
                         op: op.to_string(),
                         ty: operand_ty,
@@ -605,7 +606,7 @@ impl TypeChecker {
                 Some(Type::Bool)
             }
             UnaryOp::BitNot => {
-                if !operand_ty.is_integer() {
+                if !self.is_integral(&operand_ty) {
                     self.record_error(TypeError::InvalidOperator {
                         op: op.to_string(),
                         ty: operand_ty,

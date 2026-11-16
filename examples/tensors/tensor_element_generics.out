@@ -1,0 +1,7 @@
+lerp f64        = 2.5
+lerp bf16       = 2.0
+forward f32     = [4.5, 4.5]
+forward i64     = [14, 25]
+rms f16         = 1.5810546875
+odd_count u8    = 3
+last bool       = true

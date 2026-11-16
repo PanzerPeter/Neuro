@@ -131,6 +131,20 @@ export trait Hashable {
     func hash(&self) -> u64
 }
 
+// The numeric families, as bounds for a body generic over its element type: `T: Float`
+// gives `x * 2.0` and `.exp()`, `T: Integer` gives `%` and the bitwise operators. The
+// compiler implements them for the scalars and nothing else, so no program writes an impl.
+export trait Numeric: Copy {
+    func zero() -> Self
+    func one() -> Self
+}
+
+export trait Integer: Numeric {}
+
+export trait Float: Numeric {
+    func from_f64(x: f64) -> Self
+}
+
 impl Debug for ParseError {
     func fmt_debug(&self, out: &mut StringBuilder) {
         match self {

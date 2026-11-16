@@ -30,6 +30,7 @@ use neuro_hir::{HirGridIndex, HirProgram, HirType};
 use shared_types::Span;
 
 mod autodiff;
+mod bound_assoc;
 mod closures;
 mod collections;
 mod container_iterators;
@@ -122,6 +123,14 @@ pub enum LoweringError {
         "a `&string` cannot become a `&dyn {trait_name}` here: a trait object holds a thin pointer, so it must borrow a `string` binding or field directly (`&s`)"
     )]
     StringTraitObject { trait_name: String },
+
+    /// A generic body builds a tensor over a type parameter with no bound, and this instance
+    /// made the parameter something that is not a scalar. The checker refuses that where the
+    /// tensor shows in a signature; one built inside a body alone shows here.
+    #[error(
+        "a tensor's element must be an integer, a floating-point type or `bool`, but this instance makes it `{ty}`: bound the parameter by `Numeric` to refuse such a type argument at the call"
+    )]
+    NonScalarTensorElement { ty: String },
 }
 
 /// How many generic instances deep one instantiation chain may run before lowering

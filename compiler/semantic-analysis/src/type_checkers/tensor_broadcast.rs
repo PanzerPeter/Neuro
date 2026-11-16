@@ -103,7 +103,7 @@ enum Operand {
     Scalar(Type),
 }
 
-fn classify(ty: &Type) -> Option<Operand> {
+fn classify(ty: &Type, arithmetic: bool) -> Option<Operand> {
     if let Type::Tensor { element, shape } = ty.referent() {
         return Some(Operand::Tensor {
             element: (**element).clone(),
@@ -113,7 +113,7 @@ fn classify(ty: &Type) -> Option<Operand> {
     }
     // A half-precision scalar broadcasts against a tensor like any other: the operation
     // is the tensor's, and only two half scalars fall back to the scalar rule.
-    (ty.is_numeric() || ty.is_half_float()).then(|| Operand::Scalar(ty.clone()))
+    arithmetic.then(|| Operand::Scalar(ty.clone()))
 }
 
 impl TypeChecker {
@@ -180,7 +180,7 @@ impl TypeChecker {
             });
             return false;
         }
-        match classify(value_ty) {
+        match classify(value_ty, self.is_arithmetic(value_ty)) {
             Some(Operand::Scalar(scalar)) if target_element.is_compatible_with(&scalar) => true,
             Some(Operand::Tensor { element, shape, .. })
                 if target_element.is_compatible_with(&element) =>
@@ -233,7 +233,10 @@ impl TypeChecker {
             });
             return Type::Unknown;
         }
-        let (Some(lhs), Some(rhs)) = (classify(left_ty), classify(right_ty)) else {
+        let (Some(lhs), Some(rhs)) = (
+            classify(left_ty, self.is_arithmetic(left_ty)),
+            classify(right_ty, self.is_arithmetic(right_ty)),
+        ) else {
             self.record_error(TypeError::InvalidBinaryOperator {
                 op: op.to_string(),
                 left: left_ty.clone(),
@@ -302,7 +305,7 @@ impl TypeChecker {
         };
         // The element carries the arithmetic: `bool` has none. A half-precision element
         // does, although its scalar does not: the scalar restriction stops at tensor ops.
-        if !element.is_numeric() && !element.is_half_float() {
+        if !self.is_arithmetic(&element) {
             self.record_error(TypeError::TensorElementNotArithmetic {
                 op: op.to_string(),
                 element,

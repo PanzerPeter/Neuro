@@ -196,7 +196,7 @@ The buffer must reach fd 1 before the process stops. `main` returns and the pani
 
 A closure value is `{ fn_ptr, env_ptr }`. The environment is a `malloc`'d, reference-counted block, shared by every copy of the value, and it is null when nothing is captured. The closure function takes the environment as its first parameter, and a call through a local variable is an indirect call. `__neuro_fn_retain` and `__neuro_fn_release` manage the count.
 
-A `&dyn Trait` is `{ data, vtable }`. Each `impl Trait for Type` gets a constant `[N x ptr]` vtable in the trait's declaration order. Its slots are thunks: a `&self` method takes its struct by value, so the thunk loads the receiver first. A derived or builtin implementor exposes its trait methods under a `<method>$dyn` name, which the vtable uses.
+A `&dyn Trait` is `{ data, vtable }`. Each `impl Trait for Type` gets a constant `[N x ptr]` vtable in the trait's declaration order, unless the trait has a function with no receiver: such a trait is not object-safe, so no trait object can read a table. Its slots are thunks: a `&self` method takes its struct by value, so the thunk loads the receiver first. A derived or builtin implementor exposes its trait methods under a `<method>$dyn` name, which the vtable uses.
 
 ### Drops and the pool arena
 

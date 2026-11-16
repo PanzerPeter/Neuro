@@ -373,7 +373,7 @@ impl TypeChecker {
 
         // The element carries the arithmetic: `bool` has none. A half-precision element
         // does, although its scalar does not: the scalar restriction stops at tensor ops.
-        if !element.is_numeric() && !element.is_half_float() {
+        if !self.is_arithmetic(element) {
             self.record_error(TypeError::TensorElementNotArithmetic {
                 op: format!("{op}="),
                 element: element.clone(),

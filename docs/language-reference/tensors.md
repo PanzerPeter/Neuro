@@ -17,7 +17,7 @@ func loss(l: Tensor<f32, []>) { }        // rank-0 scalar tensor
 func image(px: Tensor<u8, [3, 224, 224]>) { }
 ```
 
-The shape is a bracketed list of non-negative integer literals, of shape parameters inside a generic definition ([Shape generics](#shape-generics)), or of `?`. `[]` is the rank-0 scalar tensor. The element type is a fixed-width scalar: any integer type, `f16`, `bf16`, `f32`, `f64` or `bool`.
+The shape is a bracketed list of non-negative integer literals, of shape parameters inside a generic definition ([Shape generics](#shape-generics)), or of `?`. `[]` is the rank-0 scalar tensor. The element type is a fixed-width scalar: any integer type, `f16`, `bf16`, `f32`, `f64` or `bool`, or a type parameter inside a generic definition ([Element-type generics](#element-type-generics)).
 
 Rank and every extent are part of the type, so a mismatch is a compile error naming both types:
 
@@ -333,6 +333,31 @@ Some things a shape parameter does not do:
 - A tensor **literal** cannot be written against a symbolic extent, since one literal would have to serve every instantiation. Build the tensor with a constructor instead.
 - A name that no enclosing signature declares is an error naming the dimension, not a silently accepted extent: ``tensor dimension 'N' is not a known extent``. A struct, enum or `impl` with a symbolic extent declares it as a const parameter, as in `struct Dense<const IN: u32, const OUT: u32> { w: Tensor<f32, [IN, OUT]> }`.
 - `.reshape` and `.flatten` are not available on a receiver whose extent is a shape parameter, since there is no element count to check against. `.t()` and `.permute` are, because they only reorder axes.
+
+## Element-type generics
+
+The element type may be a type parameter, and its bound says what the body may do with the tensor. A body is checked once against the bound and compiled once per element type it is called with.
+
+| Bound on `T` | Operations on a `Tensor<T, S>` |
+|---|---|
+| none | moving, indexing, `.to` and the shape casts |
+| `Numeric` | element-wise arithmetic and broadcasting against a `T`, `@`, compound assignment, `.sum()` / `.max()` / `.min()` and the sorts, `einsum` |
+| `Float` | everything `Numeric` gives, plus `.mean()` and the elementwise math methods |
+
+```neuro
+struct Dense<T> {
+    w: Tensor<T, [3, 2]>,
+    b: Tensor<T, [1, 2]>,
+}
+
+impl<T: Numeric> Dense<T> {
+    func forward(&self, x: &Tensor<T, [1, 3]>) -> Tensor<T, [1, 2]> {
+        x @ &self.w + &self.b      // one body, used at `f32` and at `i64`
+    }
+}
+```
+
+An unbounded `T` admits `bool`, and a call that makes it anything other than a scalar is refused: ``tensor element type string is not a numeric scalar`` at the call, or, for a tensor built only inside the body, when that instance is compiled. The bounds are described under [Numeric bounds](generics-and-traits.md#numeric-bounds), and [`tensor_element_generics.nr`](../../examples/tensors/tensor_element_generics.nr) runs these forms.
 
 ## Named dimensions
 

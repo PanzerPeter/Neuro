@@ -184,7 +184,7 @@ impl TypeChecker {
             return seed;
         }
 
-        if !ret.is_integer() && !ret.is_float() && !ret.is_half_float() {
+        if !self.is_arithmetic(&ret) {
             self.record_error(TypeError::TensorApplyResultElement {
                 method: method.to_string(),
                 found: ret,

@@ -1,0 +1,4 @@
+f64 : w = 2.0000, b = 1.0000, loss = 0.000000
+f32 : w = 2.0000, b = 1.0000, loss = 0.000000
+bf16: w = 1.9609, b = 0.9727, loss = 0.004486
+bf16 stalled short of the line

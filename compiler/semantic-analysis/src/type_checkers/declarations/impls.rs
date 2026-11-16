@@ -6,6 +6,7 @@
 
 use super::{CLONE_TRAIT, COPY_TRAIT, DERIVABLE_TRAITS, DERIVE_ATTRIBUTE, DROP_METHOD, DROP_TRAIT};
 use crate::errors::TypeError;
+use crate::type_checkers::numeric_bounds::is_numeric_family;
 use crate::type_checkers::operator_traits::{
     OperatorForm, is_operator_trait, is_provided_method, operator_trait_spec,
 };
@@ -38,6 +39,17 @@ impl TypeChecker {
         // The block's associated-type bindings are in scope for every signature below:
         // a method may write `Self::Item` for what this impl bound it to.
         let saved_assoc = self.enter_impl_assoc(def);
+
+        if let Some(trait_name) = &def.trait_name
+            && is_numeric_family(&trait_name.name)
+            && !self.in_prelude()
+        {
+            self.record_error(TypeError::NumericFamilyImpl {
+                trait_name: trait_name.name.clone(),
+                type_name: struct_name.clone(),
+                span: trait_name.span,
+            });
+        }
 
         // Recognize the compiler-known `Drop` lang-item. It is matched by name
         // here exactly like `Copy`/`Clone` derives, without the general trait system.

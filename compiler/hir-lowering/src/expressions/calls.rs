@@ -109,7 +109,7 @@ const FLAT_METHOD: &str = "flat";
 impl Lowerer {
     /// Lower a call, dispatching on the callee shape: free/builtin function,
     /// instance method, or associated function.
-    pub(super) fn lower_call(
+    pub(crate) fn lower_call(
         &mut self,
         func: &Expr,
         type_args: &[ast_types::GenericArg],
@@ -129,6 +129,17 @@ impl Lowerer {
             Expr::FieldAccess { object, field, .. } => {
                 self.lower_method_call(object, &field.name, type_args, args, expected, span)
             }
+            // `T::zero()` in a generic instance, through `T`'s bound.
+            Expr::Path {
+                type_name, member, ..
+            } if self.type_subst.contains_key(&type_name.name) => self.lower_bound_assoc_call(
+                &type_name.name,
+                member,
+                type_args,
+                args,
+                expected,
+                span,
+            ),
             // `Tensor::<f32, [3, 3]>::zeros()` and the five other construction helpers, unless
             // the program declares its own `Tensor`.
             Expr::Path {

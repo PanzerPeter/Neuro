@@ -114,6 +114,7 @@ mod nested_block_comments;
 mod nested_generics;
 mod newtype;
 mod null_coalesce;
+mod numeric_bounds;
 mod operator_traits;
 mod operators;
 mod option_result;

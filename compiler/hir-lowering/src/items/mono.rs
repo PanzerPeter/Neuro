@@ -391,8 +391,8 @@ impl Lowerer {
     /// for `Copy` and `Clone`.
     fn implements_derivable(&self, ty: &HirType, trait_name: &str) -> bool {
         use super::register::{
-            CLONE_TRAIT, COMPARABLE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, HASHABLE_TRAIT,
-            PARTIAL_EQ_TRAIT,
+            CLONE_TRAIT, COMPARABLE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, FLOAT_TRAIT, HASHABLE_TRAIT,
+            INTEGER_TRAIT, NUMERIC_TRAIT, PARTIAL_EQ_TRAIT,
         };
         let integer = matches!(
             ty,
@@ -426,6 +426,9 @@ impl Lowerer {
                 _ => integer || float || text || derives(&self.partial_eq_structs),
             },
             COMPARABLE_TRAIT => integer || matches!(ty, HirType::Char),
+            NUMERIC_TRAIT => integer || float,
+            INTEGER_TRAIT => integer,
+            FLOAT_TRAIT => float,
             _ => false,
         }
     }

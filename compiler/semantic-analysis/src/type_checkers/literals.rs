@@ -40,6 +40,21 @@ impl TypeChecker {
         span: Span,
     ) -> Type {
         if let Some(exp_ty) = expected {
+            // A `T: Integer` may be instantiated as `i8` or as `u8`, and the body is checked
+            // once, so its literal must fit both.
+            if matches!(exp_ty, Type::Generic(_)) && self.is_integral(exp_ty) {
+                if self.check_integer_range(value, &Type::I8)
+                    && self.check_integer_range(value, &Type::U8)
+                {
+                    return exp_ty.clone();
+                }
+                self.record_error(TypeError::IntegerLiteralOutOfRange {
+                    value,
+                    ty: exp_ty.clone(),
+                    span,
+                });
+                return Type::Unknown;
+            }
             // If expected type is an integer type, try to use it
             if exp_ty.is_integer() {
                 if self.check_integer_range(value, exp_ty) {
@@ -99,6 +114,9 @@ impl TypeChecker {
             Type::F32 => (magnitude as f32).is_infinite(),
             Type::F16 => magnitude >= F16_OVERFLOW_AT,
             Type::BF16 => magnitude >= BF16_OVERFLOW_AT,
+            // A `T: Float` literal must fit every float type, and `f16`'s range is the
+            // narrowest.
+            Type::Generic(_) => magnitude >= F16_OVERFLOW_AT,
             _ => false,
         };
         if overflows {
@@ -112,7 +130,7 @@ impl TypeChecker {
     /// Infer the type of a float literal based on expected type
     pub(crate) fn infer_float_type(&self, expected: Option<&Type>) -> Type {
         match expected {
-            Some(exp_ty) if exp_ty.is_float() || exp_ty.is_half_float() => exp_ty.clone(),
+            Some(exp_ty) if self.is_floating(exp_ty) => exp_ty.clone(),
             _ => Type::F64,
         }
     }

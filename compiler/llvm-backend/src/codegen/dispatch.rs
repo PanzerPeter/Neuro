@@ -93,6 +93,11 @@ impl<'ctx> CodegenContext<'ctx> {
             else {
                 return Ok(());
             };
+            // An associated function has no receiver to dispatch on, so its trait is not
+            // object-safe and no trait object can reach the table.
+            if method.self_param.is_none() {
+                return Ok(());
+            }
             let thunk = self.emit_vtable_thunk(trait_name, &type_name, &method.name, method)?;
             slots.push(thunk.as_global_value().as_pointer_value().into());
         }

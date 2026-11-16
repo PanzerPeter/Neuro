@@ -17,7 +17,7 @@ pub(crate) const SELF_TYPE_NAME: &str = "Self";
 /// Whether `ty` may be a tensor's element type. A tensor buffer is a flat, densely
 /// packed run of fixed-width scalars, which is exactly the set below: `string`, an
 /// aggregate, or a reference has no such representation.
-fn is_tensor_element(ty: &Type) -> bool {
+pub(super) fn is_tensor_element(ty: &Type) -> bool {
     matches!(
         ty,
         Type::I8
@@ -323,7 +323,7 @@ impl TypeChecker {
                 span,
             } => {
                 let element = self.resolve_type(element_type)?;
-                if !is_tensor_element(&element) {
+                if !is_tensor_element(&element) && !matches!(element, Type::Generic(_)) {
                     self.record_error(TypeError::NonScalarTensorElement {
                         ty: element,
                         span: *span,

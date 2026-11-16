@@ -866,6 +866,15 @@ pub enum TypeError {
         span: Span,
     },
 
+    #[error(
+        "`{trait_name}` is implemented by the compiler for the numeric scalars only, so `impl {trait_name} for {type_name}` is not allowed"
+    )]
+    NumericFamilyImpl {
+        trait_name: String,
+        type_name: String,
+        span: Span,
+    },
+
     #[error("`impl {trait_name} for {type_name}` requires `impl {supertrait} for {type_name}`")]
     MissingSupertraitImpl {
         trait_name: String,
@@ -1735,6 +1744,7 @@ impl TypeError {
             | Self::MissingAssociatedType { span, .. }
             | Self::UnconstrainedAssociatedType { span, .. }
             | Self::AssociatedTypeBoundMismatch { span, .. }
+            | Self::NumericFamilyImpl { span, .. }
             | Self::MissingSupertraitImpl { span, .. }
             | Self::SupertraitCycle { span, .. }
             | Self::ReturnTypeMismatch { span, .. }

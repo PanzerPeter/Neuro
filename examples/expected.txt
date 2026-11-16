@@ -91,6 +91,7 @@ tensors/tensor_operators.nr           36
 tensors/tensor_matmul.nr              4
 tensors/tensor_reductions.nr          21
 tensors/tensor_shape_generics.nr      41
+tensors/tensor_element_generics.nr    25
 tensors/tensor_shape_manipulation.nr  44
 tensors/tensor_sorting.nr             21
 tensors/tensor_einsum.nr              40
@@ -216,6 +217,7 @@ showcase/optimizer_step.nr           32
 showcase/owned_aggregates.nr         34
 showcase/owned_catalog.nr            15
 showcase/perceptron.nr               8
+showcase/precision_sweep.nr          2
 showcase/quantized_readings.nr       3
 showcase/ranked_batch.nr             130
 showcase/ranked_finish.nr            176

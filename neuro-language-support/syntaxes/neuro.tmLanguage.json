@@ -493,7 +493,7 @@
         {
           "comment": "Lang-item traits the compiler recognises by name, operator traits included.",
           "name": "support.type.trait.neuro",
-          "match": "\\b(Copy|Clone|Drop|PartialEq|Comparable|Hashable|Debug|Iterator|IntoIterator|PoolAware|Add|Sub|Mul|Div|Rem|Neg|BitAnd|BitOr|BitXor|BitNot|Shl|MatMul|AddAssign|SubAssign|MulAssign|DivAssign|RemAssign|BitAndAssign|BitOrAssign|BitXorAssign|ShlAssign)\\b"
+          "match": "\\b(Copy|Clone|Drop|PartialEq|Comparable|Hashable|Debug|Numeric|Integer|Float|Iterator|IntoIterator|PoolAware|Add|Sub|Mul|Div|Rem|Neg|BitAnd|BitOr|BitXor|BitNot|Shl|MatMul|AddAssign|SubAssign|MulAssign|DivAssign|RemAssign|BitAndAssign|BitOrAssign|BitXorAssign|ShlAssign)\\b"
         }
       ]
     },

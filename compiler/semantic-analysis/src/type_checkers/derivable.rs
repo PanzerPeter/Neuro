@@ -10,6 +10,7 @@ use ast_types::Expr;
 use shared_types::Span;
 
 use super::TypeChecker;
+use super::numeric_bounds::{is_numeric_family, scalar_in_family};
 use super::operator_traits::comparison_method;
 use crate::types::{CollectionKind, Type};
 
@@ -73,6 +74,7 @@ impl TypeChecker {
             PARTIAL_EQ_TRAIT => self.is_derived_comparable(ty),
             // The built-in total orders. No float has one, because of `NaN`.
             COMPARABLE_TRAIT => ty.is_integer() || ty.is_char(),
+            family if is_numeric_family(family) => scalar_in_family(ty, family),
             _ => false,
         }
     }

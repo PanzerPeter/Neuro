@@ -3,8 +3,8 @@
 // Whether `actual` is within `tolerance` of `expected`. The difference is measured absolutely
 // while `expected` is at most 1 in magnitude and relative to it above that, so one tolerance
 // serves values near zero and large ones alike. Equal values are close, infinities included;
-// NaN is close to nothing.
-export func is_close(actual: f64, expected: f64, tolerance: f64) -> bool {
+// NaN is close to nothing. Any float type serves, all three arguments the same one.
+export func is_close<T: Float>(actual: T, expected: T, tolerance: T) -> bool {
     if actual == expected {
         return true
     }
@@ -20,7 +20,7 @@ export func is_close(actual: f64, expected: f64, tolerance: f64) -> bool {
 
 // Panic, naming both values, unless `actual` is within `tolerance` of `expected` as
 // `is_close` measures it.
-export func assert_close(actual: f64, expected: f64, tolerance: f64) {
+export func assert_close<T: Float>(actual: T, expected: T, tolerance: T) {
     if !is_close(actual, expected, tolerance) {
         panic("assert_close: {actual} is not within {tolerance} of {expected}")
     }

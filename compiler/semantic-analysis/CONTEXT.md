@@ -1013,6 +1013,23 @@ type parameter bounded by `PartialEq` or `Comparable`; lowering turns it into th
 `{x:?}` on a struct accepts a hand-written `Debug` as well as the derive, and on an enum, a
 newtype or a `T: Debug` parameter accepts the trait (`debugs_by_trait`).
 
+**The numeric families** (`numeric_bounds.rs`). The prelude declares `Numeric: Copy` (with
+`zero()` and `one()`), `Integer: Numeric` and `Float: Numeric` (with `from_f64`), and
+`implements_without_impl` answers them for the scalars through `scalar_in_family`; an `impl` of
+one outside the prelude is `NumericFamilyImpl`. Every check that used to ask a scalar predicate
+asks `is_arithmetic`, `is_integral` or `is_floating` instead, which also answer for a type
+parameter carrying the bound: the operators, the tensor element checks (broadcast, reductions,
+sorts, `einsum`, `.map`'s result, compound assignment), the scalar methods, `.to_checked` /
+`.parse` targets and interpolation. A literal takes a bounded parameter's type when it fits every
+instance: an integer literal under `Integer` must fit both `i8` and `u8`, a float literal under
+`Float` must fit `f16`. Each instance is lowered at its concrete type, so nothing past the checker
+knows the families exist except lowering's `T::zero()` / `T::one()` / `T::from_f64` and its
+bound check for an instance's impl.
+
+**Associated functions through a bound.** `T::f(args)` with `T` in `generic_scope` goes to
+`check_bound_assoc_call`, which finds a receiverless `f` on one of `T`'s bounds or their
+supertraits through `resolve_generic_trait_method`; lowering calls the type argument's own.
+
 **Supertraits.** `TraitInfo.supertraits` holds the direct list, each binding kept open as
 `open_trait_signature` keeps a signature. `generic_bounds` stores what was written and every
 reader goes through the relation: `trait_closure` and `param_traits` answer by name,
@@ -1099,6 +1116,7 @@ same check for return-position `impl Trait<Assoc = U>`.
   so `a + a` is a use after move, and the right operand goes through `check_call_args`. A
   comparison instead reads its right operand, bare or borrowed, and moves nothing. A type
   parameter takes the orderings from a `Comparable` bound; the arithmetic traits give it none.
+  A `Numeric`, `Integer` or `Float` bound gives it the built-in operators of its family.
 - **By-value tensor operators** (`type_checkers/tensor_broadcast.rs`) run **before** the
   operator-trait and built-in numeric paths, on either operand being a tensor or a borrow of
   one. `broadcast_shapes` joins the two shapes: aligned at the trailing axis, an extent of 1
@@ -1415,7 +1433,10 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   `.permute` / `.flatten`, the only places one is resolved as an identifier rather than
   compared (see **Tensor shape manipulation**); HIR lowering carries the names for that one
   consumer and every backend still reads `TensorDim.extent` alone. `resolve_type` restricts the element to a fixed-width scalar (integers,
-  `f16`/`bf16`/`f32`/`f64`, `bool`) and reports `NonScalarTensorElement` otherwise. A tensor owns
+  `f16`/`bf16`/`f32`/`f64`, `bool`) or a type parameter, and reports `NonScalarTensorElement`
+  otherwise. A parameter's type argument is checked where it is supplied:
+  `substitute_tensor_element` refuses a non-scalar one at the call or annotation, and a tensor
+  built only inside a generic body is refused per instance by lowering. A tensor owns
   its buffer, so `is_type_copy` is false and `is_type_move_tracked` is true: it moves on
   assignment and on being passed. `Tensor` is a prelude name a module may shadow, so the
   shape-less spelling `Tensor<f32>` reaches the `Type::Generic` arm, where an unshadowed
@@ -1627,7 +1648,8 @@ Errors: `CollectionTypeNotInferable`, `InvalidCollectionElement`, `InvalidCollec
 ### String interpolation
 `type_checkers/expressions/interpolation.rs`. Each hole's expression is checked, its type
 auto-dereferenced through a borrow, and its written spec validated against that type: radix kinds
-need an integer, fixed-point and scientific need a float, `+` needs a signed integer or float,
+need an integer, fixed-point and scientific need a float, `+` needs a signed integer or float
+(each answered for a bounded type parameter too, through the numeric-family predicates),
 zero fill cannot combine with `<`/`^`, and width and precision are bounded. The literal always
 types as `string`, so a rejected hole does not cascade. A struct hole answers through
 `struct_render_obstacle`, which distinguishes a missing `@derive(Debug)` from a missing `:?`.

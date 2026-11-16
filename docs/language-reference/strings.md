@@ -270,7 +270,7 @@ func area(width: &string, height: &string) -> Result<f64, ParseError> {
 }
 ```
 
-The receiver is read, not moved. A `&string`, a `.slice` view and a temporary all work. The turbofish is required, and `T` must be a concrete type, so `.parse::<T>()` on a type parameter is an error.
+The receiver is read, not moved. A `&string`, a `.slice` view and a temporary all work. The turbofish is required. Inside a generic body `T` may be a type parameter bounded by `Numeric` (see [Numeric bounds](generics-and-traits.md#numeric-bounds)); an unbounded one is an error.
 
 The text must be the whole value. Whitespace around it is `Invalid`.
 

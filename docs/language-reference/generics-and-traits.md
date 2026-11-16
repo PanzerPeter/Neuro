@@ -279,7 +279,7 @@ impl Resizable for Square {
 
 Enums and newtypes take trait impls the same way structs do. A trait that names `Self` outside its receiver cannot be used as `dyn Trait` (see [Object Safety](#object-safety)).
 
-The operator traits (`Add`, `Neg`, `PartialEq`, `Comparable` and the rest) are built into the compiler and are documented under [Operator Overloading](operators.md#operator-overloading). A `T: PartialEq` bound gives a generic body `==` and `!=`, and `T: Comparable` gives it the orderings, each with its method form (`a.le(b)`). An integer or `char` meets `Comparable`; a float does not, because `NaN` has no place in a total order. The arithmetic and `*Assign` traits give a type parameter no operator yet. The derivable traits (`Copy`, `Clone`, `Debug`, `Hashable`) are also ordinary traits, see [Derivable traits](structs.md#derivable-traits-by-hand-and-as-bounds).
+The operator traits (`Add`, `Neg`, `PartialEq`, `Comparable` and the rest) are built into the compiler and are documented under [Operator Overloading](operators.md#operator-overloading). A `T: PartialEq` bound gives a generic body `==` and `!=`, and `T: Comparable` gives it the orderings, each with its method form (`a.le(b)`). An integer or `char` meets `Comparable`; a float does not, because `NaN` has no place in a total order. The arithmetic and `*Assign` traits give a type parameter no operator; the [numeric bounds](#numeric-bounds) give it the built-in ones. The derivable traits (`Copy`, `Clone`, `Debug`, `Hashable`) are also ordinary traits, see [Derivable traits](structs.md#derivable-traits-by-hand-and-as-bounds).
 
 ## Supertraits
 
@@ -348,6 +348,38 @@ func twice<T: Clone>(v: &T) -> T {
     v.clone()
 }
 ```
+
+### Numeric bounds
+
+Three prelude traits name the numeric families, so a body generic over its element type can compute. The compiler implements them for the scalars, and an `impl` of one is an error.
+
+| Bound | Met by | What the body gets |
+|---|---|---|
+| `Numeric` | every integer type, `f16`, `bf16`, `f32`, `f64` | `+ - * /`, unary `-`, the comparisons, `Copy`, `T::zero()`, `T::one()`, `{x}` |
+| `Integer: Numeric` | `i8` to `i64`, `u8` to `u64` | `%`, the bitwise operators, `wrapping_*` / `saturating_*` / `checked_*`, `.to_checked::<T>()` as a target |
+| `Float: Numeric` | `f16`, `bf16`, `f32`, `f64` | the math methods (`.exp()`, `.sqrt()`, ...), `.is_nan()`, `T::from_f64(x)` |
+
+A literal takes the parameter's type when it fits every instance. An integer literal under `Integer` must fit both `i8` and `u8` (0 to 127), and a float literal under `Float` must fit `f16`. A bare `Numeric` takes neither, because an integer literal never becomes a float. Use `T::one()` there.
+
+```neuro
+func lerp<T: Float>(a: T, b: T, t: T) -> T {
+    a + (b - a) * t          // lerp(0.0, 10.0, 0.25) is 2.5, lerp(1.0bf16, 3.0bf16, 0.5bf16) is 2.0
+}
+
+func odd_count<T: Integer>(x: &Tensor<T, [4]>) -> T {
+    mut count = T::zero()
+    for i in 0..4 {
+        count += x[i] & T::one()
+    }
+    count
+}
+```
+
+A tensor's element may be a type parameter under any of these bounds, or under none (see [Element-type generics](tensors.md#element-type-generics)). [`tensor_element_generics.nr`](../../examples/tensors/tensor_element_generics.nr) runs these forms.
+
+### Associated functions through a bound
+
+`T::f(args)` calls an associated function that one of `T`'s bounds declares, a supertrait's included, and each instance calls its type argument's own: `T::make(9)` under `T: Make` is `P::make(9)` where `T` is `P`.
 
 ### Where clauses
 

@@ -70,9 +70,7 @@ impl TypeChecker {
         if let Type::Struct(name) = ty {
             return self.struct_render_obstacle(name, kind).is_none();
         }
-        ty.is_numeric()
-            || ty.is_half_float()
-            || matches!(ty, Type::Bool | Type::Char | Type::String)
+        self.is_arithmetic(ty) || matches!(ty, Type::Bool | Type::Char | Type::String)
     }
 
     /// Whether a non-struct `ty` renders under `{x:?}` through `Debug` rather than as a
@@ -110,7 +108,7 @@ impl TypeChecker {
     /// width or precision is past the sanity ceiling.
     fn check_format_spec(&mut self, spec: &FormatSpec, ty: &Type, span: Span) {
         let kind_hint = match spec.kind {
-            FormatKind::Fixed | FormatKind::Scientific if !renders_as_float(ty) => {
+            FormatKind::Fixed | FormatKind::Scientific if !self.is_floating(ty) => {
                 Some("fixed-point and scientific notation apply to floats")
             }
             FormatKind::Decimal
@@ -118,7 +116,7 @@ impl TypeChecker {
             | FormatKind::UpperHex
             | FormatKind::Binary
             | FormatKind::Octal
-                if !ty.is_integer() =>
+                if !self.is_integral(ty) =>
             {
                 Some("radix formatting applies to integers")
             }
@@ -136,7 +134,7 @@ impl TypeChecker {
         if spec.plus_sign {
             // An unsigned value has no sign position to fill, so `+` would have
             // nothing to render; only signed integers and floats accept it.
-            if !ty.is_signed_int() && !renders_as_float(ty) {
+            if !ty.is_signed_int() && !self.is_floating(ty) {
                 self.record_error(TypeError::FormatSpecMismatch {
                     spec: "+".to_string(),
                     ty: ty.clone(),
@@ -192,10 +190,6 @@ impl TypeChecker {
 
 /// Whether a hole of `ty` renders through the float path: a half-precision value is
 /// widened to `f64` and printed exactly, as an `f32` is.
-fn renders_as_float(ty: &Type) -> bool {
-    ty.is_float() || ty.is_half_float()
-}
-
 /// The spec text to quote back in a diagnostic for a format kind.
 fn describe_kind(kind: FormatKind) -> &'static str {
     match kind {

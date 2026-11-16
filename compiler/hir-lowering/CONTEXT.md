@@ -467,6 +467,15 @@ it (`mono_depth`, set as each worklist item is emitted). Past `MAX_INSTANCE_DEPT
 (`grow(Option::Some(x))` inside `grow<T>`) needs a new instance per level, which the checker, seeing
 one template, cannot tell; without the limit lowering would never finish.
 
+Two rules read the instance's type arguments. A tensor over a type parameter the checker saw with no
+bound, built inside a body whose signature does not name it, gets its element from the instance:
+`resolve_type` refuses one that is not a scalar as `NonScalarTensorElement`. And `T::f(args)`
+names the instance's type argument (`bound_assoc.rs`, `lower_bound_assoc_call`): a struct, enum or
+newtype argument re-dispatches the call as `Arg::f(args)`, and a scalar takes the numeric
+families' functions directly, `zero()` and `one()` as literals and `from_f64(x)` as a cast.
+`instance_meets_impl_bounds` answers `Numeric`, `Integer` and `Float` for the scalars, so an
+`impl<T: Numeric>` block is emitted for its instances.
+
 Generic structs and impls work the same way, through `generic_structs` / `generic_impls` and
 `instantiate_generic_struct(base, args)`: called from `resolve_type` for a `Type::Generic`
 annotation and from `lower_generic_struct_literal` after inferring the arguments from field

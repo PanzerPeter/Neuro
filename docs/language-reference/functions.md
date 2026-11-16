@@ -373,10 +373,10 @@ func tenths_add_up() {
 
 | Function | Behaviour |
 |---|---|
-| `is_close(actual: f64, expected: f64, tolerance: f64) -> bool` | `true` when the two differ by at most `tolerance` while `expected` is at most 1 in magnitude, and by at most `tolerance * \|expected\|` above that. Equal values are close, infinities included. `NaN` is close to nothing. |
-| `assert_close(actual: f64, expected: f64, tolerance: f64)` | Panics with `assert_close: <actual> is not within <tolerance> of <expected>` unless `is_close` holds. |
+| `is_close<T: Float>(actual: T, expected: T, tolerance: T) -> bool` | `true` when the two differ by at most `tolerance` while `expected` is at most 1 in magnitude, and by at most `tolerance * \|expected\|` above that. Equal values are close, infinities included. `NaN` is close to nothing. |
+| `assert_close<T: Float>(actual: T, expected: T, tolerance: T)` | Panics with `assert_close: <actual> is not within <tolerance> of <expected>` unless `is_close` holds. |
 
-An `f32` is passed with `as f64`. Both take `f64` only until the language has a bound for float types.
+All three arguments share one float type, `f16` through `f64`. A tensor is compared element by element in a loop.
 
 A test with parameters, a return value or generic parameters is a compile error, and so is `@test` on a method or a struct.
 

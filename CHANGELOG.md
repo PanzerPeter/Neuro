@@ -10,6 +10,35 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.51.0] - 2026-11-16
+
+### Added
+
+- A tensor's element type may be a type parameter: `func total<T: Numeric>(t: &Tensor<T, [3]>) -> T
+  { t.sum() }` is one body, compiled once for each element type it is called with. Without a
+  bound the body may move, index and transfer the tensor; a call that makes the element anything
+  other than a scalar is refused.
+- The prelude's `Numeric`, `Integer` and `Float` bounds, implemented by the compiler for the
+  scalars. `T: Numeric` gives a generic body `+ - * /`, unary `-`, the comparisons, `Copy`,
+  `T::zero()`, `T::one()`, `{x}`, and on tensors of `T` the arithmetic, `@`, the reductions and the
+  sorts. `T: Integer` adds `%`, the bitwise operators, the `wrapping_*` / `saturating_*` /
+  `checked_*` methods and `.to_checked::<T>()` as a target. `T: Float` adds the math methods,
+  `.is_nan()`, `T::from_f64(x)` and `.mean()`. A literal takes the parameter's type when it fits
+  every instance: `x * 2.0` under `T: Float`, `x + 1` under `T: Integer`. An `impl` of one of
+  them is an error.
+- `T::f(args)` calls an associated function declared by one of `T`'s bounds or their
+  supertraits, user traits included: `T::make(9)` under `T: Make`.
+- `.parse::<T>()` takes a `T: Numeric`, and `std::testing::is_close` / `assert_close` take any
+  float type through `T: Float`.
+- Example `tensors/tensor_element_generics.nr` and showcase `precision_sweep.nr`, one training
+  loop run at `f64`, `f32` and `bf16`.
+
+### Fixed
+
+- A trait with an associated function that takes no receiver (`func make(x: i32) -> Self`)
+  compiles once a type implements it. The backend built a trait-object table for it and passed
+  the function a receiver it does not take, which failed LLVM's verifier.
+
 ## [5.50.3] - 2026-11-15
 
 ### Fixed

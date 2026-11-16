@@ -216,7 +216,7 @@ impl TypeChecker {
             // IEEE-754 NaN test. Nullary, yields `bool`. Matched on `recv` (not the
             // referent) like the integer intrinsics below: reading a scalar through `&T`
             // needs the deref operator.
-            (_, "is_nan") if recv.is_float() || recv.is_half_float() => {
+            (_, "is_nan") if self.is_floating(recv) => {
                 if !args.is_empty() {
                     self.record_error(TypeError::ArgumentCountMismatch {
                         expected: 0,
@@ -246,19 +246,19 @@ impl TypeChecker {
                 _,
                 "wrapping_add" | "wrapping_sub" | "wrapping_mul" | "saturating_add"
                 | "saturating_sub" | "saturating_mul" | "shr",
-            ) if recv.is_integer() => {
+            ) if self.is_integral(recv) => {
                 self.check_unary_int_intrinsic_arg(recv, args, call_span);
                 Some(recv.clone())
             }
             // Checked float-to-integer conversion: `None` where `as` would saturate or map
             // NaN to zero. Value receiver only, like `is_nan`.
-            (_, TO_CHECKED_METHOD) if recv.is_float() || recv.is_half_float() => {
+            (_, TO_CHECKED_METHOD) if self.is_floating(recv) => {
                 Some(self.check_to_checked(type_args, args, call_span))
             }
             // Overflow-reporting arithmetic. Same argument contract as the intrinsics
             // above, but the result is `Option<T>` over the receiver's type: `None` is
             // the overflow answer, so the caller must deconstruct before using the value.
-            (_, "checked_add" | "checked_sub" | "checked_mul") if recv.is_integer() => {
+            (_, "checked_add" | "checked_sub" | "checked_mul") if self.is_integral(recv) => {
                 self.check_unary_int_intrinsic_arg(recv, args, call_span);
                 Some(self.option_of(recv.clone(), call_span))
             }
@@ -336,7 +336,7 @@ impl TypeChecker {
             // result is a fresh buffer of the receiver's shape, so `&Tensor<T, S>` is
             // accepted and nothing is moved.
             (Type::Tensor { element, shape }, m)
-                if is_math_method(m) && (element.is_float() || element.is_half_float()) =>
+                if is_math_method(m) && self.is_floating(element) =>
             {
                 let (element, shape) = (element.clone(), shape.clone());
                 let referent = recv.referent().clone();
@@ -347,7 +347,7 @@ impl TypeChecker {
                 Some(referent)
             }
             // On a scalar, a value receiver only, as with `is_nan`.
-            (_, m) if is_math_method(m) && (recv.is_float() || recv.is_half_float()) => {
+            (_, m) if is_math_method(m) && self.is_floating(recv) => {
                 self.check_math_args(recv, m, args, call_span);
                 Some(recv.clone())
             }
@@ -757,14 +757,14 @@ impl TypeChecker {
         }
     }
 
-    /// Type `.to_checked::<T>()`: exactly one turbofish type, an integer, and no value
-    /// arguments. Yields `Option<T>`, or `Unknown` once an error is recorded.
+    /// Type `.to_checked::<T>()`: exactly one turbofish type, an integer or a `T: Integer`,
+    /// and no value arguments. Yields `Option<T>`, or `Unknown` once an error is recorded.
     fn check_to_checked(&mut self, type_args: &[GenericArg], args: &[Expr], span: Span) -> Type {
         let Some(target) = self.nullary_turbofish_target(TO_CHECKED_METHOD, type_args, args, span)
         else {
             return Type::Unknown;
         };
-        if !target.is_integer() {
+        if !self.is_integral(&target) {
             if !matches!(target, Type::Unknown) {
                 self.record_error(TypeError::ToCheckedTargetNotInteger { ty: target, span });
             }
@@ -773,7 +773,8 @@ impl TypeChecker {
         self.option_of(target, span)
     }
 
-    /// `string.parse::<T>()`: nullary, `T` an integer, a float or `bool`, and the result
+    /// `string.parse::<T>()`: nullary, `T` an integer, a float, `bool` or a type parameter
+    /// bounded by `Numeric`, and the result
     /// `Result<T, ParseError>`. The backend builds that value by variant name, so a program
     /// checked without the standard library's `Result` or `ParseError` is told here.
     fn check_parse(&mut self, type_args: &[GenericArg], args: &[Expr], span: Span) -> Type {
@@ -781,8 +782,7 @@ impl TypeChecker {
         else {
             return Type::Unknown;
         };
-        let parsable =
-            target.is_integer() || target.is_float() || target.is_half_float() || target.is_bool();
+        let parsable = self.is_arithmetic(&target) || target.is_bool();
         if !parsable {
             if !matches!(target, Type::Unknown) {
                 self.record_error(TypeError::ParseTargetUnsupported { ty: target, span });

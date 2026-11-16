@@ -15,6 +15,10 @@ pub(crate) const COPY_TRAIT: &str = "Copy";
 pub(crate) const CLONE_TRAIT: &str = "Clone";
 pub(crate) const PARTIAL_EQ_TRAIT: &str = "PartialEq";
 pub(crate) const COMPARABLE_TRAIT: &str = "Comparable";
+/// The numeric families. The compiler implements them for the scalars, so no `impl` names them.
+pub(crate) const NUMERIC_TRAIT: &str = "Numeric";
+pub(crate) const INTEGER_TRAIT: &str = "Integer";
+pub(crate) const FLOAT_TRAIT: &str = "Float";
 pub(crate) const DEBUG_TRAIT: &str = "Debug";
 pub(crate) const HASHABLE_TRAIT: &str = "Hashable";
 

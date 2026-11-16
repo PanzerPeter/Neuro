@@ -486,6 +486,7 @@ mod literals;
 mod loop_adapters;
 mod matches;
 mod moves;
+mod numeric_bounds;
 pub(crate) mod operator_traits;
 mod os_intrinsics;
 mod pools;

@@ -36,11 +36,11 @@ Design goals:
 |---|---|
 | [Types](language-reference/types.md) | Primitives, literals and suffixes, casts, arrays, slices, tuples, newtypes, aliases, the standard collections, type inference |
 | [Strings](language-reference/strings.md) | The `string` slice type and its escape sequences, the growable `StringBuilder` buffer, interpolation, triple-quoted literals, codepoint iteration |
-| [Tensors](language-reference/tensors.md) | `Tensor<T, [dims]>`, construction, element-wise arithmetic and broadcasting, matrix multiplication, indexing and slicing, shape generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic shapes, devices |
+| [Tensors](language-reference/tensors.md) | `Tensor<T, [dims]>`, construction, element-wise arithmetic and broadcasting, matrix multiplication, indexing and slicing, shape and element-type generics, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic shapes, devices |
 | [Automatic Differentiation](language-reference/autodiff.md) | `@grad` on functions and methods, `wrt:` selection, `.backward()` / `.grad()` / `.zero_grad()`, second derivatives with `order: 2`, `.detach()` and `@no_grad`, what a differentiated body may contain |
 | [Variables](language-reference/variables.md) | `const`, `val`, `mut`, reassignment, destructuring, scoping and shadowing |
 | [Functions](language-reference/functions.md) | Declarations, parameters, named arguments, returns, recursion, the panic and output builtins, closures |
-| [Generics and Traits](language-reference/generics-and-traits.md) | Generic functions, structs and methods, const parameters, `where` clauses, turbofish, traits, supertraits, associated types, `impl Trait` and `dyn Trait` dispatch |
+| [Generics and Traits](language-reference/generics-and-traits.md) | Generic functions, structs and methods, const parameters, numeric bounds, `where` clauses, turbofish, traits, supertraits, associated types, `impl Trait` and `dyn Trait` dispatch |
 | [Expressions](language-reference/expressions.md) | Expression syntax and evaluation order |
 | [Control Flow](language-reference/control-flow.md) | `if`/`else`, `while`, `loop`, `for`, `break`/`continue`, `match`, `val-else`, `if val` / `while val`, `pool` arena blocks |
 | [Operators](language-reference/operators.md) | Arithmetic, comparison, logical, bitwise, cast, overloading, assignment places, `??`, `?`, `\|>`, `>>` |

@@ -483,7 +483,7 @@ impl TypeChecker {
                 Type::Slice(Box::new(self.substitute_generic(element, subst, span)))
             }
             Type::Tensor { element, shape } => Type::Tensor {
-                element: Box::new(self.substitute_generic(element, subst, span)),
+                element: Box::new(self.substitute_tensor_element(element, subst, span)),
                 shape: shape
                     .iter()
                     .map(|axis| axis.with_extent(substitute_array_len(&axis.extent, subst)))
@@ -525,6 +525,27 @@ impl TypeChecker {
             }
             other => other.clone(),
         }
+    }
+}
+
+impl TypeChecker {
+    /// A tensor's element under `subst`. An unbounded `T` may be a tensor element in a
+    /// generic signature, so the type argument it receives has to be one.
+    fn substitute_tensor_element(
+        &mut self,
+        element: &Type,
+        subst: &HashMap<String, Type>,
+        span: Span,
+    ) -> Type {
+        let concrete = self.substitute_generic(element, subst, span);
+        if matches!(element, Type::Generic(_))
+            && !matches!(concrete, Type::Generic(_) | Type::Unknown)
+            && !super::resolution::is_tensor_element(&concrete)
+        {
+            self.record_error(TypeError::NonScalarTensorElement { ty: concrete, span });
+            return Type::Unknown;
+        }
+        concrete
     }
 }
 
