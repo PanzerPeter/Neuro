@@ -48,6 +48,10 @@ pub enum ArrayLen {
     Param(std::string::String),
     /// A tensor axis written `?`: its extent is not known until run time.
     Dynamic,
+    /// A shape parameter spliced into a tensor shape, the `..S` in `[..S, N]`. It stands
+    /// for any number of axes, so a shape holding one has no rank until monomorphization
+    /// substitutes it, and only a tensor shape reaches it.
+    Splice(std::string::String),
 }
 
 impl ArrayLen {
@@ -71,6 +75,7 @@ impl fmt::Display for ArrayLen {
             ArrayLen::Fixed(n) => write!(f, "{}", n),
             ArrayLen::Param(name) => write!(f, "{}", name),
             ArrayLen::Dynamic => write!(f, "?"),
+            ArrayLen::Splice(name) => write!(f, "..{}", name),
         }
     }
 }
@@ -126,8 +131,46 @@ impl fmt::Display for TensorAxis {
 }
 
 /// Whether a found shape satisfies an expected one: equal rank, and every axis agreeing.
+/// A splice agrees only with the same splice, so two shapes over one shape parameter
+/// agree exactly when they are written alike.
 pub(crate) fn shapes_agree(a: &[TensorAxis], b: &[TensorAxis]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.agrees_with(y))
+}
+
+/// The shape parameter a shape splices in, when it has one: such a shape has no rank
+/// until the parameter is substituted.
+pub(crate) fn spliced_param(shape: &[TensorAxis]) -> Option<&str> {
+    shape.iter().find_map(|axis| match &axis.extent {
+        ArrayLen::Splice(name) => Some(name.as_str()),
+        _ => None,
+    })
+}
+
+/// The argument a shape parameter takes for `shape`. A lone unnamed splice `[..S]` is the
+/// caller's own parameter passed on, spelled `Type::Generic` as every parameter standing
+/// for itself is, so an instance over it is the template it names.
+pub(crate) fn shape_argument(shape: Vec<TensorAxis>) -> Type {
+    match shape.as_slice() {
+        [
+            TensorAxis {
+                name: None,
+                extent: ArrayLen::Splice(own),
+            },
+        ] => Type::Generic(own.clone()),
+        _ => Type::Shape(shape),
+    }
+}
+
+/// Write a shape as its bracketed list, `[2, ..S]`.
+fn write_shape(f: &mut fmt::Formatter<'_>, shape: &[TensorAxis]) -> fmt::Result {
+    write!(f, "[")?;
+    for (i, axis) in shape.iter().enumerate() {
+        if i > 0 {
+            write!(f, ", ")?;
+        }
+        write!(f, "{}", axis)?;
+    }
+    write!(f, "]")
 }
 
 /// Type representation for semantic analysis
@@ -200,6 +243,12 @@ pub enum Type {
     /// substitution and instance mangling. Never appears in a real value/annotation
     /// position and never reaches the HIR (the backend re-derives lengths from the AST).
     ConstValue(u64),
+    /// A shape parameter's argument, the shape it stands for: the `[2, 3]` of
+    /// `Dense<[2, 3]>`, or `[..S, N]` passed on inside another template. Like
+    /// [`Type::ConstValue`] it lives only in substitutions and instance names. A shape
+    /// parameter in scope is also a value of this type, `[..S]`, read only through
+    /// `S.rank()` and `S.count()`.
+    Shape(Vec<TensorAxis>),
     /// Anonymous tuple `(T1, T2, ...)`: a positionally-indexed, heterogeneous
     /// aggregate. Two tuple types are compatible only when they have the same arity
     /// and each element type matches. Always has at least two elements.
@@ -361,6 +410,7 @@ impl Type {
             // A const generic argument value matches only the same value. This is
             // a monomorphization-internal marker; it never appears in ordinary positions.
             (Type::ConstValue(a), Type::ConstValue(b)) => a == b,
+            (Type::Shape(a), Type::Shape(b)) => shapes_agree(a, b),
 
             // References match when their referents match and their mutability
             // agrees. There is no implicit `&mut T` → `&T` coercion:
@@ -635,16 +685,12 @@ impl fmt::Display for Type {
             Type::Array { element, size } => write!(f, "[{}; {}]", element, size),
             Type::Slice(element) => write!(f, "[{}]", element),
             Type::Tensor { element, shape } => {
-                write!(f, "Tensor<{}, [", element)?;
-                for (i, axis) in shape.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", axis)?;
-                }
-                write!(f, "]>")
+                write!(f, "Tensor<{}, ", element)?;
+                write_shape(f, shape)?;
+                write!(f, ">")
             }
             Type::ConstValue(v) => write!(f, "{}", v),
+            Type::Shape(shape) => write_shape(f, shape),
             Type::Tuple(elements) => {
                 write!(f, "(")?;
                 for (i, el) in elements.iter().enumerate() {

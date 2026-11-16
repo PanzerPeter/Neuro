@@ -8,7 +8,7 @@
 
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, TensorAxis, Type};
+use crate::types::{ArrayLen, TensorAxis, Type, spliced_param};
 use ast_types::{BinaryOp, Expr, GenericArg, Place};
 use shared_types::{Identifier, Span};
 
@@ -70,6 +70,28 @@ impl TypeChecker {
         self.record_error(TypeError::TensorDynamicExtent {
             operation: operation.to_string(),
             ty: ty.clone(),
+            span,
+        });
+        true
+    }
+
+    /// Reject `operation` on a tensor whose shape splices in a shape parameter, reporting
+    /// whether it did. Such a shape has no rank until the instantiation, so an operation
+    /// that counts or picks axes has nothing to count.
+    pub(crate) fn reject_splice(
+        &mut self,
+        shape: &[TensorAxis],
+        operation: &str,
+        ty: &Type,
+        span: Span,
+    ) -> bool {
+        let Some(param) = spliced_param(shape) else {
+            return false;
+        };
+        self.record_error(TypeError::TensorSpliceRank {
+            operation: operation.to_string(),
+            ty: ty.clone(),
+            param: param.to_string(),
             span,
         });
         true

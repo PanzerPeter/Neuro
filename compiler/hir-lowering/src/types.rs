@@ -144,8 +144,31 @@ impl Lowerer {
                         ast_types::GenericArg::Const { value, .. } => {
                             resolved.push(crate::MonoArg::Const(*value as u64));
                         }
+                        // The caller's own extent passed on, `Ring<N>` inside a template.
+                        ast_types::GenericArg::Type(ast_types::Type::Named(id))
+                            if self.const_subst.contains_key(&id.name) =>
+                        {
+                            resolved.push(crate::MonoArg::Const(self.const_subst[&id.name]));
+                        }
+                        // `Layer<[N]>`: the one-name shape the checker reads off a slice type.
+                        ast_types::GenericArg::Type(ast_types::Type::Slice { element, .. })
+                            if matches!(&**element, ast_types::Type::Named(id)
+                                if self.const_subst.contains_key(&id.name)) =>
+                        {
+                            let ast_types::Type::Named(id) = &**element else {
+                                return Err(crate::malformed("a one-name shape argument".into()));
+                            };
+                            let extent = Some(self.const_subst[&id.name] as usize);
+                            resolved.push(crate::MonoArg::Type(shape_carrier(
+                                vec![extent],
+                                AxisNames(vec![None]),
+                            )));
+                        }
                         ast_types::GenericArg::Type(ty) => {
                             resolved.push(crate::MonoArg::Type(self.resolve_type(ty)?));
+                        }
+                        ast_types::GenericArg::Shape { dims, .. } => {
+                            resolved.push(crate::MonoArg::Type(self.resolve_shape_carrier(dims)?));
                         }
                     }
                 }
@@ -195,10 +218,7 @@ impl Lowerer {
                 shape,
                 ..
             } => {
-                let mut extents = Vec::with_capacity(shape.len());
-                for dim in shape {
-                    extents.push(crate::resolve_tensor_dim(dim, &self.const_subst)?);
-                }
+                let (extents, names) = self.resolve_shape(shape)?;
                 let element = self.resolve_type(element_type)?;
                 if !is_tensor_scalar(&element) {
                     return Err(LoweringError::NonScalarTensorElement {
@@ -208,15 +228,74 @@ impl Lowerer {
                 Ok(HirType::Tensor {
                     element: Box::new(element),
                     shape: extents,
-                    names: AxisNames(
-                        shape
-                            .iter()
-                            .map(|dim| dim.name.as_ref().map(|n| n.name.clone()))
-                            .collect(),
-                    ),
+                    names: AxisNames(names),
                 })
             }
         }
+    }
+
+    /// A written shape's extents and dimension names under the active substitution: an
+    /// extent parameter becomes its value and a `..S` splice the axes `S` is bound to.
+    fn resolve_shape(
+        &self,
+        shape: &[ast_types::TensorDim],
+    ) -> Result<ResolvedShape, LoweringError> {
+        let mut extents = Vec::with_capacity(shape.len());
+        let mut names = Vec::with_capacity(shape.len());
+        for dim in shape {
+            let ast_types::TensorExtent::Splice(id) = &dim.extent else {
+                extents.push(crate::resolve_tensor_dim(dim, &self.const_subst)?);
+                names.push(dim.name.as_ref().map(|n| n.name.clone()));
+                continue;
+            };
+            let Some((bound, bound_names)) = self.type_subst.get(&id.name).and_then(carried_shape)
+            else {
+                return Err(LoweringError::UnresolvedType {
+                    name: format!("shape parameter '{}'", id.name),
+                });
+            };
+            extents.extend(bound.iter().copied());
+            names.extend(bound_names.0.iter().cloned());
+        }
+        Ok((extents, names))
+    }
+
+    /// A shape argument, `[2, 3]` in `Dense<[2, 3]>`, as the value a shape parameter is
+    /// bound to.
+    pub(crate) fn resolve_shape_carrier(
+        &self,
+        shape: &[ast_types::TensorDim],
+    ) -> Result<HirType, LoweringError> {
+        let (extents, names) = self.resolve_shape(shape)?;
+        Ok(shape_carrier(extents, AxisNames(names)))
+    }
+}
+
+/// A shape's extents and the dimension name at each axis.
+type ResolvedShape = (Vec<Option<usize>>, Vec<Option<String>>);
+
+/// The value a shape parameter is bound to while an instance lowers. It rides in the
+/// type substitution, beside the type parameters, as a tensor of no element: every
+/// path that carries, mangles and compares a type argument then carries a shape
+/// argument too, and the `void` element keeps it apart from any real tensor type. It
+/// never reaches the HIR, since every splice is expanded where a shape is resolved.
+pub(crate) fn shape_carrier(shape: Vec<Option<usize>>, names: AxisNames) -> HirType {
+    HirType::Tensor {
+        element: Box::new(HirType::Void),
+        shape,
+        names,
+    }
+}
+
+/// The shape a [`shape_carrier`] holds, with its dimension names.
+pub(crate) fn carried_shape(ty: &HirType) -> Option<(&[Option<usize>], &AxisNames)> {
+    match ty {
+        HirType::Tensor {
+            element,
+            shape,
+            names,
+        } if matches!(**element, HirType::Void) => Some((shape, names)),
+        _ => None,
     }
 }
 
@@ -276,7 +355,7 @@ fn names_self(ty: &ast_types::Type) -> bool {
         ast_types::Type::Tuple { elements, .. } => elements.iter().any(names_self),
         ast_types::Type::Generic { args, .. } => args.iter().any(|arg| match arg {
             ast_types::GenericArg::Type(inner) => names_self(inner),
-            ast_types::GenericArg::Const { .. } => false,
+            ast_types::GenericArg::Const { .. } | ast_types::GenericArg::Shape { .. } => false,
         }),
         ast_types::Type::Function { params, ret, .. } => {
             params.iter().any(names_self) || names_self(ret)

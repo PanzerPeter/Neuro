@@ -91,19 +91,23 @@ func main() -> i32 {
 }
 
 #[test]
-fn a_shape_argument_outside_a_tensor_is_a_parse_error() {
+fn a_shape_argument_to_a_type_parameter_is_refused() {
     let source = r#"
-func f(g: Grid<f32, [2, 2]>) { }
+struct Grid<T> {
+    v: T,
+}
+
+func f(g: Grid<[2, 2]>) { }
 
 func main() -> i32 {
     return 0
 }
 "#;
     let (ok, out) = run("check", source);
-    assert!(!ok, "a shape argument is tensor-only; got: {out}");
+    assert!(!ok, "`T` takes a type, not a shape; got: {out}");
     assert!(
-        out.contains("shape argument"),
-        "diagnostic should name the shape argument; got: {out}"
+        out.contains("a type argument was expected"),
+        "diagnostic should name the kind; got: {out}"
     );
 }
 

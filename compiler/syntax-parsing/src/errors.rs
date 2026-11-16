@@ -105,11 +105,6 @@ pub enum ParseError {
     StepArity { span: Span },
 
     #[error(
-        "a `[...]` shape argument is only valid on a tensor type; `{name}` takes type or const arguments, as in `{name}<i32>`"
-    )]
-    ShapeArgumentOnNonTensor { name: String, span: Span },
-
-    #[error(
         "`Tensor` takes exactly two arguments: an element type and a `[...]` shape, as in `Tensor<f32, [3, 3]>`"
     )]
     TensorTypeArity { span: Span },
@@ -171,7 +166,6 @@ impl ParseError {
             | ParseError::AdapterTakesNoArguments { span, .. }
             | ParseError::LoopAdapterArity { span, .. }
             | ParseError::StepArity { span }
-            | ParseError::ShapeArgumentOnNonTensor { span, .. }
             | ParseError::TensorTypeArity { span }
             | ParseError::NotAPlace { span, .. }
             | ParseError::NotAPipelineTarget { span }

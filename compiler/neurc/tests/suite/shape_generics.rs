@@ -120,7 +120,7 @@ func main() -> i32 {
         .check("shape_conflict.nr", source)
         .expect_err("a contradicted shape parameter must be rejected");
     assert!(
-        err.contains("shape parameter 'K'") && err.contains("3") && err.contains("5"),
+        err.contains("extent parameter 'K'") && err.contains("3") && err.contains("5"),
         "expected the conflict to name K and both extents; got {err}"
     );
 }

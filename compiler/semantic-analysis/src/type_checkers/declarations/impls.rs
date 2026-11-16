@@ -193,7 +193,9 @@ impl TypeChecker {
             .filter(|g| {
                 matches!(
                     g.kind,
-                    ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent
+                    ast_types::GenericParamKind::Const(_)
+                        | ast_types::GenericParamKind::Extent
+                        | ast_types::GenericParamKind::Shape
                 )
             })
             .map(|g| {

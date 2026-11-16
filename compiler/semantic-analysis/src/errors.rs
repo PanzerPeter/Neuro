@@ -399,7 +399,42 @@ pub enum TypeError {
     UnknownTensorDimension { name: String, span: Span },
 
     #[error(
-        "shape parameter '{name}' is already {expected} here, but this argument makes it {found}; one shape parameter names one extent, so every position that writes it must agree"
+        "shape parameter '{name}' is not declared; declare it in the generic list of the enclosing function, type or `impl`, e.g. `func f<{name}>(t: Tensor<f32, {name}>)`"
+    )]
+    UnknownShapeParam { name: String, span: Span },
+
+    #[error(
+        "'{name}' is {declared} parameter, so a shape writes it as `{hint}`: an extent is one axis, and a shape parameter splices in any number of them"
+    )]
+    SizeParamKind {
+        name: String,
+        declared: &'static str,
+        hint: String,
+        span: Span,
+    },
+
+    #[error(
+        "this parameter's shape splices {count} shape parameters; a parameter may splice at most one, so a call can always tell which of the argument's axes each one takes. A result shape may splice as often as it needs"
+    )]
+    ShapeSplicedTwice { count: usize, span: Span },
+
+    #[error(
+        "{operation} needs the rank of `{ty}`, which the shape parameter '{param}' leaves open; write the axes it reads in the shape (`[..{param}, M, N]`) or call it on a concrete shape"
+    )]
+    TensorSpliceRank {
+        operation: String,
+        ty: Type,
+        param: String,
+        span: Span,
+    },
+
+    #[error(
+        "shape parameter '{name}' is not a value; read it through `{name}.rank()` or `{name}.count()`"
+    )]
+    ShapeParamAsValue { name: String, span: Span },
+
+    #[error(
+        "extent parameter '{name}' is already {expected} here, but this argument makes it {found}; one extent parameter names one extent, so every position that writes it must agree"
     )]
     TensorShapeParamConflict {
         name: String,
@@ -1691,6 +1726,11 @@ impl TypeError {
             | Self::AssignToTensorSlice { span }
             | Self::AssignToNewtypeInner { span, .. }
             | Self::UnknownTensorDimension { span, .. }
+            | Self::UnknownShapeParam { span, .. }
+            | Self::SizeParamKind { span, .. }
+            | Self::ShapeSplicedTwice { span, .. }
+            | Self::TensorSpliceRank { span, .. }
+            | Self::ShapeParamAsValue { span, .. }
             | Self::TensorShapeParamConflict { span, .. }
             | Self::DuplicateTensorAxisName { span, .. }
             | Self::TensorAxisNameMismatch { span, .. }

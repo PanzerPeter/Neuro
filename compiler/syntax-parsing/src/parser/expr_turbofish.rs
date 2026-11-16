@@ -33,12 +33,12 @@ impl Parser {
     ) -> ParseResult<Expr> {
         self.advance(); // consume '::'
         let (args, shape, close_span) = self.parse_generic_type_args(true)?;
+        let (args, shape) = Self::bare_shape_param(true, args, shape);
         let type_span = type_name.span.merge(close_span);
-        let Some((dims, shape_span)) = shape else {
+        let Some((dims, _)) = shape else {
             return Err(ParseError::TensorTypeArity { span: type_span });
         };
-        let tensor_type =
-            Self::build_tensor_type(type_name.clone(), args, dims, shape_span, type_span)?;
+        let tensor_type = Self::build_tensor_type(args, dims, type_span)?;
 
         self.consume(
             TokenKind::ColonColon,
@@ -101,6 +101,9 @@ impl Parser {
                     value: value as i128,
                     span,
                 });
+            } else if self.shape_argument_ahead(false) {
+                let (dims, span) = self.parse_shape_argument()?;
+                args.push(GenericArg::Shape { dims, span });
             } else {
                 args.push(GenericArg::Type(self.parse_type()?));
             }

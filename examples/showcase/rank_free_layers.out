@@ -1,0 +1,4 @@
+vector: shift sum 28.0, output sum 38.0
+matrix: shift sum 19.6875
+batch: output sum 6.0
+cells: 4 + 6 + 12 = 22

@@ -26,6 +26,11 @@ use ast_types::{Expr, GenericArg, SelfParam};
 use shared_types::{Identifier, Span};
 use std::collections::HashMap;
 
+/// `S.rank()`: how many axes the shape a shape parameter stands for has.
+pub(crate) const SHAPE_RANK_METHOD: &str = "rank";
+/// `S.count()`: how many elements a tensor of that shape holds.
+pub(crate) const SHAPE_COUNT_METHOD: &str = "count";
+
 /// A trait method reached through a bound: its visible parameter types and return type, or,
 /// when it declares parameters of its own, the signature a call infers them against and
 /// whether its receiver is taken `&mut`.
@@ -837,6 +842,35 @@ impl TypeChecker {
         self.generic_methods.contains_key(key).then_some(key)
     }
 
+    /// `S.rank()` and `S.count()` on a shape parameter `S` in scope, the axis count and the
+    /// element count of the shape it stands for, both `u64`. `None` when the receiver is
+    /// no shape parameter, a local of that name included.
+    fn check_shape_param_method(
+        &mut self,
+        object: &Expr,
+        field: &shared_types::Identifier,
+        args: &[Expr],
+        span: Span,
+    ) -> Option<Type> {
+        let Expr::Identifier(ident) = object else {
+            return None;
+        };
+        if self.symbols.lookup(&ident.name).is_some()
+            || !matches!(self.const_scope.get(&ident.name), Some(Type::Shape(_)))
+        {
+            return None;
+        }
+        if field.name != SHAPE_RANK_METHOD && field.name != SHAPE_COUNT_METHOD {
+            self.record_error(TypeError::ShapeParamAsValue {
+                name: ident.name.clone(),
+                span: field.span,
+            });
+            return Some(Type::Unknown);
+        }
+        self.check_call_args(args, &[], span);
+        Some(Type::U64)
+    }
+
     /// Bind explicit turbofish generic arguments into `subst`, positionally against
     /// the callee's declared parameters. A const parameter takes a const argument (bound
     /// to [`Type::ConstValue`]); a type parameter takes a type argument. Kind or count
@@ -863,18 +897,56 @@ impl TypeChecker {
             return;
         }
         for (pname, arg) in param_names.iter().zip(type_args.iter()) {
-            let is_const = const_types.contains_key(pname);
-            match arg {
-                ast_types::GenericArg::Const { value, .. } if is_const => {
+            let declared = const_types.get(pname);
+            let is_shape = matches!(declared, Some(Type::Shape(_)));
+            let is_const = declared.is_some() && !is_shape;
+            // A bare name is parsed as a type, but naming a size parameter in scope it
+            // passes the caller's own parameter on.
+            let passed_on = match arg {
+                ast_types::GenericArg::Type(ast_types::Type::Named(ident)) => self
+                    .const_scope
+                    .get(&ident.name)
+                    .map(|own| (ident, own.clone())),
+                _ => None,
+            };
+            match (arg, passed_on) {
+                (_, Some((ident, own))) if declared.is_some() => {
+                    let kind_agrees = if is_shape {
+                        matches!(own, Type::Shape(_))
+                    } else {
+                        Some(&own) == declared
+                    };
+                    if !kind_agrees {
+                        self.record_error(TypeError::TurbofishKindMismatch {
+                            param: pname.clone(),
+                            expected: if is_shape { "shape" } else { "const" }.to_string(),
+                            span,
+                        });
+                        continue;
+                    }
+                    subst.insert(pname.clone(), Type::Generic(ident.name.clone()));
+                }
+                (ast_types::GenericArg::Const { value, .. }, _) if is_const => {
                     subst.insert(pname.clone(), Type::ConstValue(*value as u64));
                 }
-                ast_types::GenericArg::Type(ty) if !is_const => {
+                (ast_types::GenericArg::Shape { dims, .. }, _) if is_shape => {
+                    if let Some(axes) = self.resolve_tensor_shape(dims) {
+                        subst.insert(pname.clone(), Type::Shape(axes));
+                    }
+                }
+                (ast_types::GenericArg::Type(ty), _) if declared.is_none() => {
                     if let Some(resolved) = self.resolve_type(ty) {
                         subst.insert(pname.clone(), resolved);
                     }
                 }
                 _ => {
-                    let expected = if is_const { "const" } else { "type" };
+                    let expected = if is_shape {
+                        "shape"
+                    } else if is_const {
+                        "const"
+                    } else {
+                        "type"
+                    };
                     self.record_error(TypeError::TurbofishKindMismatch {
                         param: pname.clone(),
                         expected: expected.to_string(),
@@ -928,6 +1000,9 @@ impl TypeChecker {
             } => {
                 // The handle is not a value, so it is never checked as one here.
                 if let Some(ty) = self.check_kernel_partition(object, field, args, *span) {
+                    return Some(ty);
+                }
+                if let Some(ty) = self.check_shape_param_method(object, field, args, *span) {
                     return Some(ty);
                 }
                 // The receiver is read through every borrow: `r.abs()` on a `&f64` is

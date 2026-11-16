@@ -198,7 +198,16 @@ impl TypeChecker {
                     Some(const_ty)
                 } else if let Some(const_param_ty) = self.const_scope.get(&ident.name).cloned() {
                     // A const generic parameter used as a value in a generic body
-                    // has its declared integer type.
+                    // has its declared integer type. A shape parameter is read only
+                    // through its two methods, which `check_shape_param_method` takes
+                    // before the receiver gets here.
+                    if matches!(const_param_ty, Type::Shape(_)) {
+                        self.record_error(TypeError::ShapeParamAsValue {
+                            name: ident.name.clone(),
+                            span: ident.span,
+                        });
+                        return None;
+                    }
                     Some(const_param_ty)
                 } else if let Some(function_ty) = self.functions.get(&ident.name).cloned() {
                     // A function named as a value is an ordinary value of its function

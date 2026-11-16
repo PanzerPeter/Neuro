@@ -12,6 +12,9 @@ pub enum GenericArg {
     Type(Type),
     /// A const (value) argument, e.g. the `4` in `Ring<i32, 4>` or `zeros::<4>()`.
     Const { value: i128, span: Span },
+    /// A shape argument for a shape parameter, e.g. the `[2, 3]` in `Dense<[2, 3]>` or
+    /// `relu::<f32, [2, 3]>(x)`.
+    Shape { dims: Vec<TensorDim>, span: Span },
 }
 
 impl GenericArg {
@@ -19,7 +22,7 @@ impl GenericArg {
     pub fn span(&self) -> Span {
         match self {
             GenericArg::Type(ty) => ty.span(),
-            GenericArg::Const { span, .. } => *span,
+            GenericArg::Const { span, .. } | GenericArg::Shape { span, .. } => *span,
         }
     }
 }
@@ -53,19 +56,21 @@ pub enum ArraySize {
     Const(Identifier),
 }
 
-/// One extent of a tensor shape `Tensor<T, [d0, d1, ...]>`.
+/// One entry of a tensor shape `Tensor<T, [d0, d1, ...]>`.
 ///
 /// Ordinarily a compile-time integer literal. Inside a generic definition it may
-/// instead name a shape parameter (`[M, K]`): a bare identifier in a shape position is
-/// sugar for a `const NAME: u32` parameter, so the symbolic form is resolved to a concrete
-/// extent by monomorphization and never escapes the frontend. A `?` axis is neither: its
-/// extent is not known until run time and survives every later stage.
+/// instead name an extent parameter (`[M, K]`) or splice in a shape parameter (`..S`);
+/// both are resolved by monomorphization and never escape the frontend. A `?` axis is
+/// neither: its extent is not known until run time and survives every later stage.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TensorExtent {
     /// A concrete compile-time extent, e.g. the `3` in `Tensor<f32, [3, 3]>`.
     Literal(usize),
-    /// A shape parameter used as an extent, e.g. the `K` in `Tensor<f32, [M, K]>`.
+    /// An extent parameter, e.g. the `K` in `Tensor<f32, [M, K]>`.
     Param(Identifier),
+    /// A shape parameter spliced in, the `..S` in `Tensor<f32, [..S, N]>`: any number of
+    /// axes, possibly none. `Tensor<T, S>` is written with one as its whole shape.
+    Splice(Identifier),
     /// A dynamic extent, the `?` in `Tensor<f32, [?, 784]>`: unknown until run time,
     /// so the axis opts out of compile-time shape checking while its siblings keep it.
     Dynamic(Span),

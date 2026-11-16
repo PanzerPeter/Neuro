@@ -393,6 +393,9 @@ fn is_annotatable(ty: &Type, generics: &[GenericParam]) -> bool {
                 && args.iter().all(|arg| match arg {
                     GenericArg::Type(ty) => is_annotatable(ty, generics),
                     GenericArg::Const { .. } => true,
+                    GenericArg::Shape { dims, .. } => dims
+                        .iter()
+                        .all(|dim| matches!(dim.extent, ast_types::TensorExtent::Literal(_))),
                 })
         }
         // A statically shaped tensor is fully nameable at a call site: its extents are

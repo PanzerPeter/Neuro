@@ -15,7 +15,7 @@ in an error names that file. `parse(source)` is `parse_at(source, 0)`.
 `ParseError::span()` gives the range an error points at, `None` for `UnexpectedEof` and
 `MaxDepthExceeded`, which have no token to point at. A wrapped `LexError` answers with its own.
 
-`kind_impl_extents(items: &mut [Item])` is the second pipeline entry point: the driver runs it
+`kind_passed_sizes(items: &mut [Item])` is the second pipeline entry point: the driver runs it
 over the resolved program (see **Size parameters are decided here** below).
 
 `parse_expr(source: &str) -> Result<Expr, ParseError>` is also public. It is not a second
@@ -210,24 +210,26 @@ the tuple-index parse, so it needs no expression grammar of its own.
   `once` is no keyword: `function_mode_prefix` reads it (and `mut`) as a mode only when `(`
   follows, a place no type named `once` could stand, so `once` stays an ordinary name. A tuple
   type after the mode is an error.
-- **Shape argument vs. array/slice type argument.** `Tensor<f32, [2, 3]>` is the one type
-  application whose argument is a shape rather than a type, and it shares its opening bracket
-  with `Box<[T; N]>` / `Box<[T]>`. `shape_argument_ahead` decides on the token after `[`: an
-  integer, a `?`, or an immediate `]` can never open a type, so a shape needs no backtracking.
-  `parse_generic_type_args` therefore takes a `symbolic_extents` flag and returns
-  `(args, Option<ShapeArg>, close_span)`, and `build_tensor_type` turns a shape plus one type
-  argument into `Type::Tensor`. `Tensor` is a
-  prelude name, not a keyword, so the parser only claims it once a shape appears: a module
-  declaring its own generic `Tensor<T>` keeps parsing as `Type::Generic`. A shape under any
-  other name is `ParseError::ShapeArgumentOnNonTensor`; a shape with no element type, or with a
+- **Shape argument vs. array/slice type argument.** `Tensor<f32, [2, 3]>` takes a shape where
+  a type would go, and so does a type with a shape parameter (`Layer<[2, 3]>`) or a turbofish
+  (`f::<[2, 3]>()`), all sharing the opening bracket with `Box<[T; N]>` / `Box<[T]>`.
+  `shape_argument_ahead` decides on the tokens after `[`: an integer, a `?`, a `..`, an
+  immediate `]`, or a name followed by `,` or `:` can never open a type, so a shape needs no
+  backtracking. `parse_generic_type_args` takes a `symbolic_extents` flag (set under `Tensor`)
+  and returns `(args, Option<ShapeArg>, close_span)`: under `Tensor` the shape fills the
+  tensor's slot and `build_tensor_type` turns it plus one type argument into `Type::Tensor`;
+  elsewhere a shape is a `GenericArg::Shape`. `bare_shape_param` reads `Tensor<T, S>`, a bare
+  name in the shape's place, as the one-entry shape `[..S]`. `Tensor` is a prelude name, not a
+  keyword, so the parser only claims it once a shape appears: a module declaring its own
+  generic `Tensor<T>` keeps parsing as `Type::Generic`. A shape with no element type, or with a
   second type argument, is `ParseError::TensorTypeArity`. A shape is a list of
   `TensorDim { name, extent }`: the extent is a non-negative integer literal
-  (`TensorExtent::Literal`), a shape parameter's name (`TensorExtent::Param`), or `?`
-  (`TensorExtent::Dynamic`), and the
-  optional name is the `batch:` of a named dimension, which a `?` axis may carry like any
-  other. An identifier-led `[...]` is ambiguous
-  with the slice type `[T]`, so it is read as a shape only under the name `Tensor`, which is
-  what `symbolic_extents` carries: everywhere else `Foo<[T]>` parses as it always did.
+  (`TensorExtent::Literal`), an extent parameter's name (`TensorExtent::Param`), a `..S` splice
+  (`TensorExtent::Splice`, which takes no dimension name), or `?` (`TensorExtent::Dynamic`),
+  and the optional name is the `batch:` of a named dimension, which a `?` axis may carry like
+  any other. A lone identifier-led `[N]` is ambiguous with the slice type `[T]`, so it is read
+  as a shape only under the name `Tensor`: everywhere else `Foo<[T]>` parses as it always did,
+  and the checker reads a slice of an extent name as that shape.
 - **A dimension name is decided by the colon after it.** `[N]` names the extent and `[batch: N]`
   names the axis, so `parse_dimension_name` looks one token past the identifier and claims the
   name only when a `:` follows. Nothing else distinguishes the two spellings, and the
@@ -244,12 +246,15 @@ the tuple-index parse, so it needs no expression grammar of its own.
 - **Size parameters are decided here.** A bare name used as an array length or a tensor
   extent is a size parameter, so `rekind_size_params` (`parser/size_params.rs`) rewrites every
   bound-less `GenericParamKind::Type` that a function or method signature, a struct's fields or
-  an enum's payloads use that way into `GenericParamKind::Extent`. This is the same shape of
+  an enum's payloads use that way into `GenericParamKind::Extent`, and one they splice into a
+  tensor shape (`Tensor<T, S>`, `[..S, N]`) into `GenericParamKind::Shape`; a name used both
+  ways is a shape, and the checker refuses the extent use. This is the same shape of
   rewrite `desugar_impl_trait_params` does, and for the same reason: one representation reaches
   every later pass. A parameter carrying trait bounds is left alone (a bound names a type), and
   so is a written `const` one, which the checker then refuses in the size position.
-  An `impl` header passes its names to a type declared elsewhere, so `kind_impl_extents` settles
-  it from that declaration's kinds: `parse_program` runs it over the file, skipping a name the
+  An `impl` header, a signature or a field passing a name to a type declared elsewhere
+  (`impl<S> Layer<S>`, `func f<N>(r: &Ring<N>)`) is settled by `kind_passed_sizes` from that
+  declaration's kinds: `parse_program` runs it over the file, skipping a name the
   file declares twice, and `neurc` runs it again over the resolved program, where every name is
   canonical and a type from another module is in reach.
 - **Tensor constructor turbofish.** `Tensor::<f32, [3, 3]>::zeros()` is the one turbofish that

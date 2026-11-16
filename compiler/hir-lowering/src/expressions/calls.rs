@@ -105,8 +105,27 @@ const ZERO_GRAD_METHOD: &str = "zero_grad";
 const DETACH_METHOD: &str = "detach";
 const ITEM_METHOD: &str = "item";
 const FLAT_METHOD: &str = "flat";
+const SHAPE_RANK_METHOD: &str = "rank";
+const SHAPE_COUNT_METHOD: &str = "count";
 
 impl Lowerer {
+    /// `S.rank()` or `S.count()` on a shape parameter of the instance being lowered: the
+    /// bound shape's axis or element count, a constant of the instance.
+    fn shape_param_method(&self, object: &Expr, method: &str) -> Option<i128> {
+        let Expr::Identifier(ident) = object else {
+            return None;
+        };
+        if self.lookup(&ident.name).is_some() {
+            return None;
+        }
+        let (shape, _) = crate::types::carried_shape(self.type_subst.get(&ident.name)?)?;
+        match method {
+            SHAPE_RANK_METHOD => Some(shape.len() as i128),
+            SHAPE_COUNT_METHOD => Some(shape.iter().map(|e| e.unwrap_or(0) as i128).product()),
+            _ => None,
+        }
+    }
+
     /// Lower a call, dispatching on the callee shape: free/builtin function,
     /// instance method, or associated function.
     pub(crate) fn lower_call(
@@ -127,6 +146,13 @@ impl Lowerer {
                 self.lower_ident_call(&ident.name, type_args, args, expected, span)
             }
             Expr::FieldAccess { object, field, .. } => {
+                if let Some(value) = self.shape_param_method(object, &field.name) {
+                    return Ok(HirExpr::new(
+                        HirExprKind::Literal(shared_types::Literal::Integer(value, None)),
+                        HirType::U64,
+                        span,
+                    ));
+                }
                 self.lower_method_call(object, &field.name, type_args, args, expected, span)
             }
             // `T::zero()` in a generic instance, through `T`'s bound.
@@ -484,7 +510,12 @@ impl Lowerer {
         let gnames: std::collections::HashSet<String> = template
             .generics
             .iter()
-            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Type))
+            .filter(|g| {
+                matches!(
+                    g.kind,
+                    ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape
+                )
+            })
             .map(|g| g.name.name.clone())
             .collect();
         let cnames: std::collections::HashSet<String> = template
@@ -504,16 +535,7 @@ impl Lowerer {
         let mut const_subst: std::collections::HashMap<String, u64> =
             std::collections::HashMap::new();
         // Seed explicit turbofish arguments before inference, positionally.
-        for (gp, arg) in template.generics.iter().zip(type_args.iter()) {
-            match arg {
-                ast_types::GenericArg::Const { value, .. } => {
-                    const_subst.insert(gp.name.name.clone(), *value as u64);
-                }
-                ast_types::GenericArg::Type(ty) => {
-                    subst.insert(gp.name.name.clone(), self.resolve_type(ty)?);
-                }
-            }
-        }
+        self.seed_turbofish(&template.generics, type_args, &mut subst, &mut const_subst)?;
 
         let params: Vec<&ast_types::Type> = template.params.iter().map(|p| &p.ty).collect();
         let lowered_args = self.lower_generic_args(
@@ -792,7 +814,7 @@ impl Lowerer {
         let mut instance_args = Vec::with_capacity(generics.len());
         for gp in &generics {
             let arg = match gp.kind {
-                ast_types::GenericParamKind::Type => {
+                ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape => {
                     subst.get(&gp.name.name).cloned().map(crate::MonoArg::Type)
                 }
                 ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent => {

@@ -47,7 +47,9 @@ impl TypeChecker {
         };
         // An index computes a flat offset from the extents to its right, so one `?`
         // anywhere in the shape leaves every stride unknown.
-        if self.reject_dynamic_extent(shape, "an index", &source, span) {
+        if self.reject_dynamic_extent(shape, "an index", &source, span)
+            || self.reject_splice(shape, "an index", &source, span)
+        {
             return Type::Unknown;
         }
         if indices.len() != shape.len() {

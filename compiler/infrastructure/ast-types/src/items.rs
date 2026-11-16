@@ -34,6 +34,10 @@ pub enum GenericParamKind {
     /// extent (`[T; N]`, `[M, K]`), or passed to a type's extent in an `impl` header. Its
     /// value is a `u64`. The parser decides it from how the declaration uses the name.
     Extent,
+    /// A shape parameter declared by bare name and used as a whole tensor shape or a
+    /// splice (`Tensor<T, S>`, `[..S, N]`), or passed to a type's shape parameter in an
+    /// `impl` header. It stands for any number of extents.
+    Shape,
     /// A const (value) parameter `const N: T`, carrying its declared integer type. It
     /// sizes nothing.
     Const(Type),

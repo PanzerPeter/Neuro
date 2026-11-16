@@ -89,7 +89,12 @@ impl Lowerer {
         let gnames: std::collections::HashSet<String> = template
             .generics
             .iter()
-            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Type))
+            .filter(|g| {
+                matches!(
+                    g.kind,
+                    ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape
+                )
+            })
             .map(|g| g.name.name.clone())
             .collect();
         let cnames: std::collections::HashSet<String> = template
@@ -179,9 +184,11 @@ impl Lowerer {
                     ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent => {
                         crate::MonoArg::Const(const_subst.get(&gp.name.name).copied().unwrap_or(0))
                     }
-                    ast_types::GenericParamKind::Type => crate::MonoArg::Type(
-                        subst.get(&gp.name.name).cloned().unwrap_or(HirType::Void),
-                    ),
+                    ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape => {
+                        crate::MonoArg::Type(
+                            subst.get(&gp.name.name).cloned().unwrap_or(HirType::Void),
+                        )
+                    }
                 })
                 .collect(),
         };

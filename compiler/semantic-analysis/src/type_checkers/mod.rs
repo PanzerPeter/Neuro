@@ -1126,6 +1126,7 @@ impl TypeChecker {
         // declaration rather than as a duplicate symbol in the backend.
         self.check_reserved_names(items);
         self.check_attribute_names(items);
+        self.check_parameter_splices(items);
         self.library_modules = os_intrinsics::library_modules(items);
 
         // Pass 0a: pre-register newtype NAMES so a newtype used as a struct

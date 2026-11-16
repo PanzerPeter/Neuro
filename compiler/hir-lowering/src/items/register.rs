@@ -518,7 +518,7 @@ impl Lowerer {
                 ast_types::GenericParamKind::Extent => {
                     out.insert(gp.name.name.clone(), HirType::U64);
                 }
-                ast_types::GenericParamKind::Type => {}
+                ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape => {}
             }
         }
         Ok(out)

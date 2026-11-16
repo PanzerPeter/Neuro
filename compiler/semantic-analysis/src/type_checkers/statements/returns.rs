@@ -143,7 +143,8 @@ impl TypeChecker {
                     .iter()
                     .map(|arg| match arg {
                         ast_types::GenericArg::Type(ty) => self.lifetime_positions(ty),
-                        ast_types::GenericArg::Const { .. } => 0,
+                        ast_types::GenericArg::Const { .. }
+                        | ast_types::GenericArg::Shape { .. } => 0,
                     })
                     .sum();
                 declared(&name.name) + inner

@@ -156,7 +156,9 @@ func main() -> i32 {
 }
 ```
 
-A name used in neither way is a type parameter, and a misspelled size is an unknown-length error rather than a new parameter.
+A name used as a whole tensor shape or spliced into one (`Tensor<T, S>`, `[..S, N]`) is a **shape** parameter instead, standing for any number of extents; see [Shape parameters](tensors.md#shape-parameters). A size parameter in scope is passed on by its bare name, to a call (`sum::<N>(a)`, or inferred) or to a type (`func f<CAP>(r: &Buffer<i32, CAP>)`, `Buffer<T, CAP>` inside its own `impl`).
+
+A name used in none of these ways is a type parameter, and a misspelled size is an unknown-length error rather than a new parameter.
 
 A **const parameter**, `const NAME: T` with `T` an integer type, is a value that sizes nothing, such as the `N` of `count` above. Writing one in a size position is an error whose hint is the bare form, so every parameter has one spelling: `` const parameter 'N' sizes an array, but a `const` parameter is a value that sizes nothing; declare a size parameter by its bare name instead: `<N>` ``.
 

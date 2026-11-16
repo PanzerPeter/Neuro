@@ -933,6 +933,7 @@ impl TypeChecker {
             | Type::Char
             | Type::Void
             | Type::ConstValue(_)
+            | Type::Shape(_)
             | Type::Unknown => true,
             Type::Enum(name) => {
                 if !seen.insert(name.clone()) {

@@ -61,7 +61,15 @@ fn broadcast_shapes(left: &[TensorAxis], right: &[TensorAxis]) -> Option<Vec<Ten
 
 /// The result axis two aligned operand axes produce, or `None` when neither stretches
 /// into the other.
+///
+/// A splice joins only the same splice: aligned at the same depth from the end, the two
+/// stand for the same axes whatever the instantiation, while against anything else the
+/// axes it stands for would align differently per rank.
 fn join_axes(left: &TensorAxis, right: &TensorAxis) -> Option<TensorAxis> {
+    let spliced = |axis: &TensorAxis| matches!(axis.extent, ArrayLen::Splice(_));
+    if (spliced(left) || spliced(right)) && left.extent != right.extent {
+        return None;
+    }
     if left.extent == right.extent {
         // Both operands walk this axis, so a name either supplies is the result's and a
         // disagreement is a dimension-name mismatch rather than a silent relabel.
@@ -367,6 +375,8 @@ impl TypeChecker {
         // M x N to size the fresh result's buffer. A `?` supplies none of them.
         if self.reject_dynamic_extent(shape, "`@`", left_ty, span)
             || self.reject_dynamic_extent(other_shape, "`@`", right_ty, span)
+            || self.reject_splice(shape, "`@`", left_ty, span)
+            || self.reject_splice(other_shape, "`@`", right_ty, span)
         {
             return None;
         }

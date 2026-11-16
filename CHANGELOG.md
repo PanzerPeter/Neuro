@@ -10,6 +10,43 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.53.0] - 2026-11-16
+
+### Added
+
+- Shape parameters: a bare generic name written where a whole tensor shape goes,
+  `func relu<T: Float, S>(x: Tensor<T, S>) -> Tensor<T, S>`, stands for any number of
+  extents, so one function serves vectors, matrices and batches. `..S` splices one into a
+  longer shape: `[..S, N]` takes the last extent as `N` and the leading ones as `S`, possibly
+  none. Each distinct shape is its own specialization.
+- `S.rank()` and `S.count()` read a shape parameter's axis and element counts as `u64` values.
+- A shape-generic body accepts moving, borrowing, `.clone()`, element-wise arithmetic, the scalar
+  broadcast, a broadcast through the same splice (`[..S, N] + [N]`), the math methods and the
+  constructors (`Tensor::<f32, S>::zeros()`). An operation that needs a rank, such as an index,
+  `@`, `.t()`, a reduction or `.item()`, is refused on a shape that splices a parameter.
+- Structs, enums and `impl` blocks take shape parameters (`struct Layer<S> { w: Tensor<f32, S> }`,
+  `impl<S> Layer<S>`), and a shape is written as a type argument or a turbofish:
+  `Layer<[2, 3]>`, `zeros_of::<[4, 2]>()`.
+- A parameter's shape may splice at most once, so a call can always tell which of the
+  argument's axes each parameter takes. A result shape may splice as often as it needs.
+
+### Fixed
+
+- A size parameter can be passed on to another generic call or type: `sum_n(t)` and
+  `sum_n::<N>(t)` inside `func delegate<N>(t: &Tensor<i32, [N]>)`, `func f<CAP>(r: &Ring<i32, CAP>)`
+  in a signature, and `Ring<T, CAP>` written inside `impl<T, CAP> Ring<T, CAP>`. Before, each
+  was refused as uninferable, of the wrong kind, or an unknown type name. Closes BUG-027.
+
+### Changed
+
+- The conflicting-extent error now says "extent parameter", since "shape parameter" names the
+  new whole-shape kind.
+
+### Removed
+
+- The parse error for a `[...]` shape argument on a type other than `Tensor`: a type with a
+  shape parameter takes one.
+
 ## [5.52.0] - 2026-11-16
 
 ### Added

@@ -1,0 +1,7 @@
+describe(&v)     = 31
+describe(&m)     = 62
+describe(&batch) = 123
+twice(&m).sum()  = 42.0
+add_bias sum     = 24.0
+gain.apply sum   = 10.5
+cells            = 6 and 3

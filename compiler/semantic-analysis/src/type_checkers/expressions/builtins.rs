@@ -89,6 +89,20 @@ impl TypeChecker {
         args: &[Expr],
         call_span: Span,
     ) -> Option<Type> {
+        // Every method below that counts or picks axes needs a rank, and a spliced shape
+        // has none until it is instantiated.
+        if let Type::Tensor { shape, .. } = recv.referent()
+            && (is_shape_method(method)
+                || is_reduce_method(method)
+                || is_apply_method(method)
+                || is_sort_method(method)
+                || method == ITEM_METHOD)
+        {
+            let (shape, referent) = (shape.clone(), recv.referent().clone());
+            if self.reject_splice(&shape, &format!("`.{method}`"), &referent, call_span) {
+                return Some(Type::Unknown);
+            }
+        }
         // String methods auto-deref through an immutable borrow `&string`, so the
         // referent drives the string match below.
         match (recv.referent(), method) {

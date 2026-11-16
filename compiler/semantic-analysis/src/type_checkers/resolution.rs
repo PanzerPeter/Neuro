@@ -5,7 +5,7 @@ use super::declarations::traits::names_self;
 use super::operator_traits::is_operator_trait;
 use super::tensors::TENSOR_TYPE_NAME;
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type};
+use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type, shape_argument};
 
 /// The qualifier an associated-type path carries in its name, as the parser spells it.
 pub(crate) const SELF_ASSOC_PREFIX: &str = "Self::";
@@ -265,7 +265,34 @@ impl TypeChecker {
                         GenericArg::Const { value, .. } => {
                             resolved.push(Type::ConstValue(*value as u64));
                         }
+                        // A size parameter in scope passed on, `Ring<N>` or `Layer<S>` in a
+                        // template: it parses as a type name. It stands for itself, as a
+                        // template's own parameters do (`instance_parts`).
+                        GenericArg::Type(ast_types::Type::Named(ident))
+                            if self.const_scope.contains_key(&ident.name)
+                                && !self.value_consts.contains(&ident.name) =>
+                        {
+                            resolved.push(Type::Generic(ident.name.clone()));
+                        }
+                        // `Layer<[N]>`: a one-name shape parses as the slice type `[N]`,
+                        // but an extent in scope names no type, so it is that shape.
+                        GenericArg::Type(ast_types::Type::Slice { element, .. })
+                            if matches!(&**element, ast_types::Type::Named(ident)
+                                if matches!(self.const_scope.get(&ident.name), Some(Type::U64))
+                                    && !self.value_consts.contains(&ident.name)) =>
+                        {
+                            let ast_types::Type::Named(ident) = &**element else {
+                                return None;
+                            };
+                            resolved.push(Type::Shape(vec![TensorAxis {
+                                name: None,
+                                extent: ArrayLen::Param(ident.name.clone()),
+                            }]));
+                        }
                         GenericArg::Type(ty) => resolved.push(self.resolve_type(ty)?),
+                        GenericArg::Shape { dims, .. } => {
+                            resolved.push(shape_argument(self.resolve_tensor_shape(dims)?));
+                        }
                     }
                 }
                 // A compiler-known collection resolves to its own type, unless the
@@ -330,28 +357,7 @@ impl TypeChecker {
                     });
                     return None;
                 }
-                let mut axes: Vec<TensorAxis> = Vec::with_capacity(shape.len());
-                for dim in shape {
-                    let extent = self.resolve_tensor_dim(dim)?;
-                    // Dimension names are the tensor type's own namespace, and
-                    // `permute`-style operations resolve an identifier against it, so a
-                    // repeated name would denote two axes at once.
-                    if let Some(name) = &dim.name
-                        && axes
-                            .iter()
-                            .any(|axis| axis.name.as_deref() == Some(name.name.as_str()))
-                    {
-                        self.record_error(TypeError::DuplicateTensorAxisName {
-                            name: name.name.clone(),
-                            span: name.span,
-                        });
-                        return None;
-                    }
-                    axes.push(TensorAxis {
-                        name: dim.name.as_ref().map(|n| n.name.clone()),
-                        extent,
-                    });
-                }
+                let axes = self.resolve_tensor_shape(shape)?;
                 // The buffer is an LLVM array, whose element count is 32 bits wide, as an
                 // array's is. Checked, because an overflowing product wraps to a tensor
                 // with no elements.
@@ -366,6 +372,7 @@ impl TypeChecker {
                             ast_types::TensorExtent::Literal(extent) => extent.to_string(),
                             ast_types::TensorExtent::Dynamic(_) => "?".to_string(),
                             ast_types::TensorExtent::Param(ident) => ident.name.clone(),
+                            ast_types::TensorExtent::Splice(ident) => format!("..{}", ident.name),
                         })
                         .collect();
                     self.record_error(TypeError::TensorTooLarge {
@@ -381,6 +388,36 @@ impl TypeChecker {
                 })
             }
         }
+    }
+
+    /// Resolve a written shape, axis by axis.
+    pub(crate) fn resolve_tensor_shape(
+        &mut self,
+        shape: &[ast_types::TensorDim],
+    ) -> Option<Vec<TensorAxis>> {
+        let mut axes: Vec<TensorAxis> = Vec::with_capacity(shape.len());
+        for dim in shape {
+            let extent = self.resolve_tensor_dim(dim)?;
+            // Dimension names are the tensor type's own namespace, and `permute`-style
+            // operations resolve an identifier against it, so a repeated name would
+            // denote two axes at once.
+            if let Some(name) = &dim.name
+                && axes
+                    .iter()
+                    .any(|axis| axis.name.as_deref() == Some(name.name.as_str()))
+            {
+                self.record_error(TypeError::DuplicateTensorAxisName {
+                    name: name.name.clone(),
+                    span: name.span,
+                });
+                return None;
+            }
+            axes.push(TensorAxis {
+                name: dim.name.as_ref().map(|n| n.name.clone()),
+                extent,
+            });
+        }
+        Some(axes)
     }
 
     /// Resolve one axis's extent. A literal is taken as written; a name is accepted
@@ -399,8 +436,18 @@ impl TypeChecker {
                     });
                     return None;
                 }
-                if self.const_scope.contains_key(&ident.name) {
-                    return Some(ArrayLen::Param(ident.name.clone()));
+                match self.const_scope.get(&ident.name) {
+                    Some(Type::Shape(_)) => {
+                        self.record_error(TypeError::SizeParamKind {
+                            name: ident.name.clone(),
+                            declared: "a shape",
+                            hint: format!("..{}", ident.name),
+                            span: ident.span,
+                        });
+                        return None;
+                    }
+                    Some(_) => return Some(ArrayLen::Param(ident.name.clone())),
+                    None => {}
                 }
                 self.record_error(TypeError::UnknownTensorDimension {
                     name: ident.name.clone(),
@@ -408,6 +455,25 @@ impl TypeChecker {
                 });
                 None
             }
+            ast_types::TensorExtent::Splice(ident) => match self.const_scope.get(&ident.name) {
+                Some(Type::Shape(_)) => Some(ArrayLen::Splice(ident.name.clone())),
+                Some(_) => {
+                    self.record_error(TypeError::SizeParamKind {
+                        name: ident.name.clone(),
+                        declared: "an extent",
+                        hint: ident.name.clone(),
+                        span: ident.span,
+                    });
+                    None
+                }
+                None => {
+                    self.record_error(TypeError::UnknownShapeParam {
+                        name: ident.name.clone(),
+                        span: ident.span,
+                    });
+                    None
+                }
+            },
         }
     }
 

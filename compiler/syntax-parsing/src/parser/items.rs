@@ -9,7 +9,7 @@ use ast_types::{
 };
 
 use super::Parser;
-use super::size_params::kind_impl_extents;
+use super::size_params::kind_passed_sizes;
 use super::type_aliases::{TypeAliasDecl, expand_self, expand_type_aliases};
 
 /// Whether an item list runs to end of input or to the `}` of an inline `module` block.
@@ -42,7 +42,7 @@ impl Parser {
         inject_trait_defaults(&mut items);
         expand_self(&mut items);
         expand_type_aliases(&mut items, alias_decls)?;
-        kind_impl_extents(&mut items);
+        kind_passed_sizes(&mut items);
         Ok(items)
     }
 

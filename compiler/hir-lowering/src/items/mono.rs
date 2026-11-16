@@ -533,8 +533,17 @@ impl Lowerer {
                 ast_types::GenericArg::Const { value, .. } => {
                     const_subst.insert(gp.name.name.clone(), *value as u64);
                 }
+                // The caller's own size parameter passed on: a bare name parses as a type.
+                ast_types::GenericArg::Type(ast_types::Type::Named(id))
+                    if self.const_subst.contains_key(&id.name) =>
+                {
+                    const_subst.insert(gp.name.name.clone(), self.const_subst[&id.name]);
+                }
                 ast_types::GenericArg::Type(ty) => {
                     subst.insert(gp.name.name.clone(), self.resolve_type(ty)?);
+                }
+                ast_types::GenericArg::Shape { dims, .. } => {
+                    subst.insert(gp.name.name.clone(), self.resolve_shape_carrier(dims)?);
                 }
             }
         }
@@ -761,9 +770,12 @@ pub(crate) fn generic_name_sets(
     std::collections::HashSet<String>,
     std::collections::HashSet<String>,
 ) {
-    let (types, consts): (Vec<_>, Vec<_>) = generics
-        .iter()
-        .partition(|g| matches!(g.kind, ast_types::GenericParamKind::Type));
+    let (types, consts): (Vec<_>, Vec<_>) = generics.iter().partition(|g| {
+        matches!(
+            g.kind,
+            ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape
+        )
+    });
     (
         types.iter().map(|g| g.name.name.clone()).collect(),
         consts.iter().map(|g| g.name.name.clone()).collect(),
@@ -794,6 +806,10 @@ pub(crate) fn mentions_any(
         ast_types::Type::Generic { args, .. } => args.iter().any(|arg| match arg {
             ast_types::GenericArg::Type(ty) => inner(ty),
             ast_types::GenericArg::Const { .. } => false,
+            ast_types::GenericArg::Shape { dims, .. } => dims.iter().any(
+                |dim| matches!(&dim.extent, ast_types::TensorExtent::Param(id) if open_const(&id.name))
+                    || matches!(&dim.extent, ast_types::TensorExtent::Splice(id) if open_type(&id.name)),
+            ),
         }),
         ast_types::Type::Function { params, ret, .. } => params.iter().any(inner) || inner(ret),
         ast_types::Type::Tensor {
@@ -801,7 +817,8 @@ pub(crate) fn mentions_any(
             shape,
             ..
         } => shape.iter().any(
-            |dim| matches!(&dim.extent, ast_types::TensorExtent::Param(id) if open_const(&id.name)),
+            |dim| matches!(&dim.extent, ast_types::TensorExtent::Param(id) if open_const(&id.name))
+                || matches!(&dim.extent, ast_types::TensorExtent::Splice(id) if open_type(&id.name)),
         ) || inner(element_type),
         ast_types::Type::ImplTrait { .. } | ast_types::Type::DynTrait { .. } => false,
     }

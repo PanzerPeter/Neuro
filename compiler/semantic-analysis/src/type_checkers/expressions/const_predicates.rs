@@ -145,8 +145,14 @@ impl TypeChecker {
     /// instance mentions one through its arguments: `Option<T>` is not concrete.
     pub(crate) fn mentions_type_parameter(&self, ty: &Type) -> bool {
         match ty {
-            Type::Generic(_) | Type::ConstValue(_) => true,
+            Type::Generic(_) | Type::ConstValue(_) | Type::Shape(_) => true,
             Type::Reference { inner, .. } => self.mentions_type_parameter(inner),
+            Type::Tensor { element, shape } => {
+                shape
+                    .iter()
+                    .any(|axis| matches!(axis.extent, ArrayLen::Param(_) | ArrayLen::Splice(_)))
+                    || self.mentions_type_parameter(element)
+            }
             Type::Array { element, size } => {
                 matches!(size, ArrayLen::Param(_)) || self.mentions_type_parameter(element)
             }

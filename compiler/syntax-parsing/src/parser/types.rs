@@ -283,9 +283,10 @@ impl Parser {
                     let symbolic_extents = ident.name == TENSOR_TYPE_NAME;
                     let (args, shape, close_span) =
                         self.parse_generic_type_args(symbolic_extents)?;
+                    let (args, shape) = Self::bare_shape_param(symbolic_extents, args, shape);
                     let span = span.merge(close_span);
-                    if let Some((dims, shape_span)) = shape {
-                        return Self::build_tensor_type(ident, args, dims, shape_span, span);
+                    if let Some((dims, _)) = shape {
+                        return Self::build_tensor_type(args, dims, span);
                     }
                     // `Ref<'a>` applies lifetimes only, which leave a plain named type.
                     if args.is_empty() {
@@ -383,6 +384,9 @@ impl Parser {
         loop {
             if self.skip_lifetime_arg()? {
                 // Checked and dropped: a lifetime argument names no part of the type.
+            } else if !symbolic_extents && self.shape_argument_ahead(false) {
+                let (dims, span) = self.parse_shape_argument()?;
+                args.push(GenericArg::Shape { dims, span });
             } else if self.shape_argument_ahead(symbolic_extents) {
                 let parsed = self.parse_shape_argument()?;
                 let parsed_span = parsed.1;
@@ -446,28 +450,62 @@ impl Parser {
     /// array or slice type. An integer, a `?`, or an immediate `]` can never open a
     /// type, so the token after `[` decides without backtracking.
     ///
-    /// An identifier-led shape (`[M, K]`) is ambiguous with the slice type `[T]`, so it
+    /// A `..` splice opens no type either, and neither does a name followed by `,` or `:`.
+    /// A lone identifier-led shape (`[N]`) is ambiguous with the slice type `[T]`, so it
     /// is claimed only under `Tensor`, where a slice cannot appear: `symbolic_extents` carries
     /// that from the caller, which already knows the name.
-    fn shape_argument_ahead(&self, symbolic_extents: bool) -> bool {
+    pub(super) fn shape_argument_ahead(&self, symbolic_extents: bool) -> bool {
         if !self.check(&TokenKind::LeftBracket) {
             return false;
         }
-        let mut i = self.current + 1;
-        while matches!(
-            self.tokens.get(i).map(|t| &t.kind),
-            Some(TokenKind::Newline)
-        ) {
-            i += 1;
-        }
-        matches!(
-            self.tokens.get(i).map(|t| &t.kind),
-            Some(TokenKind::Integer(_)) | Some(TokenKind::RightBracket) | Some(TokenKind::Question)
-        ) || (symbolic_extents
-            && matches!(
+        let skip_newlines = |mut i: usize| {
+            while matches!(
                 self.tokens.get(i).map(|t| &t.kind),
-                Some(TokenKind::Identifier(_))
-            ))
+                Some(TokenKind::Newline)
+            ) {
+                i += 1;
+            }
+            i
+        };
+        let i = skip_newlines(self.current + 1);
+        match self.tokens.get(i).map(|t| &t.kind) {
+            Some(
+                TokenKind::Integer(_)
+                | TokenKind::RightBracket
+                | TokenKind::Question
+                | TokenKind::DotDot,
+            ) => true,
+            Some(TokenKind::Identifier(_)) => {
+                symbolic_extents
+                    || matches!(
+                        self.tokens.get(skip_newlines(i + 1)).map(|t| &t.kind),
+                        Some(TokenKind::Comma | TokenKind::Colon)
+                    )
+            }
+            _ => false,
+        }
+    }
+
+    /// `Tensor<T, S>`: a bare name where a tensor's shape goes is a shape parameter
+    /// standing for the whole shape, so it is the one-entry shape `[..S]`.
+    pub(super) fn bare_shape_param(
+        tensor: bool,
+        mut args: Vec<GenericArg>,
+        shape: Option<ShapeArg>,
+    ) -> (Vec<GenericArg>, Option<ShapeArg>) {
+        if !tensor || shape.is_some() {
+            return (args, shape);
+        }
+        let [_, GenericArg::Type(Type::Named(name))] = args.as_slice() else {
+            return (args, shape);
+        };
+        let (name, span) = (name.clone(), name.span);
+        args.pop();
+        let dims = vec![TensorDim {
+            name: None,
+            extent: TensorExtent::Splice(name),
+        }];
+        (args, Some((dims, span)))
     }
 
     /// Parse the `batch:` that may open an axis, or `None` when the axis is unnamed.
@@ -497,8 +535,8 @@ impl Parser {
         Ok(Some(Identifier { name, span }))
     }
 
-    /// Parse one axis extent: a non-negative integer literal, a shape parameter's name,
-    /// or `?` for an axis whose extent is not known until run time.
+    /// Parse one shape entry: a non-negative integer literal, an extent parameter's name,
+    /// a `..S` splice, or `?` for an axis whose extent is not known until run time.
     fn parse_tensor_extent(&mut self) -> ParseResult<TensorExtent> {
         let token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "a tensor dimension".to_string(),
@@ -519,9 +557,27 @@ impl Parser {
                 span: token.span,
             })),
             TokenKind::Question => Ok(TensorExtent::Dynamic(token.span)),
+            TokenKind::DotDot => {
+                let name = self.consume(
+                    TokenKind::Identifier(String::new()),
+                    "a shape parameter's name after `..`",
+                )?;
+                let TokenKind::Identifier(text) = name.kind else {
+                    return Err(ParseError::UnexpectedToken {
+                        found: name.kind,
+                        expected: "a shape parameter's name after `..`".to_string(),
+                        span: name.span,
+                    });
+                };
+                Ok(TensorExtent::Splice(Identifier {
+                    name: text,
+                    span: token.span.merge(name.span),
+                }))
+            }
             found => Err(ParseError::UnexpectedToken {
                 found,
-                expected: "a tensor dimension: a non-negative integer, a shape parameter, or `?`"
+                expected: "a tensor dimension: a non-negative integer, an extent parameter, \
+                           `..S`, or `?`"
                     .to_string(),
                 span: token.span,
             }),
@@ -532,16 +588,22 @@ impl Parser {
     /// integer literal, a shape parameter's name, or `?`) optionally preceded by a
     /// dimension name and a colon (`[batch: 32]`); an empty list is the rank-0 scalar
     /// shape.
-    fn parse_shape_argument(&mut self) -> ParseResult<ShapeArg> {
+    pub(super) fn parse_shape_argument(&mut self) -> ParseResult<ShapeArg> {
         let open = self.consume(TokenKind::LeftBracket, "'[' to open a tensor shape")?;
         self.skip_newlines();
         let mut dims = Vec::new();
         while !self.check(&TokenKind::RightBracket) {
             let name = self.parse_dimension_name()?;
-            let dim = TensorDim {
-                name,
-                extent: self.parse_tensor_extent()?,
-            };
+            let extent = self.parse_tensor_extent()?;
+            // A splice is any number of axes, so there is no one axis a name could label.
+            if let (Some(name), TensorExtent::Splice(_)) = (&name, &extent) {
+                return Err(ParseError::UnexpectedToken {
+                    found: TokenKind::DotDot,
+                    expected: format!("an extent after the dimension name `{}:`", name.name),
+                    span: name.span,
+                });
+            }
+            let dim = TensorDim { name, extent };
             dims.push(dim);
             self.skip_newlines();
             if !self.check(&TokenKind::Comma) {
@@ -554,24 +616,14 @@ impl Parser {
         Ok((dims, open.span.merge(close.span)))
     }
 
-    /// Assemble `Tensor<T, [...]>` from an argument list that carried a shape.
-    ///
-    /// The shape is what marks the application as a tensor, so a shape under any other
-    /// name is rejected here rather than left for the type checker: no other type in the
-    /// language accepts one, and the parser already knows the name.
+    /// Assemble `Tensor<T, [...]>` from an argument list that carried a shape. Only
+    /// `Tensor` claims a shape slot; any other type takes a shape as a
+    /// `GenericArg::Shape` for its shape parameter.
     pub(super) fn build_tensor_type(
-        name: Identifier,
         args: Vec<GenericArg>,
         shape: Vec<TensorDim>,
-        shape_span: Span,
         span: Span,
     ) -> ParseResult<Type> {
-        if name.name != TENSOR_TYPE_NAME {
-            return Err(ParseError::ShapeArgumentOnNonTensor {
-                name: name.name,
-                span: shape_span,
-            });
-        }
         let [GenericArg::Type(element_type)] =
             <[GenericArg; 1]>::try_from(args).map_err(|_| ParseError::TensorTypeArity { span })?
         else {
@@ -774,12 +826,46 @@ mod tests {
     }
 
     #[test]
-    fn shape_argument_on_a_non_tensor_type_is_rejected() {
-        let err = parse("func f(x: Grid<f32, [2, 2]>) { }").expect_err("rejected");
+    fn a_shape_argument_on_another_type_is_a_shape_generic_argument() {
+        let items = parse("func f(x: Grid<f32, [2, ..S]>) { }").expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Generic { args, .. } = &func.params[0].ty else {
+            panic!("expected a generic type application");
+        };
+        let GenericArg::Shape { dims, .. } = &args[1] else {
+            panic!("expected a shape argument, got {:?}", args[1]);
+        };
+        assert!(matches!(&dims[1].extent, TensorExtent::Splice(id) if id.name == "S"));
+    }
+
+    #[test]
+    fn a_bare_shape_name_is_the_whole_shape() {
+        let items =
+            parse("func f<S>(x: Tensor<f32, S>, y: Tensor<f32, [..S, 4]>) { }").expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Tensor { shape, .. } = &func.params[0].ty else {
+            panic!("expected a tensor parameter type");
+        };
         assert!(
-            matches!(&err, ParseError::ShapeArgumentOnNonTensor { name, .. } if name == "Grid"),
-            "unexpected error: {err:?}"
+            matches!(&shape[..], [d] if matches!(&d.extent, TensorExtent::Splice(id) if id.name == "S"))
         );
+        let Type::Tensor { shape, .. } = &func.params[1].ty else {
+            panic!("expected a tensor parameter type");
+        };
+        assert_eq!(shape.len(), 2);
+        assert!(matches!(
+            func.generics[0].kind,
+            ast_types::GenericParamKind::Shape
+        ));
+    }
+
+    #[test]
+    fn a_splice_takes_no_dimension_name() {
+        assert!(parse("func f<S>(x: Tensor<f32, [b: ..S]>) { }").is_err());
     }
 
     #[test]

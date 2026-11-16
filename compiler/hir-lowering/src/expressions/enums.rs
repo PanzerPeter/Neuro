@@ -130,7 +130,7 @@ impl Lowerer {
                         .map(|v| crate::MonoArg::Const(*v))
                         .or(fallback)
                 }
-                ast_types::GenericParamKind::Type => subst
+                ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape => subst
                     .get(&gp.name.name)
                     .cloned()
                     .map(crate::MonoArg::Type)
@@ -168,7 +168,12 @@ impl Lowerer {
         let types = template
             .generics
             .iter()
-            .filter(|g| matches!(g.kind, ast_types::GenericParamKind::Type))
+            .filter(|g| {
+                matches!(
+                    g.kind,
+                    ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape
+                )
+            })
             .map(|g| g.name.name.clone())
             .collect();
         let consts = template

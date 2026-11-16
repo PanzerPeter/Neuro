@@ -15,7 +15,7 @@ pub(crate) mod traits;
 use super::derivable::{CLONE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
 use super::{BoundInfo, GenericScope, TypeChecker};
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type};
+use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type, shape_argument};
 use ast_types::{Attribute, Item};
 use shared_types::{Identifier, Span};
 use std::collections::HashMap;
@@ -125,6 +125,52 @@ impl TypeChecker {
                 // of its own here.
                 Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => {}
             }
+        }
+    }
+
+    /// Refuse a parameter or field shape that splices more than one shape parameter: a
+    /// call or a literal splits its argument's axes among them, and two splices leave the
+    /// split open.
+    pub(crate) fn check_parameter_splices(&mut self, items: &[Item]) {
+        for item in items {
+            let types: Vec<&ast_types::Type> = match item {
+                Item::Function(def) => def.params.iter().map(|p| &p.ty).collect(),
+                Item::Impl(def) => def
+                    .methods
+                    .iter()
+                    .flat_map(|m| m.params.iter().map(|p| &p.ty))
+                    .collect(),
+                Item::Struct(def) => def.fields.iter().map(|f| &f.ty).collect(),
+                Item::Module(def) => {
+                    self.check_parameter_splices(&def.items);
+                    continue;
+                }
+                _ => continue,
+            };
+            for ty in types {
+                self.check_type_splices(ty);
+            }
+        }
+    }
+
+    fn check_type_splices(&mut self, ty: &ast_types::Type) {
+        match ty {
+            ast_types::Type::Tensor { shape, span, .. } => {
+                let count = shape
+                    .iter()
+                    .filter(|dim| matches!(dim.extent, ast_types::TensorExtent::Splice(_)))
+                    .count();
+                if count > 1 {
+                    self.record_error(TypeError::ShapeSplicedTwice { count, span: *span });
+                }
+            }
+            ast_types::Type::Reference { inner, .. } => self.check_type_splices(inner),
+            ast_types::Type::Tuple { elements, .. } => {
+                for element in elements {
+                    self.check_type_splices(element);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -271,6 +317,15 @@ impl TypeChecker {
                 }
                 ast_types::GenericParamKind::Extent => {
                     self.const_scope.insert(gp.name.name.clone(), Type::U64);
+                }
+                // A shape parameter's value is the shape it stands for, `[..S]`.
+                ast_types::GenericParamKind::Shape => {
+                    let own = TensorAxis {
+                        name: None,
+                        extent: ArrayLen::Splice(gp.name.name.clone()),
+                    };
+                    self.const_scope
+                        .insert(gp.name.name.clone(), Type::Shape(vec![own]));
                 }
                 ast_types::GenericParamKind::Const(ty) => {
                     self.value_consts.insert(gp.name.name.clone());
@@ -492,11 +547,9 @@ impl TypeChecker {
             }
             Type::Tensor { element, shape } => Type::Tensor {
                 element: Box::new(self.substitute_tensor_element(element, subst, span)),
-                shape: shape
-                    .iter()
-                    .map(|axis| axis.with_extent(substitute_array_len(&axis.extent, subst)))
-                    .collect(),
+                shape: substitute_shape(shape, subst),
             },
+            Type::Shape(shape) => shape_argument(substitute_shape(shape, subst)),
             Type::Tuple(elements) => Type::Tuple(
                 elements
                     .iter()
@@ -566,26 +619,29 @@ pub(super) fn mangle_struct_instance(base: &str, args: &[Type]) -> String {
 }
 
 /// Unify a template array length against an argument's. A const-parameter length
-/// binds that parameter to the argument's concrete value (recorded as a [`Type::ConstValue`]
-/// in `subst`); two fixed lengths must be equal; a fixed template length against a symbolic
-/// argument (only inside another template) matches structurally by name.
+/// binds that parameter to the argument's length: a concrete one as a [`Type::ConstValue`],
+/// and inside another template the caller's own parameter, as the rename
+/// `Type::Generic`, which is how a size parameter is passed on. Two fixed lengths must be
+/// equal.
 pub(super) fn unify_array_len(
     param: &ArrayLen,
     arg: &ArrayLen,
     subst: &mut HashMap<String, Type>,
 ) -> bool {
-    match (param, arg) {
-        (ArrayLen::Fixed(a), ArrayLen::Fixed(b)) => a == b,
-        (ArrayLen::Param(name), ArrayLen::Fixed(v)) => match subst.get(name) {
-            Some(Type::ConstValue(existing)) => *existing as usize == *v,
-            Some(_) => false,
+    let bound = match arg {
+        ArrayLen::Fixed(v) => Type::ConstValue(*v as u64),
+        ArrayLen::Param(name) => Type::Generic(name.clone()),
+        ArrayLen::Dynamic | ArrayLen::Splice(_) => return param == arg,
+    };
+    match param {
+        ArrayLen::Param(name) => match subst.get(name) {
+            Some(existing) => *existing == bound,
             None => {
-                subst.insert(name.clone(), Type::ConstValue(*v as u64));
+                subst.insert(name.clone(), bound);
                 true
             }
         },
-        (ArrayLen::Param(a), ArrayLen::Param(b)) => a == b,
-        _ => false,
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) => param == arg,
     }
 }
 
@@ -597,11 +653,52 @@ pub(super) fn unify_array_len(
 ///
 /// A dimension name must also agree where both sides carry one: that is what
 /// rejects a transposed argument whose extents happen to match the template's.
+///
+/// A splice in the template takes the argument's axes the entries around it leave over,
+/// possibly none: `[..S, N]` against `[2, 3, 4]` binds `N` to 4 and `S` to `[2, 3]`. A
+/// template shape splices at most once (checked at its declaration), so the split is
+/// never ambiguous. A `?` axis has no value to bind, so a splice refuses one, as an
+/// extent parameter does.
 fn unify_tensor_shape(
     param: &[TensorAxis],
     arg: &[TensorAxis],
     subst: &mut HashMap<String, Type>,
 ) -> bool {
+    let Some(at) = param
+        .iter()
+        .position(|axis| matches!(axis.extent, ArrayLen::Splice(_)))
+    else {
+        return unify_axes(param, arg, subst);
+    };
+    let after = param.len() - at - 1;
+    if arg.len() < at + after {
+        return false;
+    }
+    let taken = &arg[at..arg.len() - after];
+    let mut agreed = unify_axes(&param[..at], &arg[..at], subst)
+        & unify_axes(&param[at + 1..], &arg[arg.len() - after..], subst);
+    let ArrayLen::Splice(name) = &param[at].extent else {
+        return false;
+    };
+    if taken.iter().any(|axis| axis.extent == ArrayLen::Dynamic) {
+        // Bound all the same, so the mismatch is the one error reported, not also an
+        // uninferable parameter.
+        subst.entry(name.clone()).or_insert(Type::Unknown);
+        return false;
+    }
+    let bound = shape_argument(taken.to_vec());
+    agreed &= match subst.get(name) {
+        Some(existing) => existing.is_compatible_with(&bound) || *existing == bound,
+        None => {
+            subst.insert(name.clone(), bound);
+            true
+        }
+    };
+    agreed
+}
+
+/// Unify two runs of single axes of equal length, position by position.
+fn unify_axes(param: &[TensorAxis], arg: &[TensorAxis], subst: &mut HashMap<String, Type>) -> bool {
     if param.len() != arg.len() {
         return false;
     }
@@ -611,6 +708,29 @@ fn unify_tensor_shape(
             unify_array_len(&axis.extent, &found.extent, subst) && axis.names_agree_with(found);
     }
     agreed
+}
+
+/// A template shape under `subst`: an extent parameter becomes its value and a splice
+/// expands to the axes its shape parameter stands for, keeping their names.
+pub(super) fn substitute_shape(
+    shape: &[TensorAxis],
+    subst: &HashMap<String, Type>,
+) -> Vec<TensorAxis> {
+    let mut out = Vec::with_capacity(shape.len());
+    for axis in shape {
+        let ArrayLen::Splice(name) = &axis.extent else {
+            out.push(axis.with_extent(substitute_array_len(&axis.extent, subst)));
+            continue;
+        };
+        match subst.get(name) {
+            Some(Type::Shape(axes)) => out.extend(axes.iter().cloned()),
+            Some(Type::Generic(renamed)) => {
+                out.push(axis.with_extent(ArrayLen::Splice(renamed.clone())))
+            }
+            _ => out.push(axis.clone()),
+        }
+    }
+    out
 }
 
 /// The first axis whose dimension name the argument contradicts: its position, the name
@@ -687,7 +807,7 @@ pub(crate) fn conflicting_shape_param(
 fn extent_param_name(extent: &ArrayLen) -> Option<&str> {
     match extent {
         ArrayLen::Param(name) => Some(name),
-        ArrayLen::Fixed(_) | ArrayLen::Dynamic => None,
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) => None,
     }
 }
 
@@ -702,6 +822,98 @@ pub(super) fn substitute_array_len(size: &ArrayLen, subst: &HashMap<String, Type
             Some(Type::Generic(renamed)) => ArrayLen::Param(renamed.clone()),
             _ => size.clone(),
         },
-        ArrayLen::Fixed(_) | ArrayLen::Dynamic => size.clone(),
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) => size.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{substitute_shape, unify_tensor_shape};
+    use crate::types::{ArrayLen, TensorAxis, Type};
+    use std::collections::HashMap;
+
+    fn axis(extent: ArrayLen) -> TensorAxis {
+        TensorAxis { name: None, extent }
+    }
+
+    fn fixed(extents: &[usize]) -> Vec<TensorAxis> {
+        extents.iter().map(|e| axis(ArrayLen::Fixed(*e))).collect()
+    }
+
+    fn splice(name: &str) -> TensorAxis {
+        axis(ArrayLen::Splice(name.to_string()))
+    }
+
+    fn param(name: &str) -> TensorAxis {
+        axis(ArrayLen::Param(name.to_string()))
+    }
+
+    #[test]
+    fn a_splice_takes_the_axes_the_entries_around_it_leave() {
+        let mut subst = HashMap::new();
+        let template = [param("B"), splice("S"), param("N")];
+        assert!(unify_tensor_shape(
+            &template,
+            &fixed(&[2, 3, 4, 5]),
+            &mut subst
+        ));
+        assert_eq!(subst["B"], Type::ConstValue(2));
+        assert_eq!(subst["N"], Type::ConstValue(5));
+        assert_eq!(subst["S"], Type::Shape(fixed(&[3, 4])));
+        assert_eq!(substitute_shape(&template, &subst), fixed(&[2, 3, 4, 5]));
+    }
+
+    #[test]
+    fn a_splice_may_take_no_axes_but_not_fewer() {
+        let mut subst = HashMap::new();
+        assert!(unify_tensor_shape(
+            &[splice("S"), param("N")],
+            &fixed(&[7]),
+            &mut subst
+        ));
+        assert_eq!(subst["S"], Type::Shape(Vec::new()));
+        let mut subst = HashMap::new();
+        assert!(!unify_tensor_shape(
+            &[param("M"), splice("S"), param("N")],
+            &fixed(&[7]),
+            &mut subst
+        ));
+    }
+
+    #[test]
+    fn a_callers_own_splice_is_passed_on_by_name() {
+        let mut subst = HashMap::new();
+        let caller = [splice("R"), axis(ArrayLen::Fixed(3))];
+        assert!(unify_tensor_shape(&[splice("S")], &caller, &mut subst));
+        assert_eq!(subst["S"], Type::Shape(caller.to_vec()));
+        let mut subst = HashMap::new();
+        assert!(unify_tensor_shape(
+            &[splice("S")],
+            &[splice("R")],
+            &mut subst
+        ));
+        assert_eq!(subst["S"], Type::Generic("R".to_string()));
+        assert_eq!(
+            substitute_shape(&[splice("S"), param("N")], &subst)[0],
+            splice("R")
+        );
+    }
+
+    #[test]
+    fn a_dynamic_axis_binds_no_splice() {
+        let mut subst = HashMap::new();
+        let found = [axis(ArrayLen::Dynamic), axis(ArrayLen::Fixed(2))];
+        assert!(!unify_tensor_shape(
+            &[splice("S"), param("N")],
+            &found,
+            &mut subst
+        ));
+    }
+
+    #[test]
+    fn an_extent_parameter_passes_on_the_callers_own() {
+        let mut subst = HashMap::new();
+        assert!(unify_tensor_shape(&[param("N")], &[param("M")], &mut subst));
+        assert_eq!(subst["N"], Type::Generic("M".to_string()));
     }
 }

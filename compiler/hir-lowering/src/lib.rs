@@ -26,7 +26,7 @@
 use std::collections::{HashMap, HashSet};
 
 use ast_types::Item;
-use neuro_hir::{HirGridIndex, HirProgram, HirType};
+use neuro_hir::{AxisNames, HirGridIndex, HirProgram, HirType};
 use shared_types::Span;
 
 mod autodiff;
@@ -677,9 +677,9 @@ impl Lowerer {
                 }
                 self.unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
             }
-            // A tensor parameter's shape binds every shape parameter it names to the
+            // A tensor parameter's shape binds every extent parameter it names to the
             // argument's extent at that axis, which is what makes `matmul<M, N, K>` infer
-            // its three extents from two arguments.
+            // its three extents from two arguments, and its splice to the axes between.
             (
                 ast_types::Type::Tensor {
                     element_type: pe,
@@ -689,10 +689,29 @@ impl Lowerer {
                 HirType::Tensor {
                     element: ae,
                     shape: ashape,
-                    ..
+                    names,
                 },
-            ) if pshape.len() == ashape.len() => {
-                for (dim, extent) in pshape.iter().zip(ashape) {
+            ) => {
+                // A splice takes the axes the entries around it leave over, as the
+                // checker's unification splits them; the template holds at most one.
+                let at = pshape
+                    .iter()
+                    .position(|dim| matches!(dim.extent, ast_types::TensorExtent::Splice(_)));
+                let (before, after) = match at {
+                    Some(at) => (at, pshape.len() - at - 1),
+                    None => (pshape.len(), 0),
+                };
+                if before + after > ashape.len() || (at.is_none() && pshape.len() != ashape.len()) {
+                    return;
+                }
+                let taken = before..ashape.len() - after;
+                let aligned = pshape.iter().take(before).zip(&ashape[..before]).chain(
+                    pshape
+                        .iter()
+                        .skip(before + 1)
+                        .zip(&ashape[ashape.len() - after..]),
+                );
+                for (dim, extent) in aligned {
                     // A `?` argument axis carries no value, so it binds no shape parameter;
                     // the checker has already refused the call that would need one.
                     let (ast_types::TensorExtent::Param(id), Some(extent)) = (&dim.extent, extent)
@@ -702,6 +721,16 @@ impl Lowerer {
                     if cnames.contains(&id.name) {
                         const_subst.entry(id.name.clone()).or_insert(*extent as u64);
                     }
+                }
+                if let Some(at) = at
+                    && let ast_types::TensorExtent::Splice(id) = &pshape[at].extent
+                    && gnames.contains(&id.name)
+                {
+                    let names = names.0.get(taken.clone()).map(<[_]>::to_vec);
+                    let names = names.unwrap_or_else(|| vec![None; taken.len()]);
+                    subst.entry(id.name.clone()).or_insert_with(|| {
+                        crate::types::shape_carrier(ashape[taken].to_vec(), AxisNames(names))
+                    });
                 }
                 self.unify_ast_hir(pe, ae, gnames, cnames, subst, const_subst)
             }
@@ -764,8 +793,18 @@ impl Lowerer {
                     return;
                 }
                 for (p, a) in args.iter().zip(built_with) {
-                    if let (ast_types::GenericArg::Type(p), MonoArg::Type(a)) = (p, a) {
-                        self.unify_ast_hir(p, a, gnames, cnames, subst, const_subst);
+                    match (p, a) {
+                        // `Ring<N>`: the instance's extent binds the size parameter passed.
+                        (
+                            ast_types::GenericArg::Type(ast_types::Type::Named(id)),
+                            MonoArg::Const(value),
+                        ) if cnames.contains(&id.name) => {
+                            const_subst.entry(id.name.clone()).or_insert(*value);
+                        }
+                        (ast_types::GenericArg::Type(p), MonoArg::Type(a)) => {
+                            self.unify_ast_hir(p, a, gnames, cnames, subst, const_subst);
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -811,6 +850,10 @@ fn resolve_tensor_dim(
             .ok_or_else(|| LoweringError::UnresolvedType {
                 name: format!("tensor dimension '{}'", id.name),
             }),
+        ast_types::TensorExtent::Splice(id) => Err(malformed(format!(
+            "the splice `..{}` reached a single tensor axis",
+            id.name
+        ))),
     }
 }
 
@@ -876,7 +919,7 @@ fn mangle_instance(
                     .map(|v| format!("c{}", v))
                     .unwrap_or_else(|| "unresolved".to_string())
             }
-            ast_types::GenericParamKind::Type => subst
+            ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape => subst
                 .get(&gp.name.name)
                 .map(mangle_type)
                 .unwrap_or_else(|| "unresolved".to_string()),

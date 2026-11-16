@@ -984,6 +984,24 @@ is `TensorLiteralSymbolicExtent`: one literal serves every instantiation, so the
 to check it against. Indexing a symbolic axis keeps its rank check and drops only the
 compile-time bounds check, which is the debug-tier guard's job at that point.
 
+**Shape parameters.** A shape parameter sits in `const_scope` as `Type::Shape([..S])`, its own
+value; reading it as a value is `ShapeParamAsValue`, except as the receiver of `S.rank()` /
+`S.count()` (`check_shape_param_method`, both `u64`). A splice resolves to
+`ArrayLen::Splice`, an axis entry, so shapes over one parameter compare structurally; a name of
+the other kind is `SizeParamKind`, an undeclared one `UnknownShapeParam`. `unify_tensor_shape`
+splits the argument around the template's one splice and binds the parameter to a
+`Type::Shape`, or to `Type::Generic` for a caller's lone `[..S]` (`shape_argument`, the spelling
+`instance_parts` gives a template's own parameters); `substitute_shape` expands a binding. A `?`
+axis binds none. `check_parameter_splices` refuses a parameter or field shape splicing twice
+(`ShapeSplicedTwice`). `reject_splice` (`tensors.rs`) refuses whatever counts or picks axes on a
+spliced shape (`TensorSpliceRank`): an index, `@`, `einsum`, and the shape, reduce, apply, sort
+and `.item()` methods (guarded once at the top of `resolve_builtin_method`). `broadcast_shapes`
+joins a splice only with the same splice. A size parameter in scope passed on, to a turbofish or
+as a type argument, resolves to `Type::Generic` (`seed_turbofish`, `resolve_type`), and
+`unify_array_len` binds a callee extent to a caller's the same way. Struct and enum
+instantiation check each argument's kind against its parameter (`arg_kind`,
+`generic_arg_kind`).
+
 **Dynamic shapes.** `resolve_type` maps a `TensorExtent::Dynamic` to `ArrayLen::Dynamic`, and
 `ArrayLen::satisfies` is the whole rule: an EXPECTED `?` accepts any extent, and the
 reverse is refused, since a `?` found where a literal is expected would let the consumer index at

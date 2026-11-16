@@ -1,17 +1,21 @@
-// Size parameters: a bare generic name re-kinded to an extent by how its declaration uses it.
+// Size parameters: a bare generic name re-kinded to an extent or a shape by how its
+// declaration uses it.
 //
 // A function, method, struct or enum decides its own from its signature or fields as it
-// is parsed. An `impl` header passes its names to a type declared elsewhere, so it is
-// settled by `kind_impl_extents` once every declaration it can name is in hand.
+// is parsed. A name passed to another type's size parameter (an `impl` header, `Ring<N>`
+// in a signature or a field) is settled by `kind_passed_sizes` from that type's
+// declaration, once every declaration it can name is in hand.
 
 use std::collections::HashMap;
 
 use ast_types::{
-    ArraySize, GenericArg, GenericParam, GenericParamKind, Item, TensorExtent, Type, VariantPayload,
+    ArraySize, GenericArg, GenericParam, GenericParamKind, Item, TensorDim, TensorExtent, Type,
+    VariantPayload,
 };
 
 /// Re-kind every bound-less type parameter that `types` use as an array length or a
-/// tensor extent into an extent parameter.
+/// tensor extent into an extent parameter, and one they splice into a tensor shape
+/// (`Tensor<T, S>`, `[..S, N]`) into a shape parameter.
 ///
 /// A parameter carrying trait bounds is left alone: a bound names a type, so the two
 /// readings cannot both be right, and leaving it makes the checker report the extent as
@@ -26,11 +30,18 @@ pub(super) fn rekind_size_params<'a>(
         collect_size_names(ty, &mut named);
     }
     for generic in generics.iter_mut() {
-        if matches!(generic.kind, GenericParamKind::Type)
-            && generic.bounds.is_empty()
-            && named.contains(&generic.name.name)
-        {
-            generic.kind = GenericParamKind::Extent;
+        if !matches!(generic.kind, GenericParamKind::Type) || !generic.bounds.is_empty() {
+            continue;
+        }
+        // A name used both ways is a shape: the checker then refuses the extent use,
+        // which names the conflict, rather than an unknown shape parameter.
+        let uses = named.iter().filter(|(name, _)| *name == generic.name.name);
+        if let Some(shape) = uses.map(|(_, shape)| *shape).reduce(|a, b| a || b) {
+            generic.kind = if shape {
+                GenericParamKind::Shape
+            } else {
+                GenericParamKind::Extent
+            };
         }
     }
 }
@@ -44,27 +55,22 @@ pub(super) fn payload_types(payload: &VariantPayload) -> Vec<&Type> {
     }
 }
 
-/// Collect the names used as array lengths or tensor extents anywhere in `ty`,
-/// including under references, sequences, tuples, and other generic applications.
-fn collect_size_names(ty: &Type, out: &mut Vec<String>) {
+/// Collect the names used as array lengths, tensor extents or shape splices anywhere in
+/// `ty`, including under references, sequences, tuples, and other generic applications,
+/// each with whether it was a splice.
+fn collect_size_names(ty: &Type, out: &mut Vec<(String, bool)>) {
     match ty {
         Type::Tensor {
             element_type,
             shape,
             ..
         } => {
-            for dim in shape {
-                // The dimension NAME is not a parameter: it lives in the tensor type's
-                // own namespace, so only the extent can re-kind a generic.
-                if let TensorExtent::Param(name) = &dim.extent {
-                    out.push(name.name.clone());
-                }
-            }
+            collect_shape_names(shape, out);
             collect_size_names(element_type, out);
         }
         Type::Array { element, size, .. } => {
             if let ArraySize::Const(name) = size {
-                out.push(name.name.clone());
+                out.push((name.name.clone(), false));
             }
             collect_size_names(element, out);
         }
@@ -77,8 +83,10 @@ fn collect_size_names(ty: &Type, out: &mut Vec<String>) {
         }
         Type::Generic { args, .. } => {
             for arg in args {
-                if let GenericArg::Type(inner) = arg {
-                    collect_size_names(inner, out);
+                match arg {
+                    GenericArg::Type(inner) => collect_size_names(inner, out),
+                    GenericArg::Shape { dims, .. } => collect_shape_names(dims, out),
+                    GenericArg::Const { .. } => {}
                 }
             }
         }
@@ -92,22 +100,38 @@ fn collect_size_names(ty: &Type, out: &mut Vec<String>) {
     }
 }
 
-/// Re-kind an `impl` header's bare names passed to a type's extent parameters
-/// (`impl<T, CAP> Ring<T, CAP>` for `struct Ring<T, CAP> { data: [T; CAP] }`).
+fn collect_shape_names(shape: &[TensorDim], out: &mut Vec<(String, bool)>) {
+    for dim in shape {
+        // The dimension NAME is not a parameter: it lives in the tensor type's own
+        // namespace, so only the extent can re-kind a generic.
+        match &dim.extent {
+            TensorExtent::Param(name) => out.push((name.name.clone(), false)),
+            TensorExtent::Splice(name) => out.push((name.name.clone(), true)),
+            TensorExtent::Literal(_) | TensorExtent::Dynamic(_) => {}
+        }
+    }
+}
+
+/// Re-kind the bare names an `impl` header, a function or method signature, or a
+/// struct's fields pass to a type's extent or shape parameters (`impl<T, CAP> Ring<T, CAP>`
+/// and `func f<CAP>(r: &Ring<i32, CAP>)` for `struct Ring<T, CAP> { data: [T; CAP] }`).
 ///
 /// The parser runs this over each file, where a declaration is named as written, and the
 /// driver runs it again over the resolved program, where every name is canonical and so
 /// an `impl` reaches a type declared in another module. A name two declarations of the
 /// file share is skipped here, since only resolution knows which one the `impl` means.
-pub fn kind_impl_extents(items: &mut [Item]) {
-    let mut declared: HashMap<String, Option<Vec<bool>>> = HashMap::new();
+pub fn kind_passed_sizes(items: &mut [Item]) {
+    let mut declared: HashMap<String, Option<SizeKinds>> = HashMap::new();
     collect_extent_positions(items, &mut declared);
     rekind_impls(items, &declared);
 }
 
-/// For each generic struct and enum, which of its parameters are extents, or `None`
-/// for a name declared more than once.
-fn collect_extent_positions(items: &[Item], out: &mut HashMap<String, Option<Vec<bool>>>) {
+/// Per parameter of a declaration, its kind when it is a size.
+type SizeKinds = Vec<Option<GenericParamKind>>;
+
+/// For each generic struct and enum, the kind of each parameter when it is a size (an
+/// extent or a shape), or `None` for a name declared more than once.
+fn collect_extent_positions(items: &[Item], out: &mut HashMap<String, Option<SizeKinds>>) {
     for item in items {
         let (name, generics) = match item {
             Item::Struct(def) => (&def.name.name, &def.generics),
@@ -120,7 +144,10 @@ fn collect_extent_positions(items: &[Item], out: &mut HashMap<String, Option<Vec
         };
         let positions = generics
             .iter()
-            .map(|g| matches!(g.kind, GenericParamKind::Extent))
+            .map(|g| {
+                matches!(g.kind, GenericParamKind::Extent | GenericParamKind::Shape)
+                    .then(|| g.kind.clone())
+            })
             .collect();
         out.entry(name.clone())
             .and_modify(|seen| *seen = None)
@@ -128,32 +155,96 @@ fn collect_extent_positions(items: &[Item], out: &mut HashMap<String, Option<Vec
     }
 }
 
-fn rekind_impls(items: &mut [Item], declared: &HashMap<String, Option<Vec<bool>>>) {
+fn rekind_impls(items: &mut [Item], declared: &HashMap<String, Option<SizeKinds>>) {
     for item in items {
-        let def = match item {
-            Item::Impl(def) => def,
-            Item::Module(def) => {
-                rekind_impls(&mut def.items, declared);
-                continue;
+        match item {
+            Item::Impl(def) => {
+                let header = Type::Generic {
+                    name: def.type_name.clone(),
+                    args: def
+                        .type_args
+                        .iter()
+                        .cloned()
+                        .map(GenericArg::Type)
+                        .collect(),
+                    span: def.type_name.span,
+                };
+                rekind_passed([&header], declared, &mut def.generics);
+                for method in &mut def.methods {
+                    let types = method.params.iter().map(|p| &p.ty);
+                    let types = types.chain(method.return_type.as_ref());
+                    rekind_passed(types, declared, &mut method.generics);
+                }
             }
-            _ => continue,
-        };
-        let Some(Some(positions)) = declared.get(&def.type_name.name) else {
-            continue;
-        };
-        for (arg, is_extent) in def.type_args.iter().zip(positions) {
-            let Type::Named(name) = arg else { continue };
-            if !is_extent {
-                continue;
+            Item::Function(def) => {
+                let types = def.params.iter().map(|p| &p.ty);
+                let types = types.chain(def.return_type.as_ref());
+                rekind_passed(types, declared, &mut def.generics);
             }
-            if let Some(generic) = def.generics.iter_mut().find(|g| {
-                g.name.name == name.name
-                    && g.bounds.is_empty()
-                    && matches!(g.kind, GenericParamKind::Type)
-            }) {
-                generic.kind = GenericParamKind::Extent;
+            Item::Struct(def) => {
+                let types = def.fields.iter().map(|f| &f.ty);
+                rekind_passed(types, declared, &mut def.generics);
+            }
+            Item::Module(def) => rekind_impls(&mut def.items, declared),
+            _ => {}
+        }
+    }
+}
+
+/// Re-kind each bound-less type parameter that `types` pass to a declared type's size
+/// parameter (`Ring<N>`, `Layer<S>`) to that parameter's kind.
+fn rekind_passed<'a>(
+    types: impl IntoIterator<Item = &'a Type>,
+    declared: &HashMap<String, Option<SizeKinds>>,
+    generics: &mut [GenericParam],
+) {
+    let mut passed = Vec::new();
+    for ty in types {
+        collect_passed(ty, declared, &mut passed);
+    }
+    for (name, kind) in passed {
+        if let Some(generic) = generics.iter_mut().find(|g| {
+            g.name.name == name && g.bounds.is_empty() && matches!(g.kind, GenericParamKind::Type)
+        }) {
+            generic.kind = kind;
+        }
+    }
+}
+
+fn collect_passed(
+    ty: &Type,
+    declared: &HashMap<String, Option<SizeKinds>>,
+    out: &mut Vec<(String, GenericParamKind)>,
+) {
+    match ty {
+        Type::Generic { name, args, .. } => {
+            let kinds = declared.get(&name.name).and_then(Option::as_ref);
+            for (index, arg) in args.iter().enumerate() {
+                let GenericArg::Type(inner) = arg else {
+                    continue;
+                };
+                match (inner, kinds.and_then(|k| k.get(index)).cloned().flatten()) {
+                    (Type::Named(passed), Some(kind)) => out.push((passed.name.clone(), kind)),
+                    _ => collect_passed(inner, declared, out),
+                }
             }
         }
+        Type::Reference { inner, .. } => collect_passed(inner, declared, out),
+        Type::Array { element, .. } | Type::Slice { element, .. } => {
+            collect_passed(element, declared, out);
+        }
+        Type::Tuple { elements, .. } => {
+            for element in elements {
+                collect_passed(element, declared, out);
+            }
+        }
+        Type::Function { params, ret, .. } => {
+            for param in params {
+                collect_passed(param, declared, out);
+            }
+            collect_passed(ret, declared, out);
+        }
+        Type::Tensor { .. } | Type::Named(_) | Type::ImplTrait { .. } | Type::DynTrait { .. } => {}
     }
 }
 

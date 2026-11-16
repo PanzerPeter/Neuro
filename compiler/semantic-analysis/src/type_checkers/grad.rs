@@ -124,7 +124,7 @@ fn differentiated_tensor_problem(ty: &Type, generic: bool) -> Option<&'static st
     }
     if shape.iter().any(|axis| match axis.extent {
         ArrayLen::Fixed(_) => false,
-        ArrayLen::Param(_) => !generic,
+        ArrayLen::Param(_) | ArrayLen::Splice(_) => !generic,
         _ => true,
     }) {
         return Some(

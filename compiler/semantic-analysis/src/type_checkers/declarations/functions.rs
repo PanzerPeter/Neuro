@@ -131,21 +131,22 @@ impl TypeChecker {
             // `Type::Generic` placeholders and is instantiated at each call site. A
             // parameter that cannot be inferred from the arguments must be supplied by a
             // turbofish at the call; enforced per call, not here.
-            let const_types: HashMap<String, Type> =
-                func.generics
-                    .iter()
-                    .filter_map(|g| match &g.kind {
-                        ast_types::GenericParamKind::Const(_)
-                        | ast_types::GenericParamKind::Extent => Some((
-                            g.name.name.clone(),
-                            self.const_scope
-                                .get(&g.name.name)
-                                .cloned()
-                                .unwrap_or(Type::Unknown),
-                        )),
-                        ast_types::GenericParamKind::Type => None,
-                    })
-                    .collect();
+            let const_types: HashMap<String, Type> = func
+                .generics
+                .iter()
+                .filter_map(|g| match &g.kind {
+                    ast_types::GenericParamKind::Const(_)
+                    | ast_types::GenericParamKind::Extent
+                    | ast_types::GenericParamKind::Shape => Some((
+                        g.name.name.clone(),
+                        self.const_scope
+                            .get(&g.name.name)
+                            .cloned()
+                            .unwrap_or(Type::Unknown),
+                    )),
+                    ast_types::GenericParamKind::Type => None,
+                })
+                .collect();
             let bounds: HashMap<String, Vec<BoundInfo>> = func
                 .generics
                 .iter()

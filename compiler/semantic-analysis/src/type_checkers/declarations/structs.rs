@@ -491,25 +491,15 @@ impl TypeChecker {
                 .insert(mangled.clone(), (base.to_string(), args.to_vec()));
             let mut subst: HashMap<String, Type> = HashMap::new();
             for (gp, arg) in template.generics.iter().zip(args.iter()) {
-                // Validate each argument's kind: a const parameter takes a `ConstValue`,
-                // a type parameter takes a type.
-                let is_const = matches!(
-                    gp.kind,
-                    ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent
-                );
-                match arg {
-                    Type::ConstValue(_) if is_const => {}
-                    Type::ConstValue(_) => self.record_error(TypeError::TurbofishKindMismatch {
+                // Validate each argument's kind: a const parameter takes a value, a
+                // shape parameter a shape, a type parameter a type.
+                let expected = generic_arg_kind(&gp.kind);
+                if !matches!(arg, Type::Unknown) && self.arg_kind(arg) != expected {
+                    self.record_error(TypeError::TurbofishKindMismatch {
                         param: gp.name.name.clone(),
-                        expected: "type".to_string(),
+                        expected: expected.to_string(),
                         span,
-                    }),
-                    _ if is_const => self.record_error(TypeError::TurbofishKindMismatch {
-                        param: gp.name.name.clone(),
-                        expected: "const".to_string(),
-                        span,
-                    }),
-                    _ => {}
+                    });
                 }
                 subst.insert(gp.name.name.clone(), arg.clone());
             }
@@ -698,6 +688,32 @@ impl TypeChecker {
                     .insert((trait_name.clone(), mangled.to_string()), concrete);
             }
             self.trait_impls.insert((trait_name, mangled.to_string()));
+        }
+    }
+}
+
+/// The kind of argument a generic parameter takes, as a diagnostic names it.
+pub(crate) fn generic_arg_kind(kind: &ast_types::GenericParamKind) -> &'static str {
+    match kind {
+        ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent => "const",
+        ast_types::GenericParamKind::Shape => "shape",
+        ast_types::GenericParamKind::Type => "type",
+    }
+}
+
+impl TypeChecker {
+    /// The kind of a resolved generic argument. A parameter in scope passed on is
+    /// `Type::Generic` whatever its kind, so its declaration decides.
+    pub(crate) fn arg_kind(&self, arg: &Type) -> &'static str {
+        match arg {
+            Type::ConstValue(_) => "const",
+            Type::Shape(_) => "shape",
+            Type::Generic(name) => match self.const_scope.get(name) {
+                Some(Type::Shape(_)) => "shape",
+                Some(_) => "const",
+                None => "type",
+            },
+            _ => "type",
         }
     }
 }

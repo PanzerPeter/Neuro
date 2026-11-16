@@ -447,7 +447,7 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
     let mut items = program.items;
     // Each file settled the `impl` headers naming its own types; with every name now
     // canonical, an `impl` of a type from another module learns its extents too.
-    syntax_parsing::kind_impl_extents(&mut items);
+    syntax_parsing::kind_passed_sizes(&mut items);
 
     // Named arguments are resolved against the whole program, so this runs only once the
     // standard library and every module are in one list, and before type checking, which is what

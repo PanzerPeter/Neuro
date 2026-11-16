@@ -222,6 +222,13 @@ impl TypeChecker {
             });
             return false;
         };
+        let operand = Type::Tensor {
+            element: operand_element.clone(),
+            shape: shape.clone(),
+        };
+        if self.reject_splice(shape, "`einsum`", &operand, span) {
+            return false;
+        }
         if shape.len() != subscript.len() {
             self.record_error(TypeError::EinsumOperandRank {
                 position,

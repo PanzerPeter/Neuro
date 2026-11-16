@@ -541,7 +541,13 @@ tensor-argument's shape, `resolve_array_size` resolves
 `[T; N]` to a concrete length, `resolve_tensor_dim` resolves a `Tensor<T, [M, K]>` axis's extent to one (a dimension
 name is checked by semantic analysis and dropped here), a const-param reference lowers to a typed integer literal, and
 mangles include const values (`_cN`). Turbofish `type_args` seed the substitution before
-inference. Backends are unaffected: every instance reaching the HIR has concrete `usize` array
+inference (`seed_turbofish`, which also reads a bare name in `const_subst` as the caller's extent
+passed on). A shape parameter is bound in `type_subst` as a `shape_carrier` (`types.rs`: a
+tensor of `void` element), so it rides the type-argument paths, mangling included;
+`unify_ast_hir` binds it to the axes around a template's splice, `resolve_shape` expands every
+`..S` where a tensor type resolves, `GenericArg::Shape` (and a one-name `[N]` the parser read as
+a slice) resolves to a carrier, and `S.rank()` / `S.count()` lower to `u64` literals
+(`shape_param_method`). No carrier reaches the HIR. Backends are unaffected: every instance reaching the HIR has concrete `usize` array
 lengths.
 
 **Generic enums** (`Option<T>` / `Result<T, E>`) use `generic_enums` (base → template),
