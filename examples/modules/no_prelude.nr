@@ -2,20 +2,25 @@
 
 // Opting out of the implicit prelude. `@no_prelude` goes on the first line of a file,
 // before any declaration, and never inside a `module { }` block. It takes this file's
-// prelude names away: `Option`, `Result`, `Some`, `None`, `Ok` and `Err` are no longer in
-// scope here, so a bare `Some(1)` is an error. Other files of the program keep them, and
-// the standard library is compiled with the program either way.
+// prelude names away: `Option`, `Result`, `Some`, `None`, `Vec`, `println` and the rest are
+// no longer in scope here, so a bare `Some(1)` is an error. Other files of the program keep
+// them, and the standard library is compiled with the program either way.
 //
 // The prelude is the module `std::prelude`, so a file that opted out imports exactly what
 // it wants from it, variants included, or writes a full path.
-import std::prelude::{Option, Some, None}
+import std::prelude::{Option, Some, None, println}
 
-// What `@no_prelude` does *not* take away: `print` / `println`, which are compiler
-// builtins, and the traits the language dispatches through (`Iterator`, `Clone`, ...).
+// What `@no_prelude` does *not* take away: the builtins `assert` and `panic`, and the
+// traits the language dispatches through (`Iterator`, `Clone`, ...).
 
+// `Vec` was not imported, so it is written by its path, as `Result` is below.
 func triangular(n: i32) -> i32 {
-    mut total: i32 = 0
+    mut steps: std::prelude::Vec<i32> = std::prelude::Vec::new()
     for step in 1..n + 1 {
+        steps.push(step)
+    }
+    mut total: i32 = 0
+    for step in steps {
         total += step
     }
     total

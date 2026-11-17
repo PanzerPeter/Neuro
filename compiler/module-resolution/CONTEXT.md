@@ -39,8 +39,8 @@ Reads `.nr` files from disk; writes nothing.
 - **Name lookup is lexical.** A bare name written in module M resolves to, in order: a local
   (tracked by the walk), M's imports and its own declarations and inline blocks, the same for
   each module enclosing M when M is a block, then the prelude's variants. A name nothing in
-  scope declares is left alone for the type checker, which knows the prelude's types and
-  functions and the builtins. Since the root's names are bare, such a name that the root
+  scope declares is left alone for the type checker, which knows the builtins (`assert`,
+  `panic`, `grad`). Since the root's names are bare, such a name that the root
   happens to declare would land on the root's item from a module that never imported it, so
   outside the root file it is `NotInScope`. Together with canonical names, this keeps a private
   item out of reach by its bare name in either direction.
@@ -100,6 +100,19 @@ Reads `.nr` files from disk; writes nothing.
   of their own. A `std` path head reaches that module from every scope before the file system is
   consulted, so a `std.nr` beside the program is never loaded through it. The library's modules
   are not reported as `ResolvedModule`s: they have no file, and `check` counts the program's.
+- **An `@intrinsic` declaration is a name with nothing behind it.** `std::prelude` declares the
+  names the compiler implements (`Vec`, `println`, `Tensor`, `einsum`, ...) with `@intrinsic`.
+  `load_std` registers them like any declaration, so paths, imports, `@no_prelude` and a root
+  collision treat them like `Option`, then drops the items: the later passes know these names
+  by their bare canonical spelling, and an empty struct `Vec` would only collide with that.
+  Only the library's items are dropped, so a program's `@intrinsic` reaches the checker,
+  which rejects it as an unknown attribute.
+- **`Tensor`'s syntax names it without a site.** The parser builds `Type::Tensor` from the
+  word `Tensor` and keeps no name, so the walk offers a synthetic `Tensor` type name for each
+  one, which is what lets `@no_prelude` take it away. A path or an alias to it
+  (`std::prelude::Tensor<f32, [2]>`, `T<f32, [2]>`) parses as `Type::Generic` with a shape
+  argument, and the walk rebuilds it as `Type::Tensor` once its name resolves to the
+  prelude's.
 - **`std::prelude`'s names stay bare, so a root declaration of one takes a path.** The checker,
   lowering and backends know `Option`, `Result`, `Range` and the adapters by name, so
   `canonical` leaves the prelude's declarations unprefixed. The root's are bare too, so a root

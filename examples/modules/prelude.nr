@@ -51,8 +51,8 @@ func main() -> i32 {
         Err(reason) => reason           // 9
     }
 
-    // `println` needed no import either: it is a compiler builtin rather than a
-    // prelude declaration, so even `@no_prelude` leaves it in place.
+    // `println` needed no import either: it is a prelude name like `Option`, declared in
+    // `std::prelude` and implemented by the compiler.
     println("half(16)     Some -> {eight}")
     println("half(7)      None -> {fallback}")
     println("quarter(20)  Ok   -> {quartered}")

@@ -27,6 +27,10 @@ const PRELUDE: &str = "prelude";
 /// The module every program starts from.
 const ROOT: usize = 0;
 
+/// Marks a standard-library declaration of a name the compiler implements (`Vec`,
+/// `println`): the source states the name, the compiler supplies everything behind it.
+const INTRINSIC_ATTRIBUTE: &str = "intrinsic";
+
 /// A module that was loaded, as reported back to the driver.
 #[derive(Debug, Clone)]
 pub struct ResolvedModule {
@@ -174,6 +178,9 @@ impl ModuleGraph {
             let path = format!("{STD_ROOT}::{}", module.name);
             let origin = std_origin(&path, &module.display, Some(hub));
             let id = self.push_module(origin, module.items, false)?;
+            // Registered as declared above, so paths, imports and `@no_prelude` reach the
+            // name; the item goes no further, because the later passes know it by name.
+            self.modules[id].items.retain(|item| !is_intrinsic(item));
             self.modules[hub]
                 .inline_children
                 .insert(module.name.clone(), id);
@@ -998,6 +1005,18 @@ fn declared_name(item: &mut Item) -> Option<&mut shared_types::Identifier> {
         Item::Newtype(def) => Some(&mut def.name),
         Item::Impl(_) | Item::Import(_) | Item::Module(_) | Item::NoPrelude(_) => None,
     }
+}
+
+/// Is this a declaration of a name the compiler implements?
+fn is_intrinsic(item: &Item) -> bool {
+    let attributes = match item {
+        Item::Function(def) => &def.attributes,
+        Item::Struct(def) => &def.attributes,
+        _ => return false,
+    };
+    attributes
+        .iter()
+        .any(|attr| attr.name.name == INTRINSIC_ATTRIBUTE)
 }
 
 /// Record which module a declaration was loaded from, on the item kinds whose bodies

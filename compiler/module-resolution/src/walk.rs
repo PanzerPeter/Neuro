@@ -18,6 +18,9 @@ use shared_types::Identifier;
 
 use crate::ModuleError;
 
+/// The prelude type the tensor syntax `Tensor<T, [..]>` names.
+const TENSOR: &str = "Tensor";
+
 /// A place in the AST a qualified or imported name can appear.
 pub(crate) enum Site<'a> {
     /// An `Expr::Path`, `Expr::EnumStructLiteral`, or bare `Expr::Identifier`. Handed over
@@ -243,8 +246,22 @@ impl Walker<'_> {
     fn ty(&mut self, ty: &mut Type) -> Result<(), ModuleError> {
         match ty {
             Type::Named(name) => self.type_name(name),
-            Type::Generic { name, args, .. } => {
+            Type::Generic { name, args, span } => {
                 self.type_name(name)?;
+                // A path or an alias to the prelude's `Tensor` reaches it only now, so the
+                // tensor type the bare word parses as is built here.
+                if name.name == TENSOR
+                    && let [GenericArg::Type(element), GenericArg::Shape { dims, .. }] =
+                        args.as_mut_slice()
+                {
+                    self.ty(element)?;
+                    *ty = Type::Tensor {
+                        element_type: Box::new(element.clone()),
+                        shape: std::mem::take(dims),
+                        span: *span,
+                    };
+                    return Ok(());
+                }
                 for arg in args {
                     if let GenericArg::Type(inner) = arg {
                         self.ty(inner)?;
@@ -266,7 +283,18 @@ impl Walker<'_> {
                 }
                 self.ty(ret)
             }
-            Type::Tensor { element_type, .. } => self.ty(element_type),
+            Type::Tensor {
+                element_type, span, ..
+            } => {
+                // The word `Tensor` leaves no name in the tensor type, so it is offered
+                // here: an opted-out file must import it like any prelude name.
+                let mut name = Identifier {
+                    name: TENSOR.to_string(),
+                    span: *span,
+                };
+                self.type_name(&mut name)?;
+                self.ty(element_type)
+            }
             Type::ImplTrait {
                 trait_name,
                 assoc_bindings,

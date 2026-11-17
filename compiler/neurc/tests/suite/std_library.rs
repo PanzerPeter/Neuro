@@ -1,9 +1,10 @@
 // End-to-end tests for the standard library rooted at `std`: `std::prelude` as a module a
 // program can name and import from, `@no_prelude` taking a file's prelude names away
 // whichever file carries it, and a root declaration with a prelude name living beside the
-// library's (LIM-027, LIM-272).
+// library's (LIM-027, LIM-272). The names the compiler implements are declared there too
+// (LIM-275).
 
-use crate::compile_harness::{assert_exit, rejected, run_program};
+use crate::compile_harness::{assert_exit, rejected, run_program, stdout_of};
 
 /// `half` answers `Option<i32>` and every program below reads `half(8)` and `half(5)` back
 /// out, so each must return 4 + 9 = 13 however it names `Option`, `Some` and `None`.
@@ -214,4 +215,157 @@ fn a_name_the_prelude_does_not_declare_is_reported() {
 fn a_qualified_prelude_enum_s_variants_can_be_imported() {
     let source = "import Device::{CPU}\nfunc main() -> i32 {\n    val t: Tensor<f32, [2]> = [1.0, 2.0]\n    val moved = t.to(CPU)\n    7\n}\n";
     assert_exit("device_import.nr", source, 7);
+}
+
+/// The names the compiler implements are declared in `std::prelude` too, so every spelling
+/// that reaches `Option` reaches them. Each program computes 5 + 6 from a `Vec`, 2 from a
+/// `HashMap`'s length and 3 + 7 from an `einsum` row sum, so returns 23 and prints it.
+#[test]
+fn every_spelling_reaches_the_compiler_implemented_names() {
+    let bare = r#"
+func main() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    v.push(5)
+    v.push(6)
+    mut m: HashMap<i32, i32> = HashMap::new()
+    m.insert(1, 10)
+    m.insert(2, 20)
+    val t: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val rows = einsum("ij->i", &t)
+    println("{v[0] + v[1] + m.len() as i32 + rows[0] + rows[1]}")
+    v[0] + v[1] + m.len() as i32 + rows[0] + rows[1]
+}
+"#;
+    let full_path = r#"
+func main() -> i32 {
+    mut v: std::prelude::Vec<i32> = std::prelude::Vec::new()
+    v.push(5)
+    v.push(6)
+    mut m: std::prelude::HashMap<i32, i32> = std::prelude::HashMap::new()
+    m.insert(1, 10)
+    m.insert(2, 20)
+    val t: std::prelude::Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val rows = std::prelude::einsum("ij->i", &t)
+    val total = v[0] + v[1] + m.len() as i32 + rows[0] + rows[1]
+    std::prelude::println("{total}")
+    total
+}
+"#;
+    let module_alias = r#"
+import std::prelude as pre
+func main() -> i32 {
+    mut v: pre::Vec<i32> = pre::Vec::new()
+    v.push(5)
+    v.push(6)
+    mut m: pre::HashMap<i32, i32> = pre::HashMap::new()
+    m.insert(1, 10)
+    m.insert(2, 20)
+    val t: pre::Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val score = |v: &pre::Vec<i32>, m: &pre::HashMap<i32, i32>| v[0] + v[1] + m.len() as i32
+    val rows = pre::einsum("ij->i", &t)
+    val total = if rows[0] > 0 { score(&v, &m) + rows[0] + rows[1] } else { 0 }
+    pre::println("{total}")
+    total
+}
+"#;
+    let opted_out = r#"
+@no_prelude
+import std::prelude::{Vec as List, HashMap, Tensor, einsum, println}
+func size_of<V>(m: &HashMap<i32, V>) -> i32 {
+    m.len() as i32
+}
+func main() -> i32 {
+    mut v: List<i32> = List::new()
+    v.push(5)
+    v.push(6)
+    mut m: HashMap<i32, i32> = HashMap::new()
+    m.insert(1, 10)
+    m.insert(2, 20)
+    val t: Tensor<i32, [2, 2]> = [[1, 2], [3, 4]]
+    val rows = einsum("ij->i", &t)
+    val total = match size_of(&m) {
+        2 => v[0] + v[1] + 2 + rows[0] + rows[1],
+        _ => 0
+    }
+    println("{total}")
+    total
+}
+"#;
+    for (name, source) in [
+        ("bare.nr", bare),
+        ("full_path.nr", full_path),
+        ("module_alias.nr", module_alias),
+        ("opted_out.nr", opted_out),
+    ] {
+        assert_eq!(stdout_of(name, source), "23\n", "{name}");
+        assert_exit(name, source, 23);
+    }
+}
+
+/// LIM-275: `@no_prelude` used to leave these names in scope, because nothing declared them.
+#[test]
+fn no_prelude_takes_the_compiler_implemented_names_away() {
+    for (name, body) in [
+        ("println", "    println(\"x\")\n"),
+        ("print", "    print(\"x\")\n"),
+        ("Vec", "    val v: Vec<i32> = Vec::new()\n"),
+        ("HashMap", "    val m: HashMap<i32, i32> = HashMap::new()\n"),
+        (
+            "BTreeMap",
+            "    val m: BTreeMap<i32, i32> = BTreeMap::new()\n",
+        ),
+        ("StringBuilder", "    val b = StringBuilder::new()\n"),
+        ("Tensor", "    val t: Tensor<f32, [2]> = [1.0, 2.0]\n"),
+        ("einsum", "    val t = einsum(\"i->\", [1.0, 2.0])\n"),
+    ] {
+        let source = format!("@no_prelude\nfunc main() -> i32 {{\n{body}    0\n}}\n");
+        let error = rejected("strict.nr", &source);
+        assert!(
+            error.contains(&format!("`{name}` comes from `std::prelude`"))
+                && error.contains(&format!("import std::prelude::{{{name}}}")),
+            "{name}: {error}"
+        );
+    }
+}
+
+/// A root `Vec` and `println` live beside the library's: the root's own code reaches its own,
+/// and another module still reaches the prelude's. 5 + 2 + 2 = 9.
+#[test]
+fn a_root_vec_and_println_coexist_with_the_library_s() {
+    let counts = r#"
+export func count() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    v.push(2)
+    println("the library's println")
+    v.len() as i32
+}
+"#;
+    let main = r#"
+import counts::{count}
+struct Vec { x: i32 }
+func println(n: i32) -> i32 { n * 2 }
+func main() -> i32 {
+    val mine = Vec { x: 5 }
+    mine.x + count() + println(1)
+}
+"#;
+    assert_eq!(
+        run_program(&[("counts.nr", counts), ("main.nr", main)], "main.nr"),
+        Ok(9)
+    );
+}
+
+/// `@intrinsic` marks the library's declarations of compiler-implemented names; a program
+/// cannot use it to declare one of its own.
+#[test]
+fn a_program_cannot_declare_an_intrinsic() {
+    let error = rejected(
+        "intrinsic.nr",
+        "@intrinsic\nexport struct Vec<T> {}\nfunc main() -> i32 { 0 }\n",
+    );
+    assert!(
+        error.contains("`@intrinsic` is not an attribute"),
+        "{error}"
+    );
 }

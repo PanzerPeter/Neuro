@@ -137,7 +137,10 @@ import std::prelude::{Option, Some, None, Result, Ok, Err}
 so the two fallible types and their four variants are in scope in every file, with no `import` at all.
 `ParseError`, the error [`.parse`](strings.md#parsing-text) returns, is in scope the same way, but its
 variants keep the `ParseError::` prefix. So are `IoError` and `IoErrorKind`, what the
-[file and input calls](standard-library.md#errors-ioerror) fail with.
+[file and input calls](standard-library.md#errors-ioerror) fail with, and the names the compiler
+implements: `print`, `println`, `Vec`, `HashMap`, `BTreeMap`, `StringBuilder`, `Tensor` and `einsum`.
+`std::prelude` declares each of these with `@intrinsic` and an empty body, and the compiler supplies
+the rest. A program cannot write `@intrinsic` itself.
 
 The prelude is an ordinary module, `std::prelude`. The standard library is Neuro source embedded in `neurc`
 and compiled with every program, so a compiler binary needs no library files beside it. `std` names it
@@ -196,9 +199,9 @@ file that opted out. The traits the language dispatches through (`Iterator`, `In
 `Clone`, `Debug`, `Hashable` and `PoolAware`) stay in scope, because a `for` loop, `@derive` and a
 `pool` block reach them whatever the file imports.
 
-`print` / `println` (and the panic family) are **not** in the prelude. They are compiler builtins
-resolved by name, so `@no_prelude` does not take them away. Only a local declaration of the same name
-shadows one. See [Standard Output Builtins](functions.md#standard-output-builtins).
+That includes `print`, `println`, `Vec` and `Tensor`: an opted-out file imports them
+(`import std::prelude::{println, Vec}`) or writes `std::prelude::Vec`. `assert`, `panic` and
+`unreachable` are builtins rather than prelude names, so `@no_prelude` leaves them in place.
 
 ## How a path is resolved
 
@@ -351,9 +354,11 @@ declaration lives.
 
 The standard library's modules are `std::prelude`, `std::testing` ([Tests](functions.md#tests)), and
 `std::fs`, `std::safetensors`, `std::env`, `std::io` and `std::time`
-([Standard Library](standard-library.md)). The names
-the compiler implements itself (`print`, `println`, `Vec`, `HashMap`, `BTreeMap`, `StringBuilder`, `Tensor`, `einsum`) have no
-declaration in it yet. `@no_prelude` does not take them away, and `std::prelude::Vec` is not a path.
+([Standard Library](standard-library.md)). `Rng` is not declared yet.
+
+An alias of `Tensor` (`import std::prelude::{Tensor as T}`) reads a shape only where one could not
+be a type: `T<f32, [2, 3]>` works, but `T<f32, S>` and `T<f32, [N]>` do not. A turbofish after a module path,
+`std::prelude::Tensor::<f32, [2]>::zeros()` or `geo::Point::<i32>::new()`, does not parse.
 
 A compile-time error or a runtime panic names the file it comes from, with its line and column, in
 whichever module it was raised. A panic inside a prelude body names `<std>/prelude.nr`.
@@ -362,7 +367,7 @@ whichever module it was raised. A panic inside a prelude body names `<std>/prelu
 
 - [Structs and Enums](structs.md), struct fields, visibility of fields, and enum variants
 - [Generics and Traits](generics-and-traits.md), traits, `impl` blocks and bounds
-- [Functions](functions.md), the standard output builtins that the prelude does not cover
+- [Functions](functions.md), standard output through `print` and `println`
 - [`examples/modules/main.nr`](../../examples/modules/main.nr), qualified paths, exit code `40`
 - [`examples/modules/imports.nr`](../../examples/modules/imports.nr), every import form over the same
   modules, exit code `40`

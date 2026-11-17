@@ -221,7 +221,10 @@ the tuple-index parse, so it needs no expression grammar of its own.
   elsewhere a shape is a `GenericArg::Shape`. `bare_shape_param` reads `Tensor<T, S>`, a bare
   name in the shape's place, as the one-entry shape `[..S]`. `Tensor` is a prelude name, not a
   keyword, so the parser only claims it once a shape appears: a module declaring its own
-  generic `Tensor<T>` keeps parsing as `Type::Generic`. A shape with no element type, or with a
+  generic `Tensor<T>` keeps parsing as `Type::Generic`. A path ending in `::Tensor`
+  (`std::prelude::Tensor<f32, S>`) reads its shape the same way but stays a `Type::Generic`
+  with the shape as a `GenericArg::Shape`, so module resolution can check where the path lands
+  before it becomes a tensor type. A shape with no element type, or with a
   second type argument, is `ParseError::TensorTypeArity`. A shape is a list of
   `TensorDim { name, extent }`: the extent is a non-negative integer literal
   (`TensorExtent::Literal`), an extent parameter's name (`TensorExtent::Param`), a `..S` splice

@@ -110,6 +110,42 @@ export struct IoError {
     export message: string
 }
 
+// The names the compiler implements. Nothing in the language builds a growable buffer or a
+// tensor, so each declaration here states a name and `@intrinsic` says the compiler supplies
+// the rest: its layout, its methods, and the type of each call. The bodies stay empty. Being
+// declared is what makes `std::prelude::Vec` a path and lets `@no_prelude` take the name away.
+
+// Standard output. `print` writes its text and `println` follows it with a newline; either
+// takes a `&string` as well.
+@intrinsic
+export func print(text: string) {}
+
+@intrinsic
+export func println(text: string) {}
+
+// The growable collections and text buffer.
+@intrinsic
+export struct Vec<T> {}
+
+@intrinsic
+export struct HashMap<K, V> {}
+
+@intrinsic
+export struct BTreeMap<K, V> {}
+
+@intrinsic
+export struct StringBuilder {}
+
+// A tensor of element type `T` and shape `S`.
+@intrinsic
+export struct Tensor<T: Numeric, S> {}
+
+// `einsum("ij,jk->ik", a, b)`: one tensor operand per input term of the subscript string,
+// which must be a literal. The result's type is read off the subscripts at each call, which
+// no single signature can state.
+@intrinsic
+export func einsum(subscripts: &string) {}
+
 // The derivable traits. `@derive` writes each of these impls field by field; a program
 // may write one by hand instead and name any of them as a bound. The scalars, `string`,
 // and a struct carrying the derive implement them with no impl block here.

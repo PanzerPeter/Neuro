@@ -380,7 +380,7 @@ All three arguments share one float type, `f16` through `f64`. A tensor is compa
 
 A test with parameters, a return value or generic parameters is a compile error, and so is `@test` on a method or a struct.
 
-## Standard Output Builtins
+## Standard Output
 
 `print` and `println` write text to standard output. Unlike the panic builtins they return: the result is `void`, so a call is a statement and not a value.
 
@@ -410,7 +410,7 @@ phase 2 is 0.88 done
 
 Each takes exactly one argument, an owned `string` or an immutable `&string` sub-slice (`text.slice(1..4)`). There is no variadic form and no format string at the call site, because [string interpolation](strings.md#string-interpolation) has already rendered every hole into one `string` before the call. `println("{label:>10}: {count} of {total}")` is one argument.
 
-The text is read, not consumed, so the value stays usable afterwards. A user-defined function named `print` or `println` shadows the builtin within the program, as one named `panic` does. `@no_prelude` does not remove them, because they are compiler builtins rather than declarations.
+The text is read, not consumed, so the value stays usable afterwards. Both are prelude names, declared in `std::prelude` and implemented by the compiler. A function of the same name declared in a module shadows them there, and `@no_prelude` takes them away like any prelude name, so an opted-out file imports them (`import std::prelude::{println}`).
 
 Output is buffered. A call copies its bytes into a page-sized buffer, which reaches the operating system when it fills, so a printing loop makes one write per buffer rather than one or two per call. The buffer is emptied on every path out of the program (`main` returning, a panic, a debug-build overflow trap), so buffering never loses output, and a line printed before a panic appears before the panic's diagnostic.
 

@@ -5,8 +5,8 @@
 // `main.nr` and `report/mod.nr` still get `Option`, `Some` and `None` bare. `total` is
 // private to this module and read only through `mean()`.
 
-// The one prelude type this file needs, named from the module the prelude really is.
-import std::prelude::{Option, Some, None}
+// The prelude names this file needs, named from the module the prelude really is.
+import std::prelude::{Option, Some, None, Vec}
 
 export struct Summary {
     export count: i32,

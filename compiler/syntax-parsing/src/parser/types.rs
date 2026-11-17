@@ -280,11 +280,33 @@ impl Parser {
                 // following `<`, this is a plain named type. Arguments may be types or
                 // const (integer) values, as in `Ring<i32, 4>`.
                 if self.check(&TokenKind::Less) {
-                    let symbolic_extents = ident.name == TENSOR_TYPE_NAME;
-                    let (args, shape, close_span) =
+                    let qualified_tensor = ident
+                        .name
+                        .strip_suffix(TENSOR_TYPE_NAME)
+                        .is_some_and(|path| path.ends_with("::"));
+                    let symbolic_extents = ident.name == TENSOR_TYPE_NAME || qualified_tensor;
+                    let (mut args, shape, close_span) =
                         self.parse_generic_type_args(symbolic_extents)?;
-                    let (args, shape) = Self::bare_shape_param(symbolic_extents, args, shape);
                     let span = span.merge(close_span);
+                    // `std::prelude::Tensor<f32, [2, 3]>` keeps its path, so resolution can
+                    // check it reaches the prelude's `Tensor` before it becomes a tensor
+                    // type. A module's own `Tensor` taking a shape parameter parses the same.
+                    if qualified_tensor {
+                        let (shape_args, shape) = Self::bare_shape_param(true, args, shape);
+                        args = shape_args;
+                        if let Some((dims, shape_span)) = shape {
+                            args.push(GenericArg::Shape {
+                                dims,
+                                span: shape_span,
+                            });
+                        }
+                        return Ok(Type::Generic {
+                            name: ident,
+                            args,
+                            span,
+                        });
+                    }
+                    let (args, shape) = Self::bare_shape_param(symbolic_extents, args, shape);
                     if let Some((dims, _)) = shape {
                         return Self::build_tensor_type(args, dims, span);
                     }
@@ -857,6 +879,30 @@ mod tests {
             panic!("expected a tensor parameter type");
         };
         assert_eq!(shape.len(), 2);
+        assert!(matches!(
+            func.generics[0].kind,
+            ast_types::GenericParamKind::Shape
+        ));
+    }
+
+    /// A path to `Tensor` keeps its name for resolution to check, with the shape, bare
+    /// shape parameter included, read as the tensor syntax reads it.
+    #[test]
+    fn a_qualified_tensor_keeps_its_path_and_its_shape() {
+        let items = parse("func f<S>(x: std::prelude::Tensor<f32, S>) { }").expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Generic { name, args, .. } = &func.params[0].ty else {
+            panic!("expected a generic type, got {:?}", func.params[0].ty);
+        };
+        assert_eq!(name.name, "std::prelude::Tensor");
+        let [GenericArg::Type(_), GenericArg::Shape { dims, .. }] = &args[..] else {
+            panic!("expected an element type and a shape, got {args:?}");
+        };
+        assert!(
+            matches!(&dims[..], [d] if matches!(&d.extent, TensorExtent::Splice(id) if id.name == "S"))
+        );
         assert!(matches!(
             func.generics[0].kind,
             ast_types::GenericParamKind::Shape

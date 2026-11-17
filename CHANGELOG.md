@@ -10,6 +10,25 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.54.0] - 2026-11-17
+
+### Added
+
+- `print`, `println`, `Vec`, `HashMap`, `BTreeMap`, `StringBuilder`, `Tensor` and `einsum` are
+  declared in `std::prelude`, marked `@intrinsic` because the compiler implements them. They are
+  prelude names like `Option`: `std::prelude::Vec<i32>` and `std::prelude::println("...")` are
+  paths, `import std::prelude::{println, Vec as List}` works, and `std::prelude::Tensor<f32, [2, 3]>`
+  is a tensor type.
+
+### Changed
+
+- `@no_prelude` takes these names away too. An opted-out file imports them
+  (`import std::prelude::{println}`) or writes the full path. Before, they stayed in scope because
+  nothing declared them.
+- A root-file declaration of one of these names (`struct Vec`, `func println`) now lives beside the
+  library's, as a root `Result` already did: another module still reaches the prelude's `Vec`, and
+  a diagnostic names the root's `main::Vec`.
+
 ## [5.53.3] - 2026-11-17
 
 ### Changed
