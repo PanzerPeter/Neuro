@@ -8,6 +8,7 @@ use ast_types::{
 use neuro_hir::HirType;
 
 use crate::{EnumVariantData, Lowerer, LoweringError};
+use std::rc::Rc;
 
 /// The `@derive(...)` attribute name and the trait arguments lowering cares about.
 const DERIVE_ATTRIBUTE: &str = "derive";
@@ -44,7 +45,7 @@ impl Lowerer {
                     self.enums.insert(def.name.name.clone(), Vec::new());
                 } else {
                     self.generic_enums
-                        .insert(def.name.name.clone(), def.clone());
+                        .insert(def.name.name.clone(), Rc::new(def.clone()));
                 }
             }
         }
@@ -80,7 +81,7 @@ impl Lowerer {
                     self.generic_impls
                         .entry(def.type_name.name.clone())
                         .or_default()
-                        .push(def.clone());
+                        .push(Rc::new(def.clone()));
                 }
             }
         }
@@ -136,7 +137,7 @@ impl Lowerer {
     pub(super) fn register_generic_struct(&mut self, def: &StructDef) {
         self.record_derives(def);
         self.generic_structs
-            .insert(def.name.name.clone(), def.clone());
+            .insert(def.name.name.clone(), Rc::new(def.clone()));
     }
 
     /// Resolve an enum's variants and payload field types into the lowering table
@@ -313,7 +314,7 @@ impl Lowerer {
                     const_subst: self.const_subst.clone(),
                     const_types: self.const_types.clone(),
                 };
-                self.generic_methods.insert(mangled, template);
+                self.generic_methods.insert(mangled, Rc::new(template));
                 continue;
             }
             let (params, ret) = self.method_signature(&self_ty, method)?;
@@ -429,7 +430,7 @@ impl Lowerer {
         // for monomorphization and skip the concrete-signature registration below.
         if !func.generics.is_empty() {
             self.generic_templates
-                .insert(func.name.name.clone(), func.clone());
+                .insert(func.name.name.clone(), Rc::new(func.clone()));
             return Ok(());
         }
 

@@ -130,16 +130,28 @@ impl<'ctx> CodegenContext<'ctx> {
     /// holds it. The column counts characters, not bytes, matching the compile-time
     /// diagnostics `neurc` renders, so a multi-byte character earlier on the line does not
     /// shift it.
-    fn panic_location_suffix(&self, offset: usize) -> String {
-        let Some((file, offset)) = self.sources.locate(offset) else {
+    fn panic_location_suffix(&mut self, offset: usize) -> String {
+        let Some((file, local)) = self.sources.locate(offset) else {
             return String::new();
         };
         let (path, text) = (&file.path, &file.text);
-        let before = text.get(..offset).unwrap_or(text);
-        let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-        let line = before.matches('\n').count() + 1;
-        let column = before[line_start..].chars().count() + 1;
-        format!(" at {path}:{line}:{column}")
+        // An offset inside a character reads as the end of the file.
+        let end = if text.is_char_boundary(local) {
+            local
+        } else {
+            text.len()
+        };
+        let breaks = self
+            .line_breaks
+            .entry(offset - local)
+            .or_insert_with(|| text.match_indices('\n').map(|(i, _)| i).collect());
+        let line = breaks.partition_point(|&i| i < end);
+        let line_start = line
+            .checked_sub(1)
+            .and_then(|i| breaks.get(i))
+            .map_or(0, |&i| i + 1);
+        let column = text[line_start..end].chars().count() + 1;
+        format!(" at {path}:{}:{column}", line + 1)
     }
 
     /// Emit `write(2, <global ".rodata" bytes>, len)` for a compile-time-known string.

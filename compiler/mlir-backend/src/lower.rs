@@ -202,6 +202,15 @@ pub(crate) fn build_linkable_module<'c>(
     Ok((module, (linked, guards)))
 }
 
+/// Whether [`build_linkable_module`] would try to lower any of `program`'s functions under
+/// `admit`. When none qualifies it defines nothing, so a caller can skip building a context.
+pub(crate) fn admits_any(program: &HirProgram, admit: &dyn Fn(&HirFunction) -> bool) -> bool {
+    program.items.iter().any(|item| {
+        matches!(item, HirItem::Function(function)
+            if linkable_signature(function) && admit(function))
+    })
+}
+
 /// Whether this path computes a function exactly as the LLVM backend would, so the
 /// two are interchangeable: a static tensor result ([`linkable_result`]), and parameters
 /// that are numeric scalars or static tensors of them, owned or behind `&`.

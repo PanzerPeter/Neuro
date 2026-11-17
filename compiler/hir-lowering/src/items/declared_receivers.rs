@@ -8,6 +8,7 @@
 //! meets `Copy` and `Clone` and nothing else, so no other method can reach `T` here.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use ast_types::{GenericParam, ImplDef};
 use neuro_hir::{HirExpr, HirType};
@@ -67,7 +68,7 @@ impl Lowerer {
     }
 
     /// The impl that declares `method` on the generic instance `instance`, if one does.
-    pub(super) fn impl_declaring(&self, instance: &str, method: &str) -> Option<ImplDef> {
+    pub(super) fn impl_declaring(&self, instance: &str, method: &str) -> Option<Rc<ImplDef>> {
         let (base, _) = self.instance_args(instance)?;
         self.generic_impls
             .get(base)?

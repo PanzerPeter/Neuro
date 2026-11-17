@@ -1,6 +1,8 @@
 //! Monomorphization: a generic struct or enum instantiated per type-argument list, its
 //! impl methods registered for the instance, and the instance items emitted.
 
+use std::rc::Rc;
+
 use ast_types::ImplDef;
 use neuro_hir::{HirField, HirFunction, HirImpl, HirItem, HirParam, HirStruct, HirType};
 
@@ -160,7 +162,7 @@ impl Lowerer {
                         const_subst: const_subst.clone(),
                         const_types: self.const_param_types(&base_generics)?,
                     };
-                    self.generic_methods.insert(inst_key, template);
+                    self.generic_methods.insert(inst_key, Rc::new(template));
                     continue;
                 }
                 let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
@@ -682,8 +684,8 @@ impl Lowerer {
             })?;
         method.name = mm.name.clone();
         self.mono_items.push(HirItem::Impl(HirImpl {
-            type_name: template.type_name,
-            self_type: template.self_type,
+            type_name: template.type_name.clone(),
+            self_type: template.self_type.clone(),
             trait_name: None,
             methods: vec![method],
             span: template.def.span,

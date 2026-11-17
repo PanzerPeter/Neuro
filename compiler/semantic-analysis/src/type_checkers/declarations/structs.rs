@@ -14,6 +14,7 @@ use crate::types::Type;
 use ast_types::{ImplDef, StructDef};
 use shared_types::Span;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// How many instances' impls may be registered inside one another: the cap lowering
 /// puts on an instantiation chain, so a chain the checker accepts lowers.
@@ -354,7 +355,7 @@ impl TypeChecker {
         self.record_visibility(def);
         self.record_derive_intent(def);
         self.generic_structs
-            .insert(def.name.name.clone(), def.clone());
+            .insert(def.name.name.clone(), Rc::new(def.clone()));
     }
 
     /// Register a generic `impl` template, e.g. `impl<T> Wrapper<T>`.
@@ -429,7 +430,7 @@ impl TypeChecker {
         self.generic_impls
             .entry(base.clone())
             .or_default()
-            .push(def.clone());
+            .push(Rc::new(def.clone()));
 
         // An enum instance can already exist here: a struct field or another enum's
         // payload naming `Tree<i32>` is resolved in the declaration pass, before any impl
@@ -607,7 +608,7 @@ impl TypeChecker {
     /// [`Self::instantiate_impls_for`] past its depth check.
     fn register_instance_impls(
         &mut self,
-        impls: &[ast_types::ImplDef],
+        impls: &[Rc<ImplDef>],
         base: &str,
         mangled: &str,
         args: &[Type],

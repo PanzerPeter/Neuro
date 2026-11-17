@@ -1,6 +1,7 @@
 // Main type checking engine
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use ast_types::{Attribute, Item, MethodDef, ModuleId, Stmt};
 
@@ -40,7 +41,7 @@ pub(crate) struct TypeChecker {
     /// Generic enum templates, keyed by name. A generic enum is NOT a usable type
     /// on its own; each distinct set of type arguments is monomorphized into a distinct
     /// nominal enum registered in `enum_defs` on demand.
-    generic_enums: HashMap<String, ast_types::EnumDef>,
+    generic_enums: HashMap<String, Rc<ast_types::EnumDef>>,
     /// Monomorphized enum instance name → the generic enum it came from and the type
     /// arguments it was built with. Lets a construction or pattern written with the base
     /// name (`Option::Some`) resolve against a concrete instance (`Option<i32>`), and
@@ -102,10 +103,11 @@ pub(crate) struct TypeChecker {
     /// into a distinct nominal struct registered in `struct_defs` on demand. The
     /// template's field types (carrying [`Type::Generic`] placeholders) are also kept
     /// in `struct_defs` under the base name so generic method bodies type-check.
-    generic_structs: HashMap<String, ast_types::StructDef>,
+    generic_structs: HashMap<String, Rc<ast_types::StructDef>>,
     /// Generic `impl` templates keyed by base struct name: `impl<T> Wrapper<T>`.
     /// Instantiating a generic struct also instantiates each matching impl's methods.
-    generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
+    /// Shared, so instantiating an instance copies handles rather than method bodies.
+    generic_impls: HashMap<String, Vec<Rc<ast_types::ImplDef>>>,
     /// How many instances' impls are being registered inside one another. Registering an
     /// instance's method signatures can instantiate the types they name, so a signature
     /// naming its own type nested in itself (`-> W<W<I>>`) would recurse without end.

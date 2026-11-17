@@ -10,6 +10,19 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.53.2] - 2026-11-17
+
+### Changed
+
+- Faster compiles with byte-identical output. A program with no tensor body no longer builds
+  an MLIR context, which loaded every dialect and cost more than the rest of a small
+  program's compile. The checker and the HIR lowering share generic struct, enum, `impl`,
+  function and method templates instead of copying their whole syntax trees each time an
+  instance is created or a generic function is called. Panic locations for checked
+  operations read a per-file table of line starts rather than rescanning the file from its
+  first byte, which made `-O0` codegen quadratic in file size. Module resolution asks the
+  filesystem once per directory and name instead of at every qualified path.
+
 ## [5.53.1] - 2026-11-16
 
 ### Changed

@@ -3,6 +3,7 @@
 //! A module is pulled in only when a qualified path reaches into it, which is why a
 //! directory holding a dozen unrelated single-file programs still compiles one at a time.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
@@ -119,6 +120,10 @@ pub(crate) struct ModuleGraph {
     std_root: Option<usize>,
     /// `std::prelude`, whose names every module sees unless it opts out.
     prelude: Option<usize>,
+    /// What [`Self::loaded_file`] found, by directory and segment. Each answer costs two
+    /// `realpath`s and a path is resolved at every mention, so it is asked once. Cleared
+    /// whenever a file is loaded, so an answer never outlives the files it was read from.
+    file_lookups: RefCell<HashMap<(PathBuf, String), Option<usize>>>,
 }
 
 impl ModuleGraph {
@@ -136,6 +141,7 @@ impl ModuleGraph {
             root_dir,
             std_root: None,
             prelude: None,
+            file_lookups: RefCell::default(),
         };
         graph.load_file(file, None, parse_module)?;
         graph.load_std(std)?;
@@ -402,6 +408,7 @@ impl ModuleGraph {
         };
         let id = self.push_module(origin, items, false)?;
         self.by_file.insert(file, id);
+        self.file_lookups.get_mut().clear();
         Ok(id)
     }
 
@@ -574,14 +581,20 @@ impl ModuleGraph {
     }
 
     fn loaded_file(&self, dir: &Path, segment: &str) -> Option<usize> {
+        let key = (dir.to_path_buf(), segment.to_string());
+        if let Some(found) = self.file_lookups.borrow().get(&key) {
+            return *found;
+        }
         let candidates = [
             dir.join(segment).join("mod.nr"),
             dir.join(format!("{}.nr", segment)),
         ];
-        candidates
+        let found = candidates
             .iter()
             .find_map(|candidate| canonical(candidate).ok().and_then(|c| self.by_file.get(&c)))
-            .copied()
+            .copied();
+        self.file_lookups.borrow_mut().insert(key, found);
+        found
     }
 
     /// Reject reaching module `target` from `from` when it is an inline block that keeps

@@ -2,12 +2,12 @@ use crate::{
     context::new_context,
     errors::MlirError,
     guards::{Guard, Overflow, Side},
-    lower::{build_linkable_module, build_module},
+    lower::{admits_any, build_linkable_module, build_module},
     schedule,
 };
 
 use melior::{Context, ir::Module, pass::PassManager, utility::parse_pass_pipeline};
-use neuro_hir::{HirItem, HirProgram, HirTarget, HirType};
+use neuro_hir::{HirFunction, HirItem, HirProgram, HirTarget, HirType};
 
 /// The route from the dialects this slice builds in down to the `llvm` dialect.
 ///
@@ -148,14 +148,24 @@ pub fn lower_for_link(
     program: &HirProgram,
     overflow: Overflow,
 ) -> Result<LinkableBodies, MlirError> {
+    let admit = |function: &HirFunction| {
+        matches!(
+            function.target,
+            HirTarget::FollowsOperands | HirTarget::HostOperation | HirTarget::GpuOrHost
+        )
+    };
+    // Most programs have no tensor body, and a context loading every dialect costs more
+    // than the rest of their compile, so it is built only for a program with one.
+    if !admits_any(program, &admit) {
+        return Ok(LinkableBodies {
+            llvm_ir: String::new(),
+            functions: Vec::new(),
+            guards: Vec::new(),
+        });
+    }
     let context = new_context();
     let (mut module, (functions, guards)) =
-        build_linkable_module(&context, program, (overflow, Side::Host), &|function| {
-            matches!(
-                function.target,
-                HirTarget::FollowsOperands | HirTarget::HostOperation | HirTarget::GpuOrHost
-            )
-        })?;
+        build_linkable_module(&context, program, (overflow, Side::Host), &admit)?;
     if functions.is_empty() {
         return Ok(LinkableBodies {
             llvm_ir: String::new(),

@@ -11,6 +11,7 @@ use crate::types::Type;
 use ast_types::{EnumDef, VariantPayload};
 use shared_types::Span;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 impl TypeChecker {
     /// Register an enum definition: its variants, their construction form, and each
@@ -38,7 +39,7 @@ impl TypeChecker {
             .insert(def.name.name.clone(), def.lifetimes.len());
         if !def.generics.is_empty() {
             self.generic_enums
-                .insert(def.name.name.clone(), def.clone());
+                .insert(def.name.name.clone(), Rc::new(def.clone()));
         }
     }
 

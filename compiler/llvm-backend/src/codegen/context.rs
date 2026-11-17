@@ -328,6 +328,11 @@ pub(crate) struct CodegenContext<'ctx> {
     /// diagnostics. A span no file holds renders no location suffix.
     pub(crate) sources: SourceMap,
 
+    /// Each file's newline offsets, keyed by the file's base offset in `sources`, built the
+    /// first time a panic location in it is rendered. Every checked operation renders one,
+    /// so scanning the text up to each would be quadratic in the file's size.
+    pub(crate) line_breaks: HashMap<usize, Vec<usize>>,
+
     /// Names of structs implementing the `Drop` lang-item (`impl Drop for T`).
     /// A binding of such a type gets a scope-exit destructor call. Empty for programs
     /// with no Drop types, in which case all drop machinery below stays inert.
@@ -467,6 +472,7 @@ impl<'ctx> CodegenContext<'ctx> {
             const_values: HashMap::new(),
             overflow_checks: false,
             sources: SourceMap::default(),
+            line_breaks: HashMap::new(),
             trait_methods: HashMap::new(),
             vtables: HashMap::new(),
             drop_types: std::collections::HashSet::new(),

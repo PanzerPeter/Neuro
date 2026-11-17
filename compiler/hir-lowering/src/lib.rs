@@ -24,6 +24,7 @@
 //! [`lower_program`] is the only public function. It returns a [`neuro_hir::HirProgram`].
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use ast_types::Item;
 use neuro_hir::{AxisNames, HirGridIndex, HirProgram, HirType};
@@ -186,7 +187,7 @@ struct Lowerer {
     /// Generic enum templates, keyed by name. Each distinct set of type arguments
     /// produces one monomorphized concrete enum emitted as an ordinary
     /// [`neuro_hir::HirItem::Enum`].
-    generic_enums: HashMap<String, ast_types::EnumDef>,
+    generic_enums: HashMap<String, Rc<ast_types::EnumDef>>,
     /// Monomorphized enum instance name → the template it came from, so a
     /// construction or pattern written with the base name resolves to the instance.
     enum_instance_base: HashMap<String, String>,
@@ -273,14 +274,14 @@ struct Lowerer {
     /// Generic free-function templates, keyed by name. A generic function is
     /// never lowered as-is; each distinct set of type arguments produces one
     /// monomorphized concrete function instead.
-    generic_templates: HashMap<String, ast_types::FunctionDef>,
+    generic_templates: HashMap<String, Rc<ast_types::FunctionDef>>,
     /// Generic struct templates, keyed by name. Each distinct set of type
     /// arguments produces one monomorphized concrete struct emitted as an ordinary
     /// [`neuro_hir::HirItem::Struct`], so backends need no generic awareness.
-    generic_structs: HashMap<String, ast_types::StructDef>,
+    generic_structs: HashMap<String, Rc<ast_types::StructDef>>,
     /// Generic `impl` templates keyed by base struct name. Instantiating a
     /// generic struct also emits each matching impl's methods for the instance.
-    generic_impls: HashMap<String, Vec<ast_types::ImplDef>>,
+    generic_impls: HashMap<String, Vec<Rc<ast_types::ImplDef>>>,
     /// Generic-struct instance name → the template and arguments it was built with,
     /// recorded once it is materialized (registered in [`Self::structs`] and queued for
     /// emission), so each is produced exactly once.
@@ -289,7 +290,7 @@ struct Lowerer {
     mono_struct_pending: Vec<MonoStruct>,
     /// Generic methods keyed `Type__method`, a generic impl's under each instance's name,
     /// with what the body lowers under besides the method's own parameters.
-    generic_methods: HashMap<String, GenericMethod>,
+    generic_methods: HashMap<String, Rc<GenericMethod>>,
     /// Generic-method instances discovered but not yet lowered.
     mono_method_pending: Vec<MonoMethod>,
     /// Active type-parameter substitution while a monomorphized instance body is being
