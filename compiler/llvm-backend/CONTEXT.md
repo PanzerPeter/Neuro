@@ -12,6 +12,9 @@ Emit native object code, or the textual LLVM module behind it, from the typed Ne
   is the exported alias for `Result<T, CodegenError>`
 - `compile_tests` takes the same inputs plus `tests: &[String]` and returns the object code of a
   `neurc test` executable (see Test Entry)
+- `compile_executable` takes `compile`'s inputs and returns object code that is linked straight
+  into an executable: every symbol but `main` is internal (see Symbol Visibility). `compile` keeps
+  every function callable, since its object may be a library
 
 `CodegenError` implements `From<inkwell::builder::BuilderError>`, so the several hundred
 builder calls inside codegen use `?` directly. A builder failure is always an internal
@@ -48,6 +51,33 @@ instruction selection. Both are needed: the `TargetMachine` level runs no IR pas
 so without the pipeline nothing promotes an `alloca` to an SSA value, inlines a call, or
 hoists loop-invariant work. `-O0` runs no pipeline, which is what keeps its checked
 arithmetic and bounds guards where codegen emitted them.
+
+## Symbol Visibility
+`compile_executable` and `compile_tests` build objects nothing but the C runtime enters, so
+`optimize_module` gives every function and global the module defines internal linkage, `main`
+alone excepted (`internalize_all_but_main`), before the pipeline runs. The optimizer then sees
+every call a function will receive: a function called once is inlined into its caller, the
+standard-library functions the program never reaches are dropped, and the rest get the
+calling convention and argument passing the optimizer picks. Declarations keep their linkage, and
+so does anything not plainly external: the soft-float builtins are `weak_odr` because instruction
+selection calls them after the pipeline has run. At `-O0` nothing would act on it, so nothing
+changes. `compile` and `compile_to_ir` (an object or a module may be a library) export everything.
+
+## Alias Classes
+`codegen/alias.rs` tags the loads and stores whose memory is certain with LLVM type-based alias
+metadata (`!tbaa`), so a store to one class never forces a reload from another. The classes are
+siblings under one root, so no two alias: `Element` (a number in a tensor buffer or in the buffer
+of a `Vec` of numbers, one class so a tensor adopting a `Vec`'s buffer is never told apart from
+it), `TensorHeader` (a DLPack field: the data pointer and the device), `TensorHandle` (the
+variable a handle is read from) and `CollectionHeader` (a field of `{ buffer, len, cap, used }`).
+A loop that writes `t[i, j]` or `v[i]` through a reference then reads the handle, the data
+pointer, the device type, the length and the buffer once, outside the loop, and vectorizes.
+
+Only an access of certain class is tagged; an untagged one aliases everything, so a missed site
+costs speed and a wrong tag costs correctness. A `Vec` element is `Element` only when
+`MemoryClass::holds_numbers` says so: a `Vec<Vec<f64>>` slot is itself a collection header, and
+a `Vec<Tensor>` slot a handle. The language has no raw pointer and no reinterpreting cast, so a
+program cannot make two classes meet.
 
 The module is stamped with the target triple and data layout before the pipeline runs, so
 the optimizer reasons about the real size, alignment, and pointer width of the types it
@@ -97,7 +127,8 @@ load-bearing:
    each wrapper's declaration of its symbol is already there for the linked definition to
    resolve. See External Bodies.
 7. **Runtimes**: the GPU runtime (`requires_gpu_runtime`), the OS runtime
-   (`requires_os_runtime`) and the text parser (`requires_text_parser`), each only when used.
+   (`requires_os_runtime`), the text parser (`requires_text_parser`) and the float renderer (a
+   declared `__neuro_format_f64`), each only when used.
 8. **Soft-float builtins** linked in when the module uses `half`/`bfloat`, after codegen and
    before `verify`.
 
@@ -179,6 +210,13 @@ Its three entries (`__neuro_parse_int` / `_float` / `_bool`) are internalized af
 generated from `text_parse.c`, like the GPU runtime, by `tools/regen_gpu_runtime.sh`. The float path
 holds the text as an exact fraction of big integers, so all four formats round once and no libc
 behaviour shows through.
+
+**The float renderer.** A module with a float interpolation hole links `codegen/text_format.ll`
+(`link_text_format`) and internalizes its one entry, `__neuro_format_f64`. Generated from
+`text_format.c` by the same script, it writes `%.Nf` (`N` up to 19) and `%.16g` exactly, in 128-bit
+integer arithmetic, and declines (returns -1) for NaN, infinity and magnitudes whose digits do not
+fit, which `snprintf` then renders. Verified byte for byte against glibc `snprintf` over random bit
+patterns, decimal values, exact ties and powers of ten at every precision it takes.
 
 **The OS runtime.** `codegen/os_runtime.rs` lowers the standard library's runtime intrinsics
 (`__read_text`, `__read_bytes`, `__write_text` / `__write_bytes`, `__remove_file`, `__arg_count`,
@@ -1233,9 +1271,13 @@ every radix conversion, so only signed decimal can carry a sign, and `render_int
 magnitude with a wrapping negation (`0 - i64::MIN` is `i64::MIN`'s own bit pattern, which read as
 unsigned is the magnitude wanted).
 
-Float holes still call the C library, but once. `build_snprintf_alloc` renders into a
-`SCRATCH_TEXT_BYTES` stack buffer and uses `snprintf`'s return value as the length, replacing the
-`(NULL, 0)` probe call that used to precede every render. The buffer is sized for the widest
+Float holes try the float renderer first (see The float renderer), which writes the text
+`snprintf` would, ten times faster. `__neuro_fmt_flt(value, fmt, fast, plus)` carries the `printf`
+conversion and describes it again for the renderer: `fast` is the `%.Nf` precision,
+`FLOAT_FAST_GENERAL` for `%.16g` or `FLOAT_FAST_NONE` for `%e`, and `plus` the `+` flag. What
+the renderer declines goes to the C library, once. `build_snprintf_alloc` renders into a
+`SCRATCH_TEXT_BYTES` stack buffer, the renderer's as well, and uses `snprintf`'s return value as
+the length, replacing the `(NULL, 0)` probe call that used to precede every render. The buffer is sized for the widest
 conversion the format mini-language admits (`%.Nf` on a full-magnitude `f64`, with `N` capped by
 `MAX_FORMAT_PRECISION`), and a render that does not fit falls back to allocating what `snprintf`
 asked for and rendering again, so correctness does not rest on that size being right. It takes the

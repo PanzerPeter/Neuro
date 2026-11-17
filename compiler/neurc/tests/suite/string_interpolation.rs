@@ -101,6 +101,39 @@ fn float_specifiers_match_the_spec_table() {
     );
 }
 
+/// The float renderer writes these itself, or hands them to `snprintf` (precision 20, a
+/// magnitude whose digits do not fit 64 bits); either way the text is the C library's: exact
+/// ties round to even, a negative zero keeps its sign, and `%g` switches to an exponent.
+#[test]
+fn float_rendering_matches_the_c_library_at_the_edges() {
+    run(
+        "interp_float_edges.nr",
+        "    val eighth: f64 = 0.125\n    val two_half: f64 = 2.5\n    \
+         val quarter_tie: f64 = 2.25\n    val zero: f64 = 0.0\n    val neg_zero: f64 = -zero\n    \
+         val tiny_neg: f64 = -0.0001\n    val big: f64 = 10000000000000000.0\n    \
+         val third: f64 = 1.0 / 3.0\n    val small: f64 = 0.000015\n    \
+         val half_past: f64 = 1000000000000000.5\n    val huge: f64 = 100000000000000000000.0\n    \
+         val narrow: f32 = 0.1f32\n",
+        &[
+            ("{eighth:.2}", "0.12"),
+            ("{two_half:.0}", "2"),
+            ("{quarter_tie:+.1}", "+2.2"),
+            ("{neg_zero}", "-0.0"),
+            ("{neg_zero:.2}", "-0.00"),
+            ("{tiny_neg:.3}", "-0.000"),
+            ("{big}", "1e+16"),
+            ("{third}", "0.3333333333333333"),
+            ("{third:.19}", "0.3333333333333333148"),
+            ("{third:.20}", "0.33333333333333331483"),
+            ("{small}", "1.5e-05"),
+            ("{half_past:.6}", "1000000000000000.500000"),
+            ("{huge:.2}", "100000000000000000000.00"),
+            ("{narrow}", "0.1000000014901161"),
+            ("{narrow:.9}", "0.100000001"),
+        ],
+    );
+}
+
 #[test]
 fn integer_radix_specifiers_match_the_spec_table() {
     run(

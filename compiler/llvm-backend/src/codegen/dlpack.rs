@@ -10,6 +10,7 @@
 use inkwell::module::Linkage;
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 
+use crate::codegen::alias::MemoryClass;
 use crate::codegen::context::{ALIGNED_ALLOC_FN, CodegenContext};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -423,9 +424,11 @@ impl<'ctx> CodegenContext<'ctx> {
             handle,
             &[FIELD_DL_TENSOR, FIELD_DEVICE, FIELD_DEVICE_ID],
         )?;
+        let index =
+            self.builder
+                .build_load(self.context.i32_type(), index, "dlpack.device.index")?;
         Ok(self
-            .builder
-            .build_load(self.context.i32_type(), index, "dlpack.device.index")?
+            .tag_load(index, MemoryClass::TensorHeader)?
             .into_int_value())
     }
 
@@ -441,7 +444,9 @@ impl<'ctx> CodegenContext<'ctx> {
             self.handle_field_ptr(handle_ty, handle, &[FIELD_DL_TENSOR, FIELD_DEVICE])?;
         let device_type = self
             .builder
-            .build_load(i32_type, device_type, "dlpack.device.type")?
+            .build_load(i32_type, device_type, "dlpack.device.type")?;
+        let device_type = self
+            .tag_load(device_type, MemoryClass::TensorHeader)?
             .into_int_value();
         Ok(self.builder.build_int_compare(
             inkwell::IntPredicate::EQ,
@@ -838,10 +843,10 @@ impl<'ctx> CodegenContext<'ctx> {
                 CodegenError::InternalError("the DLPack tensor has no data field".to_string())
             })?;
         let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
-        self.builder
-            .build_load(ptr_type, data_ptr, "dlpack.data")
-            .map_err(CodegenError::from)
-            .map(|value| value.into_pointer_value())
+        let data = self.builder.build_load(ptr_type, data_ptr, "dlpack.data")?;
+        Ok(self
+            .tag_load(data, MemoryClass::TensorHeader)?
+            .into_pointer_value())
     }
 
     /// Call a handle's own `deleter`, releasing its buffer and the structure.

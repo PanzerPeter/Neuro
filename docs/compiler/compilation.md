@@ -16,7 +16,7 @@ Every command runs the same front half in the same order, so none can skip a ste
 | 6 | [Semantic analysis](components/semantic-analysis.md) | `semantic_analysis::type_check` | A pass or the full set of type errors, plus lint warnings. The AST is not annotated. |
 | 7 | [HIR lowering](components/hir-lowering.md) | `hir_lowering::lower_program` | Typed HIR (`neuro-hir`), where every expression carries its type and every tensor operation is outlined into a function of its own |
 | 8 | [MLIR bodies](components/mlir-backend.md) | `mlir_backend::lower_for_link`, and `lower_for_gpu` for GPU code | Bodies for the outlined tensor functions, passed to the LLVM backend as external bodies it links in place of its own. GPU bodies are built only for a program with a `@gpu` or `@kernel` function, or a tensor operation that follows its operands, for the `--gpu-arch` chip. |
-| 9 | [LLVM backend](components/llvm-backend.md) | `llvm_backend::compile`, or `compile_to_ir` under `--emit llvm-ir` | Object code, written to a temporary `.o` or `.obj` |
+| 9 | [LLVM backend](components/llvm-backend.md) | `llvm_backend::compile_executable`, `compile` under `--emit obj`, or `compile_to_ir` under `--emit llvm-ir` | Object code, written to a temporary `.o` or `.obj` |
 | 10 | Link | the platform linker driver (see [Linking](#linking)) | The executable |
 
 The driver sets the order. Each rule lives in the slice that owns its stage. Argument binding and the type checker report every error they find. The other stages stop at the first failure.

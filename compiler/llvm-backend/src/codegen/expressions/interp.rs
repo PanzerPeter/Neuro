@@ -9,6 +9,7 @@ use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::HirInterpPart;
 use shared_types::{FormatAlign, FormatKind, FormatSpec};
 
+use super::format_helpers::{FLOAT_FAST_GENERAL, FLOAT_FAST_NONE};
 use super::format_layout::{ALIGN_CENTER, ALIGN_LEFT, ALIGN_RIGHT};
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -23,6 +24,9 @@ const DEFAULT_FLOAT_CONVERSION: &str = ".16g";
 /// [`DEFAULT_FLOAT_CONVERSION`]. `%e` counts decimals rather than significant
 /// digits, hence 15. `__neuro_exp` trims the zeros this pads with.
 const DEFAULT_SCIENTIFIC_DECIMALS: u32 = 15;
+
+/// The decimals C's `%f` prints when it names no precision.
+const C_FIXED_PRECISION: u32 = 6;
 
 /// The method-shaped helper lowering emits for a type whose `Debug` is written by hand:
 /// `Type__fmt_debug$string(&self) -> string`, the type's own `fmt_debug` into a fresh
@@ -612,12 +616,26 @@ impl<'ctx> CodegenContext<'ctx> {
             _ => (DEFAULT_FLOAT_CONVERSION, None),
         };
         let format = self.format_string(spec, conversion, precision)?;
+        let fast = match spec.kind {
+            // `%f` with no precision is C's `%.6f`.
+            FormatKind::Fixed => {
+                i32::try_from(precision.unwrap_or(C_FIXED_PRECISION)).unwrap_or(FLOAT_FAST_NONE)
+            }
+            FormatKind::Scientific => FLOAT_FAST_NONE,
+            _ => FLOAT_FAST_GENERAL,
+        };
+        let i32_type = self.context.i32_type();
         let helper = self.get_or_define_fmt_float()?;
         let text = self
             .builder
             .build_call(
                 helper,
-                &[operand.into(), format.into()],
+                &[
+                    operand.into(),
+                    format.into(),
+                    i32_type.const_int(fast as u64, true).into(),
+                    i32_type.const_int(u64::from(spec.plus_sign), false).into(),
+                ],
                 "interp.float.text",
             )?
             .try_as_basic_value()

@@ -5,19 +5,19 @@ The LLVM backend turns the typed HIR into native object code, or into textual LL
 **Crate**: `compiler/llvm-backend`
 **Library**: inkwell (LLVM 23 bindings)
 **Build requirement**: `LLVM_SYS_231_PREFIX` pointing at an LLVM 23 install. Every build of the compiler also needs MLIR 23 in the same prefix ([Installation](../../getting-started/installation.md#mlir)).
-**Entry points**: `compile`, `compile_to_ir` and `compile_tests`, all in [`lib.rs`](../../../compiler/llvm-backend/src/lib.rs)
+**Entry points**: `compile`, `compile_executable`, `compile_to_ir` and `compile_tests`, all in [`lib.rs`](../../../compiler/llvm-backend/src/lib.rs)
 
 ## Overview
 
 The backend reads the HIR produced by [HIR lowering](hir-lowering.md), not the AST. Lowering has already attached a resolved type to every expression, so codegen reads types inline and no backend pass collects them again. The language features it generates are described in the [language reference](../../language-reference/).
 
-`compile` returns object code, which `neurc` passes to the system linker. `compile_to_ir` runs the same pipeline up to the optimizer and returns the module as text. `compile_tests` builds the executable behind `neurc test`, whose `main` runs the test at the index its first argument gives. Each entry also takes a `SourceMap` of every file's text, so that panic messages can name `file:line:col`.
+`compile` returns object code that may be a library, so every function stays callable. `compile_executable` returns object code that `neurc` passes to the system linker, with every symbol but `main` private to it. `compile_to_ir` runs the same pipeline up to the optimizer and returns the module as text. `compile_tests` builds the executable behind `neurc test`, whose `main` runs the test at the index its first argument gives. Each entry also takes a `SourceMap` of every file's text, so that panic messages can name `file:line:col`.
 
 ## Architecture
 
 - **Dependencies**: `neuro-hir` (the HIR it consumes), `ast-types` (the operator enums), `shared-types`, `inkwell`, `thiserror`. The `syntax-parsing`, `hir-lowering` and `mlir-backend` crates are dev-dependencies only: tests and benches lower source before compiling, and a test that compiles a tensor operation links the body MLIR computes for it.
-- **Public API**: `compile`, `compile_to_ir`, `compile_tests`, `ExternalBodies`, `BodyGuard`, `BodyGuardKind`, `BodyMemory`, `GpuVendor`, `OptimizationLevelSetting`, `CodegenError`, `CodegenResult`
-- **Internals**: `pub(crate)` throughout. `codegen/` holds the emitter, split by construct (expressions, statements, drops, collections, and so on). `type_mapping.rs` and `types.rs` map Neuro types to LLVM types. `softfloat/` holds the half-precision builtins, `codegen/text_parse.c` the text parser behind `.parse::<T>()`, and `codegen/os_runtime.c` the [system runtime](#system-runtime).
+- **Public API**: `compile`, `compile_executable`, `compile_to_ir`, `compile_tests`, `ExternalBodies`, `BodyGuard`, `BodyGuardKind`, `BodyMemory`, `GpuVendor`, `OptimizationLevelSetting`, `CodegenError`, `CodegenResult`
+- **Internals**: `pub(crate)` throughout. `codegen/` holds the emitter, split by construct (expressions, statements, drops, collections, and so on). `type_mapping.rs` and `types.rs` map Neuro types to LLVM types. `softfloat/` holds the half-precision builtins, `codegen/text_parse.c` the text parser behind `.parse::<T>()`, `codegen/text_format.c` the float renderer behind interpolation, and `codegen/os_runtime.c` the [system runtime](#system-runtime).
 - **Output**: a platform object file, or the textual module from `compile_to_ir`.
 
 ### Module emission order
@@ -30,7 +30,7 @@ The backend reads the HIR produced by [HIR lowering](hir-lowering.md), not the A
 4. Library functions nothing calls are pruned. Then `main` stores the command line if the program reads it, and standard input is synchronized with standard output if the program reads a line.
 5. The standard-output drain is inserted on every exit path, if the module prints.
 6. External bodies are linked, after every body, so each wrapper's declaration already exists.
-7. The GPU runtime, the system runtime and the text parser are each linked if the module calls into them.
+7. The GPU runtime, the system runtime, the text parser and the float renderer are each linked if the module calls into them.
 8. Soft-float builtins are linked, if the module uses `half` or `bfloat`.
 
 The module is then verified. The optimizer and instruction selection run after that (see [optimization levels](#optimization-levels)).
@@ -124,6 +124,8 @@ Every local, parameter, result slot and induction variable is an `alloca` in the
 | `O3` | aggressive | `default<O3>` | wraps |
 
 `-O0` runs no pipeline, which keeps its checks and guards exactly where codegen emitted them. Before a module is printed or compiled, its triple and data layout are set, so the optimizer reasons about the real size and alignment of each type.
+
+Two things give the pipeline more to work with, and neither changes what a program computes. An executable's object exports `main` alone: every other function and global is made internal before the pipeline runs, so a function called once is inlined into its caller and the standard-library functions a program never reaches are dropped. And loads and stores whose memory is certain carry alias classes (`!tbaa`): a tensor element, a DLPack field, the variable holding a tensor's handle, a collection's header field, and a number in a `Vec` buffer. A loop that writes `t[i, j]` or `v[i]` through a reference then reads the length, buffer and data pointer once, outside the loop, and can be vectorized.
 
 ### Panics and error-path outlining
 
@@ -243,6 +245,8 @@ Element reads and writes and `.clone()` need no kernel. They branch on the tenso
 On generic x86-64, LLVM lowers `half` and `bfloat` conversions to runtime calls such as `__extendhfsf2` and `__truncsfhf2`. Linux and macOS get them from libgcc or compiler-rt. The Windows linkers provide none, so `src/softfloat/` defines them. They are `weak_odr` (a platform runtime may override them) and integer-only, so they never call back into these conversions. `compile` links them only when the module uses `half` or `bfloat`. [`builtins.ll`](../../../compiler/llvm-backend/src/softfloat/builtins.ll) is generated from `reference.c` and was checked exhaustively against clang's native `_Float16` and `__bf16`.
 
 `.parse::<T>()` calls a small runtime linked only into a module that uses it. [`text_parse.ll`](../../../compiler/llvm-backend/src/codegen/text_parse.ll) is generated from `text_parse.c`. It converts decimal text to a float exactly, with big integers, instead of calling `strtod`: no libc parses to `f16` or `bf16`, and going through `f64` would round twice. One path serves all four formats and gives the same bits on every platform. It was checked against glibc's `strtod` and `strtof`, and against exact rational arithmetic for the half formats.
+
+Float interpolation holes go through a second small runtime, [`text_format.ll`](../../../compiler/llvm-backend/src/codegen/text_format.ll), generated from `text_format.c`. It writes `{x:.N}` (`%.Nf`, `N` up to 19) and the default `{x}` (`%.16g`) exactly, in 128-bit integer arithmetic, about ten times faster than `snprintf`. A value it does not cover (NaN, infinity, a magnitude whose digits do not fit) goes to `snprintf` as before, so the text is the C library's in every case. It was checked byte for byte against glibc's `snprintf`.
 
 ### System runtime
 

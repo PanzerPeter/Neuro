@@ -10,6 +10,23 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.53.3] - 2026-11-17
+
+### Changed
+
+- Faster compiled programs, with the same output. A float interpolation hole (`{x}`, `{x:.N}`)
+  is written by a small exact renderer in 128-bit integer arithmetic instead of `snprintf`,
+  about ten times faster per value; anything it does not cover (NaN, infinity, `{x:e}`, a
+  magnitude whose digits do not fit) still goes to `snprintf`, so the text is the C library's
+  in every case. The `format_floats` benchmark drops from 115 ms to 21 ms, ahead of C++ and
+  Rust. An executable now exports `main` alone, so the optimizer inlines a function called
+  once, drops the standard-library functions a program never reaches and picks its own calling
+  convention for the rest; binaries are about a third smaller. Tensor elements, DLPack fields,
+  collection headers and the numbers in a `Vec` carry alias classes, so a loop that writes
+  `t[i, j]` or `v[i]` through a reference keeps the length, buffer and data pointer in
+  registers instead of reloading them every iteration, and can vectorize. `--emit obj` keeps
+  every function callable, as before.
+
 ## [5.53.2] - 2026-11-17
 
 ### Changed

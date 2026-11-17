@@ -12,6 +12,7 @@ use inkwell::{AddressSpace, IntPredicate};
 use shared_types::MAX_FORMAT_PRECISION;
 
 use crate::codegen::context::CodegenContext;
+use crate::codegen::external_bodies::TEXT_FORMAT_ENTRY_POINT;
 use crate::errors::{CodegenError, CodegenResult};
 
 /// Digits are written as ASCII, so a bit value is offset by `'0'`.
@@ -28,6 +29,14 @@ const MAX_INT_TEXT_BYTES: u64 = 24;
 /// capped at [`MAX_FORMAT_PRECISION`] by semantic analysis. The rest is slack, a
 /// wrong guess here costs a second render, not correctness.
 const SCRATCH_TEXT_BYTES: u64 = 512 + MAX_FORMAT_PRECISION as u64;
+
+/// The `fast` argument of `__neuro_fmt_flt` for a conversion the float renderer does not
+/// take, so the value goes straight to `snprintf`.
+pub(crate) const FLOAT_FAST_NONE: i32 = -2;
+
+/// The `fast` argument of `__neuro_fmt_flt` for `%.16g`. A fixed conversion passes its
+/// precision instead.
+pub(crate) const FLOAT_FAST_GENERAL: i32 = -1;
 
 impl<'ctx> CodegenContext<'ctx> {
     /// The `{ ptr, i64 }` layout every string value and format helper uses.
@@ -362,20 +371,36 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// `{ptr, len} __neuro_fmt_flt(double value, i8* fmt)`, the float twin of
-    /// [`Self::get_or_define_fmt_int`].
+    /// `{ptr, len} __neuro_fmt_flt(double value, i8* fmt, i32 fast, i32 plus)`, the float
+    /// twin of [`Self::get_or_define_fmt_int`].
+    ///
+    /// `fmt` is the whole `printf` conversion. `fast` and `plus` describe it again for the
+    /// float renderer (`text_format.c`), which writes the same text an order of magnitude
+    /// faster than `snprintf` does: `fast` is a `%.Nf` precision, [`FLOAT_FAST_GENERAL`]
+    /// for `%.16g` or [`FLOAT_FAST_NONE`], and `plus` is 1 when the conversion carries
+    /// the `+` flag. What the renderer declines, `snprintf` renders.
     pub(crate) fn get_or_define_fmt_float(&self) -> CodegenResult<FunctionValue<'ctx>> {
         const NAME: &str = "__neuro_fmt_flt";
         if let Some(f) = self.module.get_function(NAME) {
             return Ok(f);
         }
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let (func, saved) =
-            self.begin_helper(NAME, &[self.context.f64_type().into(), ptr_type.into()]);
+        let i32_type = self.context.i32_type();
+        let (func, saved) = self.begin_helper(
+            NAME,
+            &[
+                self.context.f64_type().into(),
+                ptr_type.into(),
+                i32_type.into(),
+                i32_type.into(),
+            ],
+        );
 
         let value = self.param(func, 0)?;
         let fmt = self.param(func, 1)?.into_pointer_value();
-        let result = self.build_snprintf_alloc(func, fmt, value)?;
+        let fast = self.param(func, 2)?.into_int_value();
+        let plus = self.param(func, 3)?.into_int_value();
+        let result = self.build_snprintf_alloc(func, fmt, value, fast, plus)?;
 
         self.builder.build_return(Some(&result))?;
         self.end_helper(saved);
@@ -396,6 +421,9 @@ impl<'ctx> CodegenContext<'ctx> {
     /// [`SCRATCH_TEXT_BYTES`] being a large enough guess: when the render did not fit,
     /// it falls back to allocating what `snprintf` asked for and rendering again.
     ///
+    /// The float renderer is tried first, into the same scratch buffer; a length from it
+    /// joins `snprintf`'s at the copy.
+    ///
     /// `helper` is the function being defined, not the one that called for it: this runs
     /// inside a helper body the builder was moved into, so `current_function` still
     /// names the caller and the blocks below would be appended to the wrong function.
@@ -404,14 +432,58 @@ impl<'ctx> CodegenContext<'ctx> {
         helper: FunctionValue<'ctx>,
         fmt: PointerValue<'ctx>,
         value: BasicValueEnum<'ctx>,
+        fast: IntValue<'ctx>,
+        plus: IntValue<'ctx>,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let snprintf = self.get_or_declare_snprintf();
         let i64_type = self.context.i64_type();
         let i8_type = self.context.i8_type();
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
 
         let scratch_ty = i8_type.array_type(SCRATCH_TEXT_BYTES as u32);
         let scratch = self.builder.build_alloca(scratch_ty, "fmt.scratch")?;
         let capacity = i64_type.const_int(SCRATCH_TEXT_BYTES, false);
+
+        let renderer = self.extern_fn(
+            TEXT_FORMAT_ENTRY_POINT,
+            i64_type.fn_type(
+                &[
+                    self.context.f64_type().into(),
+                    self.context.i32_type().into(),
+                    self.context.i32_type().into(),
+                    ptr_type.into(),
+                ],
+                false,
+            ),
+        );
+        let rendered_fast = self
+            .builder
+            .build_call(
+                renderer,
+                &[value.into(), fast.into(), plus.into(), scratch.into()],
+                "fmt.fast",
+            )?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| CodegenError::InternalError("float renderer returned void".into()))?
+            .into_int_value();
+        let declined = self.builder.build_int_compare(
+            IntPredicate::SLT,
+            rendered_fast,
+            i64_type.const_zero(),
+            "fmt.fast.declined",
+        )?;
+        let fast_bb = self.builder.get_insert_block().ok_or_else(|| {
+            CodegenError::InternalError("float helper has no insert block".into())
+        })?;
+        let slow_bb = self.context.append_basic_block(helper, "fmt.slow");
+        let copy_bb = self.context.append_basic_block(helper, "fmt.copy");
+        let again_bb = self.context.append_basic_block(helper, "fmt.again");
+        let done_bb = self.context.append_basic_block(helper, "fmt.joined");
+        self.builder
+            .build_conditional_branch(declined, slow_bb, copy_bb)?;
+
+        self.builder.position_at_end(slow_bb);
         let written = self
             .builder
             .build_call(
@@ -443,17 +515,17 @@ impl<'ctx> CodegenContext<'ctx> {
         let fits = self
             .builder
             .build_int_compare(IntPredicate::ULT, len, capacity, "fmt.fits")?;
-        let copy_bb = self.context.append_basic_block(helper, "fmt.copy");
-        let again_bb = self.context.append_basic_block(helper, "fmt.again");
-        let done_bb = self.context.append_basic_block(helper, "fmt.joined");
         let branch = self
             .builder
             .build_conditional_branch(fits, copy_bb, again_bb)?;
         self.mark_cold_branch(branch)?;
 
         self.builder.position_at_end(copy_bb);
-        let copied = self.build_malloc(len, "fmt.buf")?;
-        self.build_memcpy_call(copied, scratch, len)?;
+        let copy_len = self.builder.build_phi(i64_type, "fmt.copy.len")?;
+        copy_len.add_incoming(&[(&rendered_fast, fast_bb), (&len, slow_bb)]);
+        let copy_len = copy_len.as_basic_value().into_int_value();
+        let copied = self.build_malloc(copy_len, "fmt.buf")?;
+        self.build_memcpy_call(copied, scratch, copy_len)?;
         self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(again_bb);
@@ -469,12 +541,15 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.build_unconditional_branch(done_bb)?;
 
         self.builder.position_at_end(done_bb);
-        let buf = self
-            .builder
-            .build_phi(self.context.ptr_type(AddressSpace::default()), "fmt.text")?;
+        let buf = self.builder.build_phi(ptr_type, "fmt.text")?;
         buf.add_incoming(&[(&copied, copy_bb), (&rendered, again_bb)]);
+        let text_len = self.builder.build_phi(i64_type, "fmt.text.len")?;
+        text_len.add_incoming(&[(&copy_len, copy_bb), (&len, again_bb)]);
 
-        self.build_string_value(buf.as_basic_value().into_pointer_value(), len)
+        self.build_string_value(
+            buf.as_basic_value().into_pointer_value(),
+            text_len.as_basic_value().into_int_value(),
+        )
     }
 
     /// `{ptr, len} __neuro_fmt_bin(i64 masked)`, the base-2 digits of an already

@@ -775,7 +775,14 @@ fn compile_file(
         Entry::Tests => test_functions(&ast),
     };
     let object_code = match entry {
-        Entry::Main => llvm_backend::compile(&hir, optimization, &sources, &external, gpu.vendor),
+        // An object may be a library, so its functions stay callable; an executable is
+        // entered at `main` alone.
+        Entry::Main if emit == EmitKind::Obj => {
+            llvm_backend::compile(&hir, optimization, &sources, &external, gpu.vendor)
+        }
+        Entry::Main => {
+            llvm_backend::compile_executable(&hir, optimization, &sources, &external, gpu.vendor)
+        }
         Entry::Tests => {
             llvm_backend::compile_tests(&hir, optimization, &sources, &external, gpu.vendor, &tests)
         }

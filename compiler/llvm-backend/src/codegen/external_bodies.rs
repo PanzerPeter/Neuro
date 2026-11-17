@@ -50,6 +50,12 @@ pub(crate) const TEXT_PARSER_ENTRY_POINTS: [&str; 3] = [
     "__neuro_parse_bool",
 ];
 
+/// The float renderer behind an interpolated float hole, generated from `text_format.c`.
+const TEXT_FORMAT_IR: &str = include_str!("text_format.ll");
+
+/// What the float renderer defines, made internal once linked.
+pub(crate) const TEXT_FORMAT_ENTRY_POINT: &str = "__neuro_format_f64";
+
 /// What the runtime defines for the launchers, the staging and device tensors, made
 /// internal once linked.
 const GPU_RUNTIME_ENTRY_POINTS: [&str; 26] = [
@@ -573,6 +579,16 @@ pub(crate) fn link_text_parser<'ctx>(
     Ok(())
 }
 
+/// Link the float renderer into `module`, which calls it, and make its entry point internal.
+pub(crate) fn link_text_format<'ctx>(
+    context: &'ctx Context,
+    module: &Module<'ctx>,
+) -> CodegenResult<()> {
+    link_ir(context, module, TEXT_FORMAT_IR, "the float renderer")?;
+    internalize(module, &[TEXT_FORMAT_ENTRY_POINT]);
+    Ok(())
+}
+
 pub(crate) fn link_ir<'ctx>(
     context: &'ctx Context,
     module: &Module<'ctx>,
@@ -1009,6 +1025,18 @@ enum ParseError { Empty, Invalid, OutOfRange }
         }
         let ir = plain_ir("func main() -> i32 { 0 }");
         assert!(!ir.contains("__neuro_parse"), "{ir}");
+    }
+
+    #[test]
+    fn a_float_hole_links_the_float_renderer_and_no_other_module_carries_it() {
+        let ir = plain_ir(
+            "func main() -> i32 {\n    val x: f64 = 1.5\n    println(\"{x} {x:.2}\")\n    0\n}",
+        );
+        let line = definition(&ir, super::TEXT_FORMAT_ENTRY_POINT)
+            .unwrap_or_else(|| panic!("expected the float renderer defined:\n{ir}"));
+        assert!(line.starts_with("define internal"), "{line}");
+        let ir = plain_ir("func main() -> i32 {\n    println(\"{1}\")\n    0\n}");
+        assert!(!ir.contains(super::TEXT_FORMAT_ENTRY_POINT), "{ir}");
     }
 
     #[test]

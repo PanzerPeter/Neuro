@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 # Regenerate the backend's embedded runtimes under compiler/llvm-backend/src/codegen with
 # the repo's LLVM: gpu_runtime.ll (CUDA) and gpu_runtime_hip.ll (HIP) from gpu_runtime.c,
-# text_parse.ll from text_parse.c, and os_runtime.ll from os_runtime.c. Keeps each .ll's
+# text_parse.ll from text_parse.c, text_format.ll from text_format.c, and os_runtime.ll from
+# os_runtime.c. Keeps each .ll's
 # leading comment block, drops what the backend's parser should not see: target datalayout
 # and triple, attribute groups, metadata, and the `; Function Attrs:` comments that would
 # describe the stripped groups.
@@ -27,4 +28,5 @@ regen() {
 regen gpu_runtime.ll gpu_runtime.c
 regen gpu_runtime_hip.ll gpu_runtime.c -DNEURO_HIP
 regen text_parse.ll text_parse.c -fno-vectorize -fno-slp-vectorize
+regen text_format.ll text_format.c -fno-vectorize -fno-slp-vectorize
 regen os_runtime.ll os_runtime.c -Os -fno-vectorize -fno-slp-vectorize -fno-builtin

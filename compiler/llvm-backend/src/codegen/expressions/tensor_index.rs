@@ -12,6 +12,7 @@ use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirTensorAxis};
 
 use super::row_major_strides;
+use crate::codegen::alias::MemoryClass;
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -60,11 +61,8 @@ impl<'ctx> CodegenContext<'ctx> {
             |this| {
                 let data = this.load_dlpack_data(handle)?;
                 let slot = this.tensor_element_ptr(elem_llvm, data, base)?;
-                Ok(Some(this.builder.build_load(
-                    elem_llvm,
-                    slot,
-                    "tensor.elem",
-                )?))
+                let element = this.builder.build_load(elem_llvm, slot, "tensor.elem")?;
+                Ok(Some(this.tag_load(element, MemoryClass::Element)?))
             },
             |this, index| {
                 let data = this.load_dlpack_data(handle)?;
@@ -96,7 +94,8 @@ impl<'ctx> CodegenContext<'ctx> {
             |this| {
                 let data = this.load_dlpack_data(handle)?;
                 let slot = this.tensor_element_ptr(elem_llvm, data, base)?;
-                this.builder.build_store(slot, value)?;
+                let store = this.builder.build_store(slot, value)?;
+                this.tag_access(store, MemoryClass::Element)?;
                 Ok(None)
             },
             |this, index| {
@@ -133,12 +132,12 @@ impl<'ctx> CodegenContext<'ctx> {
             ));
         };
         let handle = if matches!(source_ty, Type::Reference { .. }) {
-            self.builder
-                .build_load(
-                    self.context.ptr_type(inkwell::AddressSpace::default()),
-                    ptr,
-                    "tensor.index.recv",
-                )?
+            let handle = self.builder.build_load(
+                self.context.ptr_type(inkwell::AddressSpace::default()),
+                ptr,
+                "tensor.index.recv",
+            )?;
+            self.tag_load(handle, MemoryClass::TensorHandle)?
                 .into_pointer_value()
         } else {
             ptr

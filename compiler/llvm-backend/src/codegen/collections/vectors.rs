@@ -9,6 +9,7 @@ use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirStmt};
 
 use super::{FIELD_CAP, FIELD_LEN, FIELD_USED, collection_arg, initial_capacity};
+use crate::codegen::alias::MemoryClass;
 use crate::codegen::context::{CodegenContext, DropTarget, LoopTargets};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
@@ -191,9 +192,11 @@ impl<'ctx> CodegenContext<'ctx> {
         let elem_llvm = self.collection_value_type(&element_ty)?;
         // The slot keeps what it holds: a non-`Copy` element is only ever read in place,
         // as a borrow, a receiver or an operand, never moved out (the checker refuses it).
-        self.builder
-            .build_load(elem_llvm, slot, "vec.idx")
-            .map_err(CodegenError::from)
+        let element = self.builder.build_load(elem_llvm, slot, "vec.idx")?;
+        if MemoryClass::holds_numbers(&element_ty) {
+            self.tag_load(element, MemoryClass::Element)?;
+        }
+        Ok(element)
     }
 
     /// `v[i] = x`, a bounds-checked element store into a `Vec` place.
@@ -217,7 +220,10 @@ impl<'ctx> CodegenContext<'ctx> {
         if self.slot_needs_release(&element_ty) {
             self.drop_slot_value(slot, &element_ty)?;
         }
-        self.builder.build_store(slot, val)?;
+        let store = self.builder.build_store(slot, val)?;
+        if MemoryClass::holds_numbers(&element_ty) {
+            self.tag_access(store, MemoryClass::Element)?;
+        }
         Ok(())
     }
 

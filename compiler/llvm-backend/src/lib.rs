@@ -1,5 +1,5 @@
 // Feature slice for LLVM IR generation and optimization.
-// Public API: the `compile()` and `compile_to_ir()` entry points, the
+// Public API: the `compile()`, `compile_executable()` and `compile_to_ir()` entry points, the
 // `ExternalBodies` they may link in, and the `GpuVendor` whose runtime they link.
 
 mod codegen;
@@ -169,7 +169,35 @@ pub fn compile(
         gpu,
         None,
     )?;
-    emit_object_code(&codegen_ctx, optimization)
+    emit_object_code(&codegen_ctx, optimization, Exports::All)
+}
+
+/// Compile a typed HIR program to object code that is linked straight into an executable.
+///
+/// The same pipeline as [`compile`], for an object nothing but the C runtime calls into:
+/// every symbol except `main` is local to it, so the optimizer sees every call a function
+/// will ever receive. It inlines a function called once into its caller, drops the
+/// standard-library functions the program never reaches, and picks its own calling
+/// convention and argument passing for the rest. The program computes the same values;
+/// [`compile`] stays the entry for an object that may be a library.
+pub fn compile_executable(
+    program: &HirProgram,
+    optimization: OptimizationLevelSetting,
+    sources: &SourceMap,
+    external: &[ExternalBodies],
+    gpu: GpuVendor,
+) -> CodegenResult<Vec<u8>> {
+    let context = LLVMContext::create();
+    let codegen_ctx = build_module(
+        &context,
+        program,
+        optimization,
+        sources,
+        external,
+        gpu,
+        None,
+    )?;
+    emit_object_code(&codegen_ctx, optimization, Exports::Main)
 }
 
 /// Compile a typed HIR program to object code whose entry point runs one test.
@@ -198,7 +226,7 @@ pub fn compile_tests(
         gpu,
         Some(tests),
     )?;
-    emit_object_code(&codegen_ctx, optimization)
+    emit_object_code(&codegen_ctx, optimization, Exports::Main)
 }
 
 /// Compile a typed HIR program to textual LLVM IR.
@@ -227,7 +255,13 @@ pub fn compile_to_ir(
     // The target machine is built for its data layout and triple as much as for the
     // passes: IR without them is re-interpreted against the consumer's defaults.
     let (target_machine, target_triple) = host_target_machine(optimization)?;
-    optimize_module(&codegen_ctx, &target_machine, &target_triple, optimization)?;
+    optimize_module(
+        &codegen_ctx,
+        &target_machine,
+        &target_triple,
+        optimization,
+        Exports::All,
+    )?;
     Ok(codegen_ctx.module.print_to_string().to_string())
 }
 
@@ -607,6 +641,14 @@ fn build_module<'ctx>(
         codegen::external_bodies::link_text_parser(codegen_ctx.context, &codegen_ctx.module)?;
     }
 
+    if codegen_ctx
+        .module
+        .get_function(codegen::external_bodies::TEXT_FORMAT_ENTRY_POINT)
+        .is_some()
+    {
+        codegen::external_bodies::link_text_format(codegen_ctx.context, &codegen_ctx.module)?;
+    }
+
     // Link self-contained soft-float conversion builtins when the module uses
     // f16/bf16, so the emitted object resolves the half-precision libcalls
     // itself instead of depending on a platform runtime (libgcc/compiler-rt),
@@ -685,12 +727,45 @@ pub(crate) fn host_target_machine(
     Ok((target_machine, target_triple))
 }
 
+/// Which of an object's symbols code outside it may reach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Exports {
+    /// Every function and global the program defines: the object may be a library.
+    All,
+    /// The C `main` alone: the object is linked straight into an executable.
+    Main,
+}
+
+/// Give every function and global `module` defines internal linkage, except `main`.
+///
+/// Declarations keep their linkage, since the linker resolves them, and so does anything
+/// not plainly external: the soft-float builtins are `weak_odr` because instruction
+/// selection calls them after the pipeline has run, and must find them still there.
+fn internalize_all_but_main(module: &inkwell::module::Module<'_>) {
+    use inkwell::module::Linkage;
+
+    for function in module.get_functions() {
+        if function.count_basic_blocks() > 0
+            && function.get_linkage() == Linkage::External
+            && function.get_name().to_bytes() != b"main"
+        {
+            function.set_linkage(Linkage::Internal);
+        }
+    }
+    for global in module.get_globals() {
+        if global.get_initializer().is_some() && global.get_linkage() == Linkage::External {
+            global.set_linkage(Linkage::Internal);
+        }
+    }
+}
+
 /// Stamp `codegen_ctx`'s module with its target and run the IR pass pipeline over it.
 fn optimize_module(
     codegen_ctx: &CodegenContext<'_>,
     target_machine: &inkwell::targets::TargetMachine,
     target_triple: &inkwell::targets::TargetTriple,
     optimization: OptimizationLevelSetting,
+    exports: Exports,
 ) -> CodegenResult<()> {
     // Stamp the module with the target it is being compiled for. Without a data layout
     // the optimizer falls back to defaults and cannot reason about the size, alignment,
@@ -707,6 +782,10 @@ fn optimize_module(
     // middle-end passes that promote allocas to SSA values, inline, and hoist
     // loop-invariant work have to be requested separately.
     if let Some(pipeline) = optimization.pass_pipeline() {
+        // Only where a pipeline runs: at -O0 nothing would act on the narrower linkage.
+        if exports == Exports::Main {
+            internalize_all_but_main(&codegen_ctx.module);
+        }
         codegen_ctx
             .module
             .run_passes(
@@ -729,9 +808,16 @@ fn optimize_module(
 fn emit_object_code(
     codegen_ctx: &CodegenContext<'_>,
     optimization: OptimizationLevelSetting,
+    exports: Exports,
 ) -> CodegenResult<Vec<u8>> {
     let (target_machine, target_triple) = host_target_machine(optimization)?;
-    optimize_module(codegen_ctx, &target_machine, &target_triple, optimization)?;
+    optimize_module(
+        codegen_ctx,
+        &target_machine,
+        &target_triple,
+        optimization,
+        exports,
+    )?;
 
     let object_code = target_machine
         .write_to_memory_buffer(&codegen_ctx.module, inkwell::targets::FileType::Object)

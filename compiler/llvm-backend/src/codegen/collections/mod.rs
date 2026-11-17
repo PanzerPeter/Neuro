@@ -21,6 +21,7 @@ use inkwell::types::{BasicType, BasicTypeEnum, StructType};
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 use neuro_hir::HirExpr;
 
+use crate::codegen::alias::MemoryClass;
 use crate::codegen::context::{CodegenContext, DropTarget};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CollectionKind, Type};
@@ -268,9 +269,11 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_struct_gep(header_ty, header, field, "col.field")
             .map_err(|_| CodegenError::InternalError("collection header GEP failed".into()))?;
-        Ok(self
+        let value = self
             .builder
-            .build_load(self.context.i64_type(), field_ptr, name)?
+            .build_load(self.context.i64_type(), field_ptr, name)?;
+        Ok(self
+            .tag_load(value, MemoryClass::CollectionHeader)?
             .into_int_value())
     }
 
@@ -286,8 +289,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_struct_gep(header_ty, header, field, "col.field")
             .map_err(|_| CodegenError::InternalError("collection header GEP failed".into()))?;
-        self.builder.build_store(field_ptr, value)?;
-        Ok(())
+        let store = self.builder.build_store(field_ptr, value)?;
+        self.tag_access(store, MemoryClass::CollectionHeader)
     }
 
     /// Load the heap buffer pointer out of the header.
@@ -300,13 +303,13 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_struct_gep(header_ty, header, FIELD_BUFFER, "col.buf.ptr")
             .map_err(|_| CodegenError::InternalError("collection header GEP failed".into()))?;
+        let buffer = self.builder.build_load(
+            self.context.ptr_type(inkwell::AddressSpace::default()),
+            field_ptr,
+            "col.buf",
+        )?;
         Ok(self
-            .builder
-            .build_load(
-                self.context.ptr_type(inkwell::AddressSpace::default()),
-                field_ptr,
-                "col.buf",
-            )?
+            .tag_load(buffer, MemoryClass::CollectionHeader)?
             .into_pointer_value())
     }
 
@@ -321,8 +324,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_struct_gep(header_ty, header, FIELD_BUFFER, "col.buf.ptr")
             .map_err(|_| CodegenError::InternalError("collection header GEP failed".into()))?;
-        self.builder.build_store(field_ptr, buffer)?;
-        Ok(())
+        let store = self.builder.build_store(field_ptr, buffer)?;
+        self.tag_access(store, MemoryClass::CollectionHeader)
     }
 
     /// Build an `Option<T>` value: `Some(payload)` when `present`, else `None`.

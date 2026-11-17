@@ -82,6 +82,15 @@ fn module_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
 /// `optimization`: the IR instruction selection actually receives, rather than the
 /// unoptimized IR `module_ir` returns.
 fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String {
+    optimized_ir_exporting(source, optimization, Exports::All)
+}
+
+/// [`optimized_ir`] for an object exporting `exports`.
+fn optimized_ir_exporting(
+    source: &str,
+    optimization: OptimizationLevelSetting,
+    exports: Exports,
+) -> String {
     let hir = lower(source);
     let external = host_bodies(&hir, optimization);
     let context = LLVMContext::create();
@@ -97,7 +106,7 @@ fn optimized_ir(source: &str, optimization: OptimizationLevelSetting) -> String 
     .expect("module generation failed");
     let (machine, triple) =
         host_target_machine(optimization).expect("host target machine unavailable");
-    optimize_module(&codegen_ctx, &machine, &triple, optimization)
+    optimize_module(&codegen_ctx, &machine, &triple, optimization, exports)
         .expect("optimization pipeline failed");
     codegen_ctx.module.print_to_string().to_string()
 }
@@ -2515,5 +2524,65 @@ fn test_entry_replaces_main_and_keeps_the_program_main_callable() {
         entry.matches("ret i32").count(),
         entry.matches("call void @neuro.print.flush()").count(),
         "{entry}"
+    );
+}
+
+/// An executable's object exports `main` alone, so a function nothing calls is dropped and one
+/// called once is inlined away; a library's keeps both, callable from outside.
+#[test]
+fn an_executable_exports_main_alone_and_a_library_everything() {
+    const SOURCE: &str = "func unused(x: i32) -> i32 { x * 3 }\n\
+                          func helper(x: i32) -> i32 { x + 1 }\n\
+                          func main() -> i32 { helper(41) }";
+    let library = optimized_ir_exporting(SOURCE, OptimizationLevelSetting::O2, Exports::All);
+    assert!(library.contains("define i32 @unused("), "{library}");
+    assert!(library.contains("define i32 @helper("), "{library}");
+    let executable = optimized_ir_exporting(SOURCE, OptimizationLevelSetting::O2, Exports::Main);
+    assert!(!executable.contains("@unused("), "{executable}");
+    assert!(!executable.contains("@helper("), "{executable}");
+    assert!(
+        executable.contains("define noundef i32 @main()"),
+        "{executable}"
+    );
+}
+
+/// A `Vec` of numbers and a tensor's elements carry alias classes; a `Vec` whose element is
+/// a collection header of its own must not be tagged as a number, or a store to the outer
+/// slot would not be seen by a read of the inner header.
+#[test]
+fn element_accesses_are_tagged_only_where_the_slot_holds_numbers() {
+    let ir = module_ir(
+        "func numbers(v: &mut Vec<f64>, i: i64) { v[i] = v[i] + 1.0 }\n\
+         func nested(w: &mut Vec<Vec<f64>>, i: i64) { w[i] = Vec::new() }\n\
+         func cells(t: &mut Tensor<f32, [4]>, i: i64) { t[i] = 2.0f32 }",
+        OptimizationLevelSetting::O0,
+    );
+    let numbers = function_body(&ir, "numbers");
+    let stores: Vec<_> = numbers
+        .lines()
+        .filter(|l| l.contains("store double"))
+        .collect();
+    assert!(
+        !stores.is_empty() && stores.iter().all(|l| l.contains("!tbaa")),
+        "{numbers}"
+    );
+    assert!(
+        numbers
+            .lines()
+            .any(|l| l.contains("%vec.len = load") && l.contains("!tbaa")),
+        "{numbers}"
+    );
+    let nested = function_body(&ir, "nested");
+    let slot = nested
+        .lines()
+        .find(|l| l.contains("store { ptr, i64, i64, i64 }") && l.contains("%vec.slot"))
+        .unwrap_or_else(|| panic!("no slot write in:\n{nested}"));
+    assert!(!slot.contains("!tbaa"), "{slot}");
+    let cells = function_body(&ir, "cells");
+    assert!(
+        cells
+            .lines()
+            .any(|l| l.contains("store float") && l.contains("!tbaa")),
+        "{cells}"
     );
 }

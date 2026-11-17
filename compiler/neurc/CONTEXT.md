@@ -42,8 +42,9 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    type checker pairs them with parameter types.
 3. `semantic_analysis::type_check`.
 4. `hir_lowering::lower_program`: the typed HIR. `check` reports the lowered item count;
-   `compile` hands the HIR to `llvm_backend::compile`, which lowers native object code from it
-   (the backend does not consume the AST).
+   `compile` hands the HIR to `llvm_backend::compile_executable`, which lowers native object
+   code from it (the backend does not consume the AST), or to `llvm_backend::compile` under
+   `--emit obj`, whose object keeps every function callable.
 5. `compile` first hands the HIR to `mlir_backend::lower_for_link`
    (`tensor_bodies`) and passes the bodies it returns to the LLVM backend as `ExternalBodies`,
    which links them in place of its own. The two slices' types are mapped here, field for field,

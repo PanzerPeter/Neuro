@@ -227,8 +227,8 @@ built at (`clang++ -O3`, `rustc -C opt-level=3`), and all three target the gener
 with no `-march=native`. The default is `-O 0`, checked arithmetic with no optimization, so pass
 `-O 3` before drawing any conclusion about speed.
 
-Best of nine runs on one machine (Core i5-14600K, RTX 5070), lower is better. Reproduce with
-`cd benchmarks && uv run python run.py --reps 9 --levels 3`, which builds every implementation
+Best of five runs on one machine (Core i5-14600K, RTX 5070), lower is better. Reproduce with
+`cd benchmarks && uv run python run.py --levels 3`, which builds every implementation
 of each program and refuses to report timings if they disagree on output. Each one is written
 the way a programmer of that language would write it for speed. The Python column is the
 language itself; the NumPy column is what a Python programmer would write where the work
@@ -236,20 +236,20 @@ vectorizes.
 
 | Benchmark | What it stresses | Neuro `-O 3` | `clang++ -O3` | `rustc -O3` | Python 3.14 | NumPy |
 |---|---|---|---|---|---|---|
-| `mandelbrot` | scalar `f64` in a tight loop | 166 ms | 166 ms | 166 ms | 6668 ms | 1268 ms |
-| `vector_sum` | `Vec` push, sweep by reference | 24 ms | 26 ms | 24 ms | 6008 ms | 130 ms |
-| `call_overhead` | recursion, call and inline cost | 49 ms | 51 ms | 48 ms | 1409 ms | |
-| `print_lines` | integer holes to standard output | 13 ms | 20 ms | 13 ms | 111 ms | |
-| `format_floats` | `f64` holes at a fixed precision | 115 ms | 110 ms | 38 ms | 222 ms | |
-| `int_divide` | guarded `/` and `%`, opaque divisor | 95 ms | 88 ms | 89 ms | 1515 ms | |
-| `matmul` | `@` on `[256, 256]` `f32` tensors | 3.5 ms | 3.9 ms | 3.8 ms | 770 ms | 61 ms |
+| `mandelbrot` | scalar `f64` in a tight loop | 175 ms | 173 ms | 173 ms | 6999 ms | 1447 ms |
+| `vector_sum` | `Vec` push, sweep by reference | 25 ms | 28 ms | 26 ms | 6626 ms | 154 ms |
+| `call_overhead` | recursion, call and inline cost | 53 ms | 54 ms | 51 ms | 1436 ms | |
+| `print_lines` | integer holes to standard output | 14 ms | 21 ms | 13 ms | 117 ms | |
+| `format_floats` | `f64` holes at a fixed precision | 21 ms | 112 ms | 37 ms | 224 ms | |
+| `int_divide` | guarded `/` and `%`, opaque divisor | 99 ms | 92 ms | 93 ms | 1574 ms | |
+| `matmul` | `@` on `[256, 256]` `f32` tensors | 3.6 ms | 4.1 ms | 4.2 ms | 830 ms | 67 ms |
 
 Absolute times belong to the machine. Four rows are worth a word. `print_lines` beats C because
 an integer hole renders through a digit loop instead of `snprintf`, as Rust's does.
-`format_floats` loses to Rust, whose own float formatter is three times faster than the C
-library conversion Neuro and C++ both call. `int_divide` is the one place the compiler spends:
-`/` and `%` guard the operand pairs the hardware leaves undefined, and Rust guards the same pairs
-for 7% less. `matmul` runs each `@` as a register-blocked, vectorized loop nest, level with the
+`format_floats` beats both for the same reason: a float hole renders through Neuro's own exact
+renderer instead of the C library conversion C++ calls, five times faster with the same text.
+`int_divide` is the one place the compiler spends: `/` and `%` guard the operand pairs the
+hardware leaves undefined, and Rust guards the same pairs for 6% less. `matmul` runs each `@` as a register-blocked, vectorized loop nest, level with the
 i-k-j loops the C++ and Rust versions vectorize, and with the same bits as a plain loop.
 
 The GPU benchmarks run their Neuro side as `@gpu` kernels, against PyTorch on the same GPU and
@@ -257,10 +257,10 @@ NumPy on the CPU. Each moves the same data between host and device:
 
 | Benchmark | What it stresses | Neuro `@gpu` | PyTorch (CUDA) | NumPy (CPU) |
 |---|---|---|---|---|
-| `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 262 ms | 1080 ms | 619 ms |
-| `gpu_reduce` | 1000 rounds of a whole and a row `.sum()` on `[2048, 2048]` | 747 ms | 1144 ms | 1251 ms |
-| `gpu_matmul` | five `[2048, 2048]` `f32` products | 292 ms | 1137 ms | 217 ms |
-| `gpu_mlp` | twenty batches through a two-layer perceptron | 275 ms | 1133 ms | 158 ms |
+| `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 259 ms | 1157 ms | 675 ms |
+| `gpu_reduce` | 1000 rounds of a whole and a row `.sum()` on `[2048, 2048]` | 840 ms | 1179 ms | 1249 ms |
+| `gpu_matmul` | five `[2048, 2048]` `f32` products | 287 ms | 1262 ms | 277 ms |
+| `gpu_mlp` | twenty batches through a two-layer perceptron | 258 ms | 1313 ms | 203 ms |
 
 These are whole-program times, and both GPU columns start with a fixed cost: about 220 ms for a
 Neuro program, most of it the CUDA driver starting up, and about 1100 ms for PyTorch's import and
