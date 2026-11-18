@@ -1,0 +1,5 @@
+head 0 scores row 1: [0.0, 1.0, 0.0]
+head 1 scores row 2: [0.0, 1.0, 2.0]
+one head of ones scores 36.0 in total
+mixed head 1 row 2: [1.0, 2.0, 1.5, 1.0]
+readout 20.0, gradient row 0 sums both heads: 4.5

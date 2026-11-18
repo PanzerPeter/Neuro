@@ -938,3 +938,52 @@ fn regression_bug_143_a_gradient_lands_on_its_parameters_device() {
         assert!(stderr.starts_with(ON_DEVICE), "{reduction}: {stderr}");
     }
 }
+
+/// A batched product on the device, one operand stretched across the batch, matches the
+/// host's bit for bit: both add each element's products in contracted order.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_batched_product_on_the_device_matches_the_host() {
+    let test = CompileTest::new();
+    let source = r#"
+func main() -> i32 {
+    mut a = Tensor::<f32, [3, 10, 20]>::zeros()
+    mut b = Tensor::<f32, [1, 20, 9]>::zeros()
+    for s in 0..3 {
+        for i in 0..10 {
+            for k in 0..20 {
+                a[s, i, k] = ((s * 11 + i * 7 + k * 13) % 23) as f32 * 0.37f32 - 3.1f32
+            }
+        }
+    }
+    for k in 0..20 {
+        for j in 0..9 {
+            b[0, k, j] = ((k * 5 + j * 3) % 29) as f32 * 0.013f32 + 0.7f32
+        }
+    }
+    val host = &a @ &b
+    val ga = a.clone().to(Device::GPU(0))
+    val gb = b.clone().to(Device::GPU(0))
+    val device = (&ga @ &gb).to(Device::CPU)
+    mut wrong = 0
+    for s in 0..3 {
+        for i in 0..10 {
+            for j in 0..9 {
+                if device[s, i, j] != host[s, i, j] { wrong += 1 }
+            }
+        }
+    }
+    wrong
+}
+"#;
+    let output = run(&test, "batched_device.nr", source, false);
+    if without_gpu(&output) {
+        return;
+    }
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

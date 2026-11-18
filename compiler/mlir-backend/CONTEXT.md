@@ -278,7 +278,8 @@ whose body reads the source with `tensor.extract` at `start + d * step`, from `e
 reversed, and a position axis at one index) and `einsum` (`tensor_einsum.rs`: output letters
 `parallel`, contracted letters `reduction` in letter order, a `+0.0` fill, operands multiplied left
 to right and added to the accumulator, the LLVM backend's order exactly; a full contraction
-arrives boxed in `[1]` and gets one leading parallel dimension of extent 1). A slice position is a
+arrives boxed in `[1]` and gets one leading parallel dimension of extent 1, while one typed as a
+rank-0 tensor, a `...` over no axes, needs no box). A slice position is a
 literal inside its axis, or, only for an outlined target, an integer parameter the call site has
 checked, since a GPU body cannot stop the program.
 
@@ -389,8 +390,10 @@ which `neurc` reports at the operation.
 **A matrix product is a contracting `linalg.generic`.** `build_matmul` reads `@` instead of the
 element-wise path and emits the canonical three-operation shape: a `tensor.empty`, a
 `linalg.generic` that fills it with the element's zero from an `arith.constant` scalar input, and
-a second one whose index space is `(row, column, contracted)` with maps `(d0, d2)` / `(d2, d1)` /
-`(d0, d1)`, iterators `parallel, parallel, reduction`, and a multiply-accumulate body. The fill is
+a second one whose index space is `(batch.., row, column, contracted)`: on a plain product the maps
+are `(d0, d2)` / `(d2, d1)` / `(d0, d1)` with iterators `parallel, parallel, reduction`, and a
+multiply-accumulate body. Batch axes lead the index space; an operand reads a stretched one at
+index 0 and does not read one it lacks (`contraction_axes`). The fill is
 not optional: a reduction READS its destination at every point, and `tensor.empty` is undefined
 memory. Named `linalg.matmul` and `linalg.fill` are still not reachable (melior's ODS module
 generates from `LinalgOps.td` only) so all three go through the one `generic_op` builder, which

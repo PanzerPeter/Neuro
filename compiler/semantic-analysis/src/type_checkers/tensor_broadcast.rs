@@ -332,13 +332,13 @@ impl TypeChecker {
         Some(result)
     }
 
-    /// The contracted shape of `[M, K] @ [K, N]`, or `None` once a diagnostic has been
-    /// recorded for the operands.
+    /// The contracted shape of `[.., M, K] @ [.., K, N]`, or `None` once a diagnostic has
+    /// been recorded for the operands.
     ///
-    /// Matrix multiplication neither broadcasts nor stretches: it reads the inner axis of
-    /// each operand and contracts it away. A scalar operand therefore has nothing to
-    /// contract, and an operand of any rank but 2 has no inner axis to name: both are the
-    /// shape error rather than a silently different operation.
+    /// The two trailing axes of each operand are the matrix, which neither broadcasts nor
+    /// stretches: the inner axis is contracted away. The axes in front are batch axes and
+    /// broadcast. A scalar operand has nothing to contract and a rank-1 operand no inner
+    /// axis to name: both are the shape error rather than a silently different operation.
     fn matmul_shape(
         &mut self,
         lhs: &Operand,
@@ -375,31 +375,47 @@ impl TypeChecker {
         // M x N to size the fresh result's buffer. A `?` supplies none of them.
         if self.reject_dynamic_extent(shape, "`@`", left_ty, span)
             || self.reject_dynamic_extent(other_shape, "`@`", right_ty, span)
-            || self.reject_splice(shape, "`@`", left_ty, span)
-            || self.reject_splice(other_shape, "`@`", right_ty, span)
         {
             return None;
         }
-        let ([rows, inner], [contracted, columns]) = (shape.as_slice(), other_shape.as_slice())
-        else {
-            self.record_error(TypeError::TensorMatMulMismatch {
+        let mismatch = |checker: &mut Self| {
+            checker.record_error(TypeError::TensorMatMulMismatch {
                 left: left_ty.clone(),
                 right: right_ty.clone(),
                 span,
             });
-            return None;
+            None
+        };
+        // A splice may stand for batch axes, which align the same way whatever it binds,
+        // but not for a matrix axis: which axis is the matrix would change per instance.
+        for (operand, ty) in [(shape, left_ty), (other_shape, right_ty)] {
+            if operand
+                .iter()
+                .rev()
+                .take(2)
+                .any(|axis| matches!(axis.extent, ArrayLen::Splice(_)))
+            {
+                self.reject_splice(operand, "`@`", ty, span);
+                return None;
+            }
+        }
+        let (Some((left_batch, [rows, inner])), Some((right_batch, [contracted, columns]))) = (
+            shape.split_last_chunk::<2>(),
+            other_shape.split_last_chunk::<2>(),
+        ) else {
+            return mismatch(self);
         };
         // A shape parameter counts as equal to itself, which is what makes the `K` of
         // `matmul<M, N, K>` check once at the declaration rather than per instantiation.
         if inner.extent != contracted.extent || !inner.names_agree_with(contracted) {
-            self.record_error(TypeError::TensorMatMulMismatch {
-                left: left_ty.clone(),
-                right: right_ty.clone(),
-                span,
-            });
-            return None;
+            return mismatch(self);
         }
-        Some((element.clone(), vec![rows.clone(), columns.clone()]))
+        // The batch axes broadcast as an element-wise operator's whole shapes do.
+        let Some(mut result) = broadcast_shapes(left_batch, right_batch) else {
+            return mismatch(self);
+        };
+        result.extend([rows.clone(), columns.clone()]);
+        Some((element.clone(), result))
     }
 
     /// The element type and broadcast-joined shape of an element-wise operator's

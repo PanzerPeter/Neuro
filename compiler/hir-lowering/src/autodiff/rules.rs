@@ -418,8 +418,10 @@ fn binary(
     Ok(())
 }
 
-/// `C = A @ B` with `A: [m, k]`, `B: [k, n]`: `dA = dC @ Bᵀ` and `dB = Aᵀ @ dC`, written as
-/// contractions so that neither operand has to be transposed, which would consume it.
+/// `C = A @ B` with `A: [.., m, k]`, `B: [.., k, n]`: `dA = dC @ Bᵀ` and `dB = Aᵀ @ dC`, written
+/// as contractions so that neither operand has to be transposed, which would consume it. Each
+/// is taken over the result's batch axes and then summed down to the operand's own shape,
+/// which undoes the batch broadcast as `unbroadcast` does for an element-wise operator.
 fn matmul(
     em: &mut Emitter,
     [left, right]: [&Leaf; 2],
@@ -433,33 +435,73 @@ fn matmul(
             detail: "derivative transform: `@` on a non-tensor".to_string(),
         });
     };
-    let ([m, k], [_, n]) = (a.as_slice(), b.as_slice()) else {
+    let (Some((a_batch, [m, k])), Some((b_batch, [_, n]))) =
+        (a.split_last_chunk::<2>(), b.split_last_chunk::<2>())
+    else {
         return Err(LoweringError::Malformed {
             detail: "derivative transform: `@` on operands that are not matrices".to_string(),
         });
     };
-    // Letters: 0 = the rows of A, 1 = the columns of B, 2 = the contracted axis.
-    let extents = vec![*m, *n, *k];
+    // Letters: one per result batch axis, then the rows of A, the columns of B and the
+    // contracted axis, then one of extent 1 per stretched operand batch axis.
+    let rank = a_batch.len().max(b_batch.len());
+    let at = |shape: &[usize], axis: usize| {
+        (axis + shape.len())
+            .checked_sub(rank)
+            .map_or(1, |own| shape[own])
+    };
+    let batch: Vec<usize> = (0..rank)
+        .map(|axis| at(a_batch, axis).max(at(b_batch, axis)))
+        .collect();
+    let (rows, columns, inner) = (rank, rank + 1, rank + 2);
+    let mut extents = batch.clone();
+    extents.extend([*m, *n, *k]);
+    let letters = |shape: &[usize], extents: &mut Vec<usize>| -> Vec<usize> {
+        let offset = rank - shape.len();
+        shape
+            .iter()
+            .enumerate()
+            .map(|(axis, extent)| {
+                if *extent == batch[offset + axis] {
+                    return offset + axis;
+                }
+                extents.push(1);
+                extents.len() - 1
+            })
+            .collect()
+    };
+    let a_letters = letters(a_batch, &mut extents);
+    let b_letters = letters(b_batch, &mut extents);
+    let with = |head: &[usize], tail: [usize; 2]| [head, &tail].concat();
+    let result: Vec<usize> = (0..rank).collect();
     if is_active(left) {
-        let ty = tensor_type(element, &[*m, *k]);
-        let contribution = em.einsum(
+        let ty = tensor_type(element, &with(&batch, [*m, *k]));
+        let full = em.einsum(
             &[adjoint, right],
-            vec![vec![0, 1], vec![2, 1]],
-            vec![0, 2],
+            vec![
+                with(&result, [rows, columns]),
+                with(&b_letters, [inner, columns]),
+            ],
+            with(&result, [rows, inner]),
             extents.clone(),
             ty,
         );
+        let contribution = unbroadcast(em, full, left.value_ty())?;
         adjoints.add(left, contribution);
     }
     if is_active(right) {
-        let ty = tensor_type(element, &[*k, *n]);
-        let contribution = em.einsum(
+        let ty = tensor_type(element, &with(&batch, [*k, *n]));
+        let full = em.einsum(
             &[left, adjoint],
-            vec![vec![0, 2], vec![0, 1]],
-            vec![2, 1],
+            vec![
+                with(&a_letters, [rows, inner]),
+                with(&result, [rows, columns]),
+            ],
+            with(&result, [inner, columns]),
             extents,
             ty,
         );
+        let contribution = unbroadcast(em, full, right.value_ty())?;
         adjoints.add(right, contribution);
     }
     Ok(())

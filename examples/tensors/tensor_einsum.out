@@ -6,6 +6,7 @@ row sums   = 6, 15
 col sums   = 5, 7, 9
 batch 0    = [4, 5] [10, 11]
 batch 1    = [23, 25] [3, 3]
+... sums   = [6, 15], batch 1 = [24, 3]
 dot        = 25
 projected  = 8.0, 7.0
 weights    = 1.0, still readable

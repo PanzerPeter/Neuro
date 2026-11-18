@@ -4,13 +4,21 @@
 // rule covers matrix products, traces, outer products, transposes, axis sums and batched
 // contractions. The subscripts are a string literal, read while the program type-checks. A
 // letter bound to two extents, or an output letter no input binds, is a compile error
-// naming the letter. An empty output subscript contracts everything to one number. `einsum`
+// naming the letter. An empty output subscript contracts everything to one number. `...`
+// stands for an operand's leading axes, so one subscript serves every batch rank. `einsum`
 // reads its operands and allocates its own result, so it works through a borrow.
 
 // A borrowed weight matrix: `w` stays with the caller.
 
 func project(w: &Tensor<f32, [2, 3]>, x: &Tensor<f32, [3]>) -> Tensor<f32, [2]> {
     einsum("ij,j->i", w, x)
+}
+
+// `...` covers whatever axes `S` binds, from none upwards, and the result places them
+// where it writes its own `...`.
+
+func row_sums<S>(x: &Tensor<i32, [..S, 2, 3]>) -> Tensor<i32, [..S, 2]> {
+    einsum("...ij->...i", x)
 }
 
 func main() -> i32 {
@@ -69,6 +77,11 @@ func main() -> i32 {
     val batched: Tensor<i32, [2, 2, 2]> = einsum("bij,bjk->bik", batch, kernels)
     println("batch 0    = [{batched[0, 0, 0]}, {batched[0, 0, 1]}] [{batched[0, 1, 0]}, {batched[0, 1, 1]}]")
     println("batch 1    = [{batched[1, 0, 0]}, {batched[1, 0, 1]}] [{batched[1, 1, 0]}, {batched[1, 1, 1]}]")
+
+    // The same row sums at rank 2 and at rank 3.
+    val sums = row_sums(&a)
+    val stacked = row_sums(&batch)
+    println("... sums   = [{sums[0]}, {sums[1]}], batch 1 = [{stacked[1, 0]}, {stacked[1, 1]}]")
 
     // Two vectors, one shared letter, no output axes: the dot product is a scalar of the
     // element type, not a rank-0 tensor.

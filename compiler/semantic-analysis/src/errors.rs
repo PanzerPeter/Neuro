@@ -330,7 +330,7 @@ pub enum TypeError {
     },
 
     #[error(
-        "the operands of `@` do not multiply: {left} against {right}; matrix multiplication takes two rank-2 tensors whose inner axes agree, `[M, K] @ [K, N]` giving `[M, N]`"
+        "the operands of `@` do not multiply: {left} against {right}; matrix multiplication takes two tensors of rank 2 or more whose inner axes agree, `[M, K] @ [K, N]` giving `[M, N]`, and broadcasts any leading batch axes; a vector is reshaped to a matrix first, e.g. `m @ v.reshape([-1, 1])`"
     )]
     TensorMatMulMismatch { left: Type, right: Type, span: Span },
 
@@ -696,6 +696,16 @@ pub enum TypeError {
         "`einsum` writes '{letter}' twice on the right of `->`; each result axis is a distinct letter, because a repeated one would name two extents at once"
     )]
     EinsumOutputLetterRepeated { letter: char, span: Span },
+
+    #[error(
+        "`einsum` operand {position} writes `...` over {found}, but an earlier operand's `...` covers {first}; every operand that writes `...` shares the same leading axes"
+    )]
+    EinsumEllipsisMismatch {
+        position: usize,
+        first: String,
+        found: String,
+        span: Span,
+    },
 
     #[error(
         "`einsum` needs every extent of operand {position} at compile time, but '{name}' is not a number here; contract tensors whose shapes are known where the call is written"
@@ -1776,6 +1786,7 @@ impl TypeError {
             | Self::EinsumOutputLetterUnbound { span, .. }
             | Self::EinsumOutputLetterRepeated { span, .. }
             | Self::EinsumSymbolicExtent { span, .. }
+            | Self::EinsumEllipsisMismatch { span, .. }
             | Self::TensorConstructorNotApplicable { span, .. }
             | Self::TraitNotObjectSafe { span, .. }
             | Self::ImplTraitNotAllowedHere { span, .. }

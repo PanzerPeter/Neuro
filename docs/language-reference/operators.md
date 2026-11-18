@@ -11,7 +11,7 @@ Operators combine values into new values, or write a new value into a place. Thi
 | `a * b` | Multiplication | Two numbers of one type | |
 | `a / b` | Division | Two numbers of one type | Integer division truncates |
 | `a % b` | Remainder | Two numbers of one type | Integers and floats |
-| `a @ b` | Matrix product | Two rank-2 tensors | Contracts an axis; see [Tensors](#tensors) |
+| `a @ b` | Matrix product | Two tensors of rank 2 or more | Contracts an axis; see [Tensors](#tensors) |
 
 Both operands must have the same type. A bare literal takes the other operand's type, so `x + 1` works for `x: i64`, but two typed values never convert implicitly. `x + y` with `x: i32` and `y: f64` fails with `type mismatch: expected i32, found f64`, so convert with `as` first.
 
@@ -68,7 +68,7 @@ val shifted = &m + &row       // the rank-1 operand repeats across the rows
 
 Shapes align at the trailing axis. An extent of `1` stretches across a wider one, and a lower-rank operand supplies the innermost axes. A pair that does not fit fails with ``the operands of `+` do not broadcast``. The full rule is in [Element-wise arithmetic](tensors.md#element-wise-arithmetic).
 
-`@` is the matrix product, and the one tensor operator that contracts an axis instead of walking one. For `[M, K] @ [K, N]` the result is `[M, N]`, and element `[i, j]` is the dot product of row `i` of the left operand and column `j` of the right. Both operands must be rank 2, and neither broadcasts, so there is no vector or scalar form. A `?` extent on either operand is a compile error, because the contracted axis must be known.
+`@` is the matrix product, and the one tensor operator that contracts an axis instead of walking one. For `[M, K] @ [K, N]` the result is `[M, N]`, and element `[i, j]` is the dot product of row `i` of the left operand and column `j` of the right. Axes in front of the last two are batch axes: each batch element is multiplied on its own, and the batch axes broadcast like an element-wise operator's shapes, so `[B, M, K] @ [K, N]` gives `[B, M, N]`. The matrix axes never broadcast, and there is no vector or scalar form. A `?` extent on either operand is a compile error, because the contracted axis must be known.
 
 ```neuro
 val a: Tensor<i32, [2, 3]> = [[1, 2, 3], [4, 5, 6]]
@@ -78,7 +78,7 @@ val c = &a @ &b               // [2, 2]
 ```
 
 ```text
-error: the operands of `@` do not multiply: &Tensor<i32, [2, 3]> against &Tensor<i32, [2, 2]>; matrix multiplication takes two rank-2 tensors whose inner axes agree, `[M, K] @ [K, N]` giving `[M, N]`
+error: the operands of `@` do not multiply: &Tensor<i32, [2, 3]> against &Tensor<i32, [2, 2]>; matrix multiplication takes two tensors of rank 2 or more whose inner axes agree, `[M, K] @ [K, N]` giving `[M, N]`, and broadcasts any leading batch axes; a vector is reshaped to a matrix first, e.g. `m @ v.reshape([-1, 1])`
 ```
 
 Shape parameters make the check generic. The repeated `K` below is verified once, at the declaration:

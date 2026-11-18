@@ -198,7 +198,8 @@ At a point where the primal's control flow changes, the derivative is the execut
 reverse pass follows the path the forward pass took. That is the language's ruling on a kink, not
 an accident of the implementation.
 
-The rule set is closed: float and tensor `+ - * /`, scalar unary `-`, `@`, `.sum()` / `.mean()`
+The rule set is closed: float and tensor `+ - * /`, scalar unary `-`, `@` (batched too: each
+operand's adjoint is an `einsum` over the result's batch axes, summed down by `unbroadcast`), `.sum()` / `.mean()`
 whole or along one axis, tensor literals, element reads (a literal position scatters through one
 literal per tensor, a run-time one through a zero tensor and one element store), slices at
 literal bounds, the four shape casts (replayed on a copy, since the node consumes its receiver;
@@ -746,8 +747,9 @@ compiler bug, not a diagnostic.
   right-hand side, or a bare literal would lower as the default `f64` and emit a mixed-width
   instruction. A bare literal left of a scalar of its own kind takes that scalar's type the same
   way (`literal_follows_right_operand`, the checker's rule repeated). `@` takes `matmul_shape` in the same file instead of the broadcast join: it
-  contracts the operands' inner axis, so `[M, K] @ [K, N]` carries `[M, N]` with the left
-  operand's row name and the right operand's column name. A scalar operand is
+  contracts the operands' inner axis, so `[.., M, K] @ [.., K, N]` carries `[.., M, N]` with the
+  left operand's row name and the right operand's column name, the batch axes joined by the
+  broadcast rule. A scalar operand is
   `UnsupportedOperand` there rather than falling through to the element-wise arm, which would
   silently give it the tensor's own shape.
   Shape manipulation lives in `tensor_shape.rs`: `.t()`, `.reshape(...)`, `.permute(...)` and
@@ -790,7 +792,8 @@ compiler bug, not a diagnostic.
   it the way it shadows the panic and standard-output builtins. `lower_tensor_einsum` re-reads
   the subscript literal (`split_subscripts`) rather than carrying anything over from the
   checker, as this slice re-derives every resolved fact, and interns each letter to an index
-  into one extent table. What it emits is `HirExprKind::TensorEinsum` carrying only those
+  into one extent table. A `...` interns the axes it covers once, at the first operand that
+  writes it, and the output takes those indices where it writes its own. What it emits is `HirExprKind::TensorEinsum` carrying only those
   indices, so the notation stops existing here and no backend parses a string. The operands
   are left alone rather than moved: a contraction reads them, so borrowed ones lower here too.
   Slicing and indexing live in `tensor_index.rs`: `lower_tensor_index` folds each range bound to

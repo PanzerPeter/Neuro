@@ -173,13 +173,29 @@ val y: Tensor<f32, [5, 6]> = Tensor::<f32, [5, 6]>::zeros()
 val z = x @ y              // error: the operands of `@` do not multiply: Tensor<f32, [2, 3]> against Tensor<f32, [5, 6]>
 ```
 
-Unlike the element-wise operators, `@` does **not** broadcast. Both operands are rank 2: there is no vector form, because a rank-1 operand has no inner axis to contract, and no scalar form. A `?` extent is rejected on either operand, because the contracted axis bounds the sum and the result's own two axes size its buffer.
+Axes in front of the last two are **batch axes**. Each batch element is multiplied on its own, and the batch axes broadcast by the element-wise rule: equal extents walk together, an extent of `1` stretches, and a lower-rank operand repeats across the leading axes. The two matrix axes never broadcast.
+
+```neuro
+val heads = Tensor::<f32, [8, 4, 16]>::ones()
+val shared = Tensor::<f32, [16, 2]>::ones()
+val each = &heads @ &shared             // [8, 4, 2]: `shared` repeats across the 8
+```
+
+There is no vector form, because a rank-1 operand has no inner axis to contract, and no scalar form: a matrix-vector product is `m @ v.reshape([-1, 1])`. A `?` extent is rejected on either operand, because the contracted axis bounds the sum and the result's axes size its buffer.
 
 Shape parameters make `@` generic. The repeated `K` is checked once, at the declaration, rather than per call site:
 
 ```neuro
 func project<M, N, K>(w: &Tensor<f32, [M, K]>, x: &Tensor<f32, [K, N]>) -> Tensor<f32, [M, N]> {
     return w @ x
+}
+```
+
+A shape parameter spliced in front of the matrix axes makes one function serve every batch rank, none included. A splice may stand for batch axes but not for a matrix axis:
+
+```neuro
+func bmm<S, M, K, N>(a: &Tensor<f32, [..S, M, K]>, b: &Tensor<f32, [..S, K, N]>) -> Tensor<f32, [..S, M, N]> {
+    a @ b
 }
 ```
 
@@ -627,6 +643,16 @@ val heads: Tensor<f32, [8, 16, 2]> = Tensor::<f32, [8, 16, 2]>::zeros()
 val attended: Tensor<f32, [8, 4, 2]> = einsum("bij,bjk->bik", batch, heads)
 ```
 
+`...` stands for an operand's **leading axes**, so one subscript serves every batch rank. An operand writes it before its letters, the result writes it where those axes go, and the two are written together or not at all. Every operand that writes `...` covers the same axes, the same spliced shape parameter in a generic function:
+
+```neuro
+func scores<S>(q: &Tensor<f32, [..S, 3, 4]>, k: &Tensor<f32, [..S, 5, 4]>) -> Tensor<f32, [..S, 3, 5]> {
+    einsum("...qd,...kd->...qk", q, k)
+}
+```
+
+A result that writes `...` is a tensor even where the ellipsis covers no axes: `einsum("...ii->...", x)` on a `[3, 3]` is a `Tensor<T, []>`, so a generic function returns one kind at every instance. Operands whose `...` axes differ are an error naming both runs, `` `einsum` operand 1 writes `...` over [5], but an earlier operand's `...` covers [2] ``.
+
 **The subscripts are a string literal, never a value.** The compiler reads them during type checking, matches each letter against the operands' shapes, and derives the result type from the letters after `->`. A string computed at run time could not decide a shape that type checking depends on. `einsum` is the one variadic call in the language, and only because the literal fixes its arity.
 
 Like a reduction, `einsum` **reads** its operands. It allocates its own result and leaves the contracted buffers in place, so it is offered on `&Tensor<T, S>` too.
@@ -643,7 +669,7 @@ A subscript that disagrees with its operands is a compile error **naming the let
 - An output letter no input binds: `` `einsum` writes 'k' on the right of `->` but no operand's subscript binds it ``.
 - An output letter written twice: `` `einsum` writes 'i' twice on the right of `->` ``.
 
-The rest are checked the same way: one comma-separated subscript per operand, one letter per axis, every operand a tensor, and every operand sharing one integer or float element type, half precision included. Every extent must be a number, so a parameter or a `?` axis is rejected. The result's shape and strides are both built from those extents.
+The rest are checked the same way: one comma-separated subscript per operand, one letter per axis, every operand a tensor, and every operand sharing one integer or float element type, half precision included. Every lettered extent must be a number, so a parameter or a `?` axis is rejected; the axes `...` covers may be a shape parameter. The result's shape and strides are both built from those extents.
 
 A result axis carries no dimension name. A subscript letter is a local label for the contraction, not a name the type keeps. The result's axes are unnamed, and an annotation may name them.
 

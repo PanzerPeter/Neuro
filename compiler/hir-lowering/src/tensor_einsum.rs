@@ -21,6 +21,9 @@ use crate::{Lowerer, LoweringError, malformed};
 
 pub(crate) const EINSUM_FUNC: &str = "einsum";
 
+/// A `...` once split out of a subscript: one entry standing for every axis it covers.
+const ELLIPSIS: char = '.';
+
 impl Lowerer {
     /// Lower one contraction into a [`HirExprKind::TensorEinsum`].
     ///
@@ -56,6 +59,8 @@ impl Lowerer {
         // string afterwards.
         let mut letters: HashMap<char, usize> = HashMap::new();
         let mut extents: Vec<usize> = Vec::new();
+        // The indices the ellipsis's axes take, interned by the first operand that writes it.
+        let mut leading: Option<Vec<usize>> = None;
         let mut element: Option<HirType> = None;
         let mut resolved_inputs = Vec::with_capacity(inputs.len());
         for (subscript, operand) in inputs.iter().zip(operands.iter()) {
@@ -70,17 +75,39 @@ impl Lowerer {
                 ));
             };
             let shape = crate::static_extents(&shape)?;
-            if shape.len() != subscript.len() {
+            let written = subscript.first() == Some(&ELLIPSIS);
+            let named = &subscript[usize::from(written)..];
+            let covered = shape.len().checked_sub(named.len());
+            let Some(covered) = covered.filter(|covered| written || *covered == 0) else {
                 return Err(malformed(format!(
                     "`einsum` reached lowering with subscript '{}' on a rank-{} operand",
                     subscript.iter().collect::<String>(),
                     shape.len()
                 )));
-            }
+            };
             element.get_or_insert(*operand_element);
 
-            let mut axes = Vec::with_capacity(subscript.len());
-            for (letter, extent) in subscript.iter().zip(shape.iter()) {
+            let (front, shape) = shape.split_at(covered);
+            let mut axes = Vec::with_capacity(shape.len() + covered);
+            if written {
+                let bound = leading.get_or_insert_with(|| {
+                    extents.extend_from_slice(front);
+                    (extents.len() - front.len()..extents.len()).collect()
+                });
+                let agrees = bound.len() == front.len()
+                    && bound
+                        .iter()
+                        .zip(front)
+                        .all(|(at, extent)| extents[*at] == *extent);
+                if !agrees {
+                    return Err(malformed(
+                        "`einsum` reached lowering with operands whose `...` axes differ"
+                            .to_string(),
+                    ));
+                }
+                axes.extend_from_slice(bound);
+            }
+            for (letter, extent) in named.iter().zip(shape.iter()) {
                 let index = *letters.entry(*letter).or_insert_with(|| {
                     extents.push(*extent);
                     extents.len() - 1
@@ -104,6 +131,10 @@ impl Lowerer {
 
         let mut result_axes = Vec::with_capacity(output.len());
         for letter in &output {
+            if *letter == ELLIPSIS {
+                result_axes.extend(leading.iter().flatten());
+                continue;
+            }
             let index = *letters.get(letter).ok_or_else(|| {
                 malformed(format!(
                     "`einsum` reached lowering with the unbound output letter '{letter}'"
@@ -113,8 +144,9 @@ impl Lowerer {
         }
 
         // An empty output subscript contracts everything away and the result is the bare
-        // element, matching what the checker typed the call as.
-        let ty = if result_axes.is_empty() {
+        // element, matching what the checker typed the call as. One that writes `...` is a
+        // tensor whatever the ellipsis covers.
+        let ty = if result_axes.is_empty() && !output.contains(&ELLIPSIS) {
             element
         } else {
             let shape: Vec<usize> = result_axes.iter().map(|index| extents[*index]).collect();
@@ -148,11 +180,13 @@ fn split_subscripts(text: &str) -> Result<(Vec<Vec<char>>, Vec<char>), LoweringE
             "`einsum(\"{text}\", ...)` reached lowering without a `->`"
         ))
     })?;
-    let inputs = left
-        .split(',')
-        .map(|piece| piece.chars().collect::<Vec<char>>())
-        .collect();
-    Ok((inputs, right.chars().collect()))
+    let inputs = left.split(',').map(entries).collect();
+    Ok((inputs, entries(right)))
+}
+
+/// One side's letters, with a `...` folded into one [`ELLIPSIS`] entry.
+fn entries(piece: &str) -> Vec<char> {
+    piece.replace("...", ".").chars().collect()
 }
 
 #[cfg(test)]
@@ -167,6 +201,16 @@ mod tests {
         };
         assert_eq!(inputs, vec![vec!['b', 'i', 'j'], vec!['b', 'j', 'k']]);
         assert_eq!(output, vec!['b', 'i', 'k']);
+    }
+
+    #[test]
+    fn an_ellipsis_is_one_entry() {
+        let (inputs, output) = match split_subscripts("...ij,...jk->...ik") {
+            Ok(split) => split,
+            Err(error) => panic!("{error}"),
+        };
+        assert_eq!(inputs, vec![vec!['.', 'i', 'j'], vec!['.', 'j', 'k']]);
+        assert_eq!(output, vec!['.', 'i', 'k']);
     }
 
     #[test]

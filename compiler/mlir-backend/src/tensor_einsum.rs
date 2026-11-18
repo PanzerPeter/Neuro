@@ -63,7 +63,8 @@ pub(crate) fn build_einsum<'c, 'a>(
     let wide = HirType::F32;
     let half = half_precision(narrow);
     let element = if half { &wide } else { narrow };
-    let boxed = output.is_empty();
+    // A `...` over no axes leaves an empty output on a rank-0 tensor, which needs no box.
+    let boxed = output.is_empty() && !result_shape.is_empty();
     let Some(kind) = Element::computed(element) else {
         return Ok(None);
     };

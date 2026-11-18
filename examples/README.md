@@ -137,6 +137,7 @@ the full description.
 
 ### Tensors
 
+- [`tensors/batched_heads.nr`](integration/tensors/batched_heads.nr): Two attention heads as one batch: `einsum` with `...` over a shape parameter, batched `@` with a projection shared across heads, and a gradient that sums both heads.
 - [`tensors/mixed_precision.nr`](integration/tensors/mixed_precision.nr): `bf16` updates that round back to their weight beside an `f32` master copy that moves, with `.topk` and `.to_checked` over `bf16` data.
 - [`tensors/model_shapes.nr`](integration/tensors/model_shapes.nr): A network's layer stack declared with real tensor parameters, where shapes are part of the types and a second owner of a tensor needs `.clone()`.
 - [`tensors/optimizer_step.nr`](integration/tensors/optimizer_step.nr): A weight update written in place (`w -= g`) and by value (`w = w - g`), with broadcasting and an `@` forward pass.

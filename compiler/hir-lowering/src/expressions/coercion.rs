@@ -269,28 +269,36 @@ fn tensor_result_type(
     })
 }
 
-/// The contracted shape of `[M, K] @ [K, N]`: the left operand's rows and the right
-/// operand's columns, with the inner axis read away. `None` where the checker would not
-/// have accepted the pair.
+/// The contracted shape of `[.., M, K] @ [.., K, N]`: the broadcast batch axes, then the
+/// left operand's rows and the right operand's columns, with the inner axis read away.
+/// `None` where the checker would not have accepted the pair.
 fn matmul_shape(
     left: &[Option<usize>],
     left_names: &AxisNames,
     right: &[Option<usize>],
     right_names: &AxisNames,
 ) -> Option<(Vec<Option<usize>>, AxisNames)> {
-    let ([rows, inner], [contracted, columns]) = (left, right) else {
-        return None;
-    };
+    let (left_batch, [rows, inner]) = left.split_last_chunk::<2>()?;
+    let (right_batch, [contracted, columns]) = right.split_last_chunk::<2>()?;
     if inner != contracted {
         return None;
     }
-    Some((
-        vec![*rows, *columns],
-        AxisNames(vec![
-            left_names.0.first().cloned().flatten(),
-            right_names.0.get(1).cloned().flatten(),
-        ]),
-    ))
+    let name = |names: &AxisNames, axis: usize| names.0.get(axis).cloned().flatten();
+    let batch_names = |names: &AxisNames, rank: usize| {
+        AxisNames((0..rank - 2).map(|axis| name(names, axis)).collect())
+    };
+    let (mut shape, mut names) = broadcast_shapes(
+        left_batch,
+        &batch_names(left_names, left.len()),
+        right_batch,
+        &batch_names(right_names, right.len()),
+    )?;
+    shape.extend([*rows, *columns]);
+    names.0.extend([
+        name(left_names, left.len() - 2),
+        name(right_names, right.len() - 1),
+    ]);
+    Some((shape, names))
 }
 
 /// The broadcast join of two shapes: align at the trailing axis, stretch an extent of 1,

@@ -209,6 +209,7 @@ integration/gpu/file_training.nr                    12  gpu
 integration/gpu/gpu_layer.nr                        3  gpu
 
 # --- integration/tensors: tensor surface beyond the feature examples --------
+integration/tensors/batched_heads.nr                80
 integration/tensors/mixed_precision.nr              6
 integration/tensors/model_shapes.nr                 232
 integration/tensors/optimizer_step.nr               32

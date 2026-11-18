@@ -34,13 +34,6 @@ const ELEMENTWISE_BODY_ARGUMENTS: usize = 3;
 /// writes, then the destination slot it writes over.
 const FILL_BODY_ARGUMENTS: usize = 2;
 
-/// The index-space rank of a matrix product: two parallel axes over the result and
-/// one reduction axis over the contracted extent.
-const CONTRACTION_RANK: usize = 3;
-
-/// A matrix product's result axes, the parallel ones of its index space.
-const RESULT_RANK: usize = 2;
-
 /// The only extent that may be stretched across a larger result axis. Any other
 /// mismatch is a shape error the frontend owns, not something to lower.
 const BROADCAST_EXTENT: usize = 1;
@@ -470,12 +463,13 @@ fn build_matmul<'c, 'a>(
     let Some(zero) = zero_attribute(context, element, map_type(context, element)?) else {
         return Ok(None);
     };
-    // Every extent must be static here. The destination's two are what `tensor.empty`
-    // is sized with, and the contracted one bounds the reduction; a `?` supplies none of
+    // Every extent must be static here. The destination's are what `tensor.empty` is
+    // sized with, and the contracted one bounds the reduction; a `?` supplies none of
     // them, and a `tensor.dim` cannot recover an axis the result does not have.
-    if !contraction_is_static(left, right, result_shape) {
+    let Some((left_axes, right_axes, contracted)) = contraction_axes(left, right, result_shape)
+    else {
         return Ok(None);
-    }
+    };
     let Some(lhs) = build_expression(context, location, block, left, scope, lowering)? else {
         return Ok(None);
     };
@@ -534,11 +528,9 @@ fn build_matmul<'c, 'a>(
         .result(0)?
         .into();
 
-    // `(d0, d1, d2)` is (row, column, contracted), so the left operand reads
-    // `(d0, d2)`, the right `(d2, d1)`, and the accumulator the result's own `(d0, d1)`.
-    let left_axes: OperandAxes = Some(vec![Some(0), Some(2)]);
-    let right_axes: OperandAxes = Some(vec![Some(2), Some(1)]);
-    let accumulator_axes: OperandAxes = Some(vec![Some(0), Some(1)]);
+    // The index space is the result's axes, then the contracted one.
+    let contraction_rank = rank + 1;
+    let accumulator_axes = destination_axes;
     let checks = lowering.checks();
     let body = Region::new();
     body.append_block(contraction_block(
@@ -556,23 +548,26 @@ fn build_matmul<'c, 'a>(
             destination: filled,
             indexing_maps: indexing_maps(
                 context,
-                CONTRACTION_RANK,
+                contraction_rank,
                 &[&left_axes, &right_axes, &accumulator_axes],
             )?,
-            iterators: iterator_types(context, CONTRACTION_RANK, 1)?,
+            iterators: iterator_types(context, contraction_rank, 1)?,
         },
         tensor_type,
         body,
     )?;
-    if let (Some(extents), true) = (
-        contraction_extents(left, result_shape),
-        lowering.checks() == checks,
-    ) {
+    if lowering.checks() == checks {
+        let extents: Vec<u64> = result_shape
+            .iter()
+            .flatten()
+            .chain([&contracted])
+            .map(|&extent| extent as u64)
+            .collect();
         schedule::tag(
             context,
             &mut contraction,
             lowering.side,
-            (&extents, RESULT_RANK),
+            (&extents, rank),
             element,
         );
     }
@@ -586,43 +581,50 @@ fn build_matmul<'c, 'a>(
     }
 }
 
-/// `[rows, columns, contracted]`, the loop extents of a static matrix product.
-fn contraction_extents(
-    left: &HirExpr,
-    result: &[Option<usize>],
-) -> Option<[u64; CONTRACTION_RANK]> {
-    let (_, [_, Some(contracted)]) = tensor_parts(&left.ty)? else {
-        return None;
-    };
-    let [Some(rows), Some(columns)] = result else {
-        return None;
-    };
-    Some([*rows as u64, *columns as u64, *contracted as u64])
-}
-
-/// Whether the three shapes really are the static `[M, K] @ [K, N] -> [M, N]` this
-/// path emits: two rank-2 operands agreeing on the contracted axis, and no `?` anywhere.
+/// How each operand of a static `[.., M, K] @ [.., K, N] -> [.., M, N]` is read over the
+/// index space `(batch.., row, column, contracted)`, and the contracted extent. `None`
+/// where the shapes are not that product: an operand below rank 2, the contracted axes
+/// disagreeing, a batch axis that neither matches nor stretches, or a `?` anywhere.
 ///
 /// The frontend has already agreed all of that; it is re-derived here because a stage
-/// carries the rule it needs over the shared type rather than importing a sibling's,
-/// and because nothing in the compiler reaches this path from a compile yet.
-fn contraction_is_static(left: &HirExpr, right: &HirExpr, result: &[Option<usize>]) -> bool {
-    let (Some((_, left_shape)), Some((_, right_shape))) =
-        (tensor_parts(&left.ty), tensor_parts(&right.ty))
-    else {
-        return false;
-    };
-    let ([rows, columns], [left_rows, contracted], [contracted_again, right_columns]) =
-        (result, left_shape, right_shape)
-    else {
-        return false;
-    };
-    left_rows == rows
-        && right_columns == columns
-        && contracted == contracted_again
-        && [rows, columns, contracted]
+/// carries the rule it needs over the shared type rather than importing a sibling's.
+fn contraction_axes(
+    left: &HirExpr,
+    right: &HirExpr,
+    result: &[Option<usize>],
+) -> Option<(OperandAxes, OperandAxes, usize)> {
+    let (_, left_shape) = tensor_parts(&left.ty)?;
+    let (_, right_shape) = tensor_parts(&right.ty)?;
+    let (result_batch, [rows, columns]) = result.split_last_chunk::<2>()?;
+    let (left_batch, [left_rows, inner]) = left_shape.split_last_chunk::<2>()?;
+    let (right_batch, [contracted, right_columns]) = right_shape.split_last_chunk::<2>()?;
+    if left_rows != rows || right_columns != columns || inner != contracted {
+        return None;
+    }
+    if result.iter().chain([contracted]).any(Option::is_none) {
+        return None;
+    }
+    let batch = result_batch.len();
+    // A batch axis is walked where its extent is the result's and read at `0` where it is
+    // stretched; a lower-rank operand's batch axes are the innermost ones.
+    let batch_axes = |shape: &[Option<usize>]| {
+        let offset = batch.checked_sub(shape.len())?;
+        shape
             .iter()
-            .all(|extent| extent.is_some())
+            .enumerate()
+            .map(|(axis, extent)| match extent {
+                matched if *matched == result_batch[offset + axis] => Some(Some(offset + axis)),
+                Some(BROADCAST_EXTENT) => Some(None),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+    };
+    let (row, column, reduced) = (batch, batch + 1, batch + 2);
+    let mut left_axes = batch_axes(left_batch)?;
+    left_axes.extend([Some(row), Some(reduced)]);
+    let mut right_axes = batch_axes(right_batch)?;
+    right_axes.extend([Some(reduced), Some(column)]);
+    Some((Some(left_axes), Some(right_axes), (*contracted)?))
 }
 
 /// The additive identity of `element`, as the attribute an `arith.constant` carries.
@@ -1478,9 +1480,17 @@ mod tests {
 
     /// `func f(a: Tensor<T, [M, K]>, b: Tensor<T, [K, N]>) -> Tensor<T, [M, N]> { return a @ b }`
     fn returns_product(element: HirType, m: usize, k: usize, n: usize) -> HirProgram {
-        let left = tensor(element.clone(), &[m, k]);
-        let right = tensor(element.clone(), &[k, n]);
-        let result = tensor(element, &[m, n]);
+        returns_batched_product(element, (&[m, k], &[k, n]), &[m, n])
+    }
+
+    fn returns_batched_product(
+        element: HirType,
+        (left, right): (&[usize], &[usize]),
+        result: &[usize],
+    ) -> HirProgram {
+        let left = tensor(element.clone(), left);
+        let right = tensor(element.clone(), right);
+        let result = tensor(element, result);
         let product = binary(
             BinaryOp::MatMul,
             variable("a", left.clone()),
@@ -1542,6 +1552,32 @@ mod tests {
         assert!(
             ir.contains("tensor<2x4xf32>"),
             "expected the contracted result type:\n{ir}"
+        );
+    }
+
+    /// The batch axes lead the index space; a stretched one reads index 0 and a missing one
+    /// is not read at all.
+    #[test]
+    fn a_batched_product_walks_its_batch_axes() {
+        let program =
+            returns_batched_product(HirType::F32, (&[2, 1, 3, 4], &[4, 5]), &[2, 1, 3, 5]);
+        let ir = lower_program(&program).expect("a batched product should lower");
+        let stretched = returns_batched_product(HirType::F32, (&[1, 3, 4], &[2, 4, 5]), &[2, 3, 5]);
+        let stretched = lower_program(&stretched).expect("a stretched batch should lower");
+
+        assert!(
+            ir.contains("affine_map<(d0, d1, d2, d3, d4) -> (d0, d1, d2, d4)>")
+                && ir.contains("affine_map<(d0, d1, d2, d3, d4) -> (d4, d3)>"),
+            "expected batch axes in front of the matrix maps:\n{ir}"
+        );
+        assert!(
+            stretched.contains("affine_map<(d0, d1, d2, d3) -> (0, d1, d3)>")
+                && stretched.contains("affine_map<(d0, d1, d2, d3) -> (d0, d3, d2)>"),
+            "expected the stretched batch axis to read index 0:\n{stretched}"
+        );
+        assert!(
+            stretched.contains(r#""parallel", "parallel", "parallel", "reduction""#),
+            "expected one reduction, after the batch and matrix axes:\n{stretched}"
         );
     }
 

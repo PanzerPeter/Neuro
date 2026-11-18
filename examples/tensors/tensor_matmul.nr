@@ -1,10 +1,12 @@
 // Matrix multiplication: the `@` operator. `@` contracts an axis, unlike the element-wise
 // `*`: element `[i, j]` of `a @ b` is the dot product of row `i` of `a` and column `j` of
 // `b`. Every linear layer is written with it. The shape rule is `[M, K] @ [K, N] -> [M,
-// N]`. Both operands are rank 2, `@` does not broadcast, and a shape mismatch is a compile
-// error. `@` shares the precedence of `*`, `/` and `%`, so `a @ b * c` groups left to
-// right. It binds tighter than `+` and looser than `as`. Like every tensor operator it
-// accepts owned or borrowed operands: `&w @ &x` reads a weight without moving it.
+// N]`, and a shape mismatch is a compile error. Axes in front of the last two are batch
+// axes: each batch element is multiplied on its own, and the batch axes broadcast like an
+// element-wise operator's shapes. `@` shares the precedence of `*`, `/` and `%`, so
+// `a @ b * c` groups left to right. It binds tighter than `+` and looser than `as`. Like
+// every tensor operator it accepts owned or borrowed operands: `&w @ &x` reads a weight
+// without moving it.
 
 // One projection, written once for every width in the program. `M`, `K` and `N` are
 // compile-time values inferred from the operands' own shapes, and the repeated `K` is
@@ -66,5 +68,27 @@ func main() -> i32 {
     assert(halved[0, 0] == first[0, 0] * 0.5)
     println("w * 0.5 @ x     binds as (w * 0.5) @ x, giving {halved[0, 0]}")
 
+    // Batch axes: two [2, 3] @ [3, 2] products at once. The rank-2 `b` repeats across the
+    // batch, so batch 0 is `a @ b` again and batch 1 multiplies the second matrix by it.
+    val pair: Tensor<i32, [2, 2, 3]> = [
+        [[1, 2, 3], [4, 5, 6]],
+        [[1, 0, 0], [0, 1, 0]]
+    ]
+    val products = &pair @ &b
+    println("[2, 2, 3] @ [3, 2] -> [2, 2, 2], batch 1 row 1 = [{products[1, 1, 0]}, {products[1, 1, 1]}]")
+
+    // Written over a shape parameter, one function serves every batch rank, none included.
+    val single = batched(&a, &b)
+    val stacked = batched(&pair, &pair_b())
+    println("batched<S, ..> sums {single.sum()} at rank 2 and {stacked.sum()} at rank 3")
+
     return c[1, 1] - 150
+}
+
+func batched<S, M, K, N>(x: &Tensor<i32, [..S, M, K]>, y: &Tensor<i32, [..S, K, N]>) -> Tensor<i32, [..S, M, N]> {
+    x @ y
+}
+
+func pair_b() -> Tensor<i32, [2, 3, 2]> {
+    [[[1, 0], [0, 1], [1, 1]], [[2, 3], [4, 5], [6, 7]]]
 }

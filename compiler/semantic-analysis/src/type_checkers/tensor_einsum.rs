@@ -24,7 +24,12 @@ use std::collections::HashMap;
 
 pub(crate) const EINSUM_FUNC: &str = "einsum";
 
-/// One subscript string, split into the letters of each operand and of the result.
+/// How a parsed subscript holds the `...` it was written with: one slot standing for every
+/// axis the ellipsis covers.
+pub(crate) const ELLIPSIS: char = '.';
+
+/// One subscript string, split into the letters of each operand and of the result. A `...`
+/// is one [`ELLIPSIS`] entry.
 pub(crate) struct Subscripts {
     pub(crate) inputs: Vec<Vec<char>>,
     pub(crate) output: Vec<char>,
@@ -49,26 +54,58 @@ pub(crate) fn parse_subscripts(text: &str) -> Result<Subscripts, String> {
         .map(|piece| letters(piece, "left of `->`"))
         .collect::<Result<Vec<Vec<char>>, String>>()?;
     let output = letters(right, "right of `->`")?;
-    Ok(Subscripts { inputs, output })
+    // The ellipsis stands for an operand's LEADING axes, so an operand writes it first; the
+    // result may place those axes anywhere.
+    if inputs
+        .iter()
+        .any(|input| input.iter().skip(1).any(|&letter| letter == ELLIPSIS))
+    {
+        return Err(
+            "`...` stands for an operand's leading axes, so an operand writes it \
+                    before its letters, e.g. \"...ij\""
+                .to_string(),
+        );
+    }
+    let written = inputs.iter().any(|input| input.contains(&ELLIPSIS));
+    match (written, output.contains(&ELLIPSIS)) {
+        (true, false) => Err("an operand writes `...` but the result does not; write \
+                              `...` right of `->` where its axes go"
+            .to_string()),
+        (false, true) => Err("the result writes `...` but no operand does, so it stands \
+                              for no axes"
+            .to_string()),
+        _ => Ok(Subscripts { inputs, output }),
+    }
 }
 
-/// One operand's or the result's letters, rejecting anything that is not one.
+/// One operand's or the result's letters, rejecting anything that is not one. A `...`
+/// becomes one [`ELLIPSIS`] entry and may appear once.
 fn letters(piece: &str, side: &str) -> Result<Vec<char>, String> {
-    piece
-        .chars()
-        .map(|letter| {
-            if letter.is_ascii_alphabetic() {
-                Ok(letter)
-            } else {
-                Err(format!(
-                    "'{}' {} is not a subscript letter; subscripts are ASCII letters \
-                     separated by `,`",
-                    letter.escape_debug(),
-                    side
-                ))
+    let mut letters = Vec::with_capacity(piece.len());
+    let mut rest = piece;
+    while let Some(letter) = rest.chars().next() {
+        if let Some(after) = rest.strip_prefix("...") {
+            if letters.contains(&ELLIPSIS) {
+                return Err(format!(
+                    "a subscript {side} writes `...` twice; it stands for one run of axes"
+                ));
             }
-        })
-        .collect()
+            letters.push(ELLIPSIS);
+            rest = after;
+            continue;
+        }
+        if !letter.is_ascii_alphabetic() {
+            return Err(format!(
+                "'{}' {} is not a subscript letter; subscripts are ASCII letters \
+                 separated by `,`, with `...` for an operand's leading axes",
+                letter.escape_debug(),
+                side
+            ));
+        }
+        letters.push(letter);
+        rest = &rest[letter.len_utf8()..];
+    }
+    Ok(letters)
 }
 
 impl TypeChecker {
@@ -129,6 +166,7 @@ impl TypeChecker {
         }
 
         let mut extents: HashMap<char, usize> = HashMap::new();
+        let mut leading: Option<Vec<TensorAxis>> = None;
         let mut element: Option<Type> = None;
         for (position, ((operand, ty), subscript)) in operands
             .iter()
@@ -141,7 +179,7 @@ impl TypeChecker {
                 operand.span(),
                 ty,
                 subscript,
-                &mut extents,
+                (&mut extents, &mut leading),
                 &mut element,
             ) {
                 return Some(Type::Unknown);
@@ -161,7 +199,16 @@ impl TypeChecker {
 
         let mut shape = Vec::with_capacity(parsed.output.len());
         let mut seen: Vec<char> = Vec::with_capacity(parsed.output.len());
+        let boxed = parsed.output.contains(&ELLIPSIS);
         for letter in parsed.output {
+            if letter == ELLIPSIS {
+                // A result axis carries no name, the ellipsis's included.
+                shape.extend(leading.iter().flatten().map(|axis| TensorAxis {
+                    name: None,
+                    extent: axis.extent.clone(),
+                }));
+                continue;
+            }
             if seen.contains(&letter) {
                 self.record_error(TypeError::EinsumOutputLetterRepeated {
                     letter,
@@ -186,8 +233,10 @@ impl TypeChecker {
         // An empty output subscript contracts everything away, so the result has no axes
         // to describe. It is the element type rather than `Tensor<T, []>`, matching the
         // whole-tensor `.sum()`: both spell "one number out of a buffer", and a reader
-        // should not have to know which one produced it to use the answer.
-        if shape.is_empty() {
+        // should not have to know which one produced it to use the answer. A result that
+        // writes `...` is a tensor whatever the ellipsis covers, so a shape-generic
+        // contraction has one result kind at every instance.
+        if shape.is_empty() && !boxed {
             return Some(element);
         }
         Some(Type::Tensor {
@@ -204,7 +253,7 @@ impl TypeChecker {
         span: Span,
         ty: &Type,
         subscript: &[char],
-        extents: &mut HashMap<char, usize>,
+        (extents, leading): (&mut HashMap<char, usize>, &mut Option<Vec<TensorAxis>>),
         element: &mut Option<Type>,
     ) -> bool {
         if matches!(ty, Type::Unknown) {
@@ -226,18 +275,54 @@ impl TypeChecker {
             element: operand_element.clone(),
             shape: shape.clone(),
         };
-        if self.reject_splice(shape, "`einsum`", &operand, span) {
-            return false;
-        }
-        if shape.len() != subscript.len() {
+        // A `...` takes whatever axes the letters leave in front of them, a splice
+        // included; the lettered axes each need an extent of their own.
+        let written = subscript.first() == Some(&ELLIPSIS);
+        let letters = &subscript[usize::from(written)..];
+        let covered = match written {
+            true => shape.len().checked_sub(letters.len()),
+            false => (shape.len() == letters.len()).then_some(0),
+        };
+        let Some(covered) = covered else {
             self.record_error(TypeError::EinsumOperandRank {
                 position,
-                subscript: subscript.iter().collect(),
-                expected: subscript.len(),
+                subscript: spelled(subscript),
+                expected: letters.len(),
                 found: shape.len(),
                 span,
             });
             return false;
+        };
+        let (front, shape) = shape.split_at(covered);
+        if self.reject_splice(shape, "`einsum`", &operand, span) {
+            return false;
+        }
+        if let Some(axis) = front.iter().find(|a| a.extent == ArrayLen::Dynamic) {
+            self.record_error(TypeError::EinsumSymbolicExtent {
+                position,
+                name: axis.extent.to_string(),
+                span,
+            });
+            return false;
+        }
+        if written {
+            let same = |bound: &[TensorAxis]| {
+                bound.len() == front.len()
+                    && bound.iter().zip(front).all(|(b, f)| b.extent == f.extent)
+            };
+            match leading.as_deref() {
+                None => *leading = Some(front.to_vec()),
+                Some(bound) if !same(bound) => {
+                    self.record_error(TypeError::EinsumEllipsisMismatch {
+                        position,
+                        first: axes_text(bound),
+                        found: axes_text(front),
+                        span,
+                    });
+                    return false;
+                }
+                Some(_) => {}
+            }
         }
 
         let operand_element = (**operand_element).clone();
@@ -264,7 +349,7 @@ impl TypeChecker {
             Some(_) => {}
         }
 
-        for (letter, axis) in subscript.iter().zip(shape.iter()) {
+        for (letter, axis) in letters.iter().zip(shape.iter()) {
             let ArrayLen::Fixed(extent) = axis.extent else {
                 self.record_error(TypeError::EinsumSymbolicExtent {
                     position,
@@ -291,6 +376,23 @@ impl TypeChecker {
         }
         true
     }
+}
+
+/// A parsed subscript as it was written, its ellipsis spelled out.
+fn spelled(subscript: &[char]) -> String {
+    subscript
+        .iter()
+        .map(|&letter| match letter {
+            ELLIPSIS => "...".to_string(),
+            letter => letter.to_string(),
+        })
+        .collect()
+}
+
+/// Axes as a shape is written, `[..S, 2]`.
+fn axes_text(axes: &[TensorAxis]) -> String {
+    let extents: Vec<String> = axes.iter().map(|axis| axis.extent.to_string()).collect();
+    format!("[{}]", extents.join(", "))
 }
 
 #[cfg(test)]
@@ -335,5 +437,39 @@ mod tests {
     #[test]
     fn a_digit_is_not_a_subscript_letter() {
         assert!(parse_subscripts("i1->i").is_err());
+    }
+
+    #[test]
+    fn an_ellipsis_is_one_entry_on_either_side() {
+        let parsed = match parse_subscripts("...ij,...jk->i...k") {
+            Ok(parsed) => parsed,
+            Err(reason) => panic!("{reason}"),
+        };
+        assert_eq!(
+            parsed.inputs,
+            vec![vec!['.', 'i', 'j'], vec!['.', 'j', 'k']]
+        );
+        assert_eq!(parsed.output, vec!['i', '.', 'k']);
+    }
+
+    #[test]
+    fn an_operand_writes_its_ellipsis_first() {
+        assert!(parse_subscripts("i...j->...ij").is_err());
+    }
+
+    #[test]
+    fn an_ellipsis_appears_once_per_subscript() {
+        assert!(parse_subscripts("......ij->...ij").is_err());
+    }
+
+    #[test]
+    fn an_ellipsis_is_written_on_both_sides_or_neither() {
+        assert!(parse_subscripts("...ij->ij").is_err());
+        assert!(parse_subscripts("ij->...ij").is_err());
+    }
+
+    #[test]
+    fn a_lone_dot_is_not_an_ellipsis() {
+        assert!(parse_subscripts("..ij->..ij").is_err());
     }
 }

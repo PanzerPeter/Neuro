@@ -994,8 +994,8 @@ splits the argument around the template's one splice and binds the parameter to 
 `instance_parts` gives a template's own parameters); `substitute_shape` expands a binding. A `?`
 axis binds none. `check_parameter_splices` refuses a parameter or field shape splicing twice
 (`ShapeSplicedTwice`). `reject_splice` (`tensors.rs`) refuses whatever counts or picks axes on a
-spliced shape (`TensorSpliceRank`): an index, `@`, `einsum`, and the shape, reduce, apply, sort
-and `.item()` methods (guarded once at the top of `resolve_builtin_method`). `broadcast_shapes`
+spliced shape (`TensorSpliceRank`): an index, a matrix axis of `@`, a lettered axis of `einsum`,
+and the shape, reduce, apply, sort and `.item()` methods (guarded once at the top of `resolve_builtin_method`). `broadcast_shapes`
 joins a splice only with the same splice. A size parameter in scope passed on, to a turbofish or
 as a type argument, resolves to `Type::Generic` (`seed_turbofish`, `resolve_type`), and
 `unify_array_len` binds a callee extent to a caller's the same way. Struct and enum
@@ -1159,11 +1159,13 @@ same check for return-position `impl Trait<Assoc = U>`.
   `literal_follows_right_operand`, which leaves out `<<` and never turns an integer literal
   into a float). `hir-lowering` repeats the rule, or the literal would lower at its default.
 - **`@` is the one tensor operator that is not element-wise.** `matmul_shape` (same file) is
-  reached instead of the broadcast join and contracts rather than stretches: two rank-2 operands
-  whose inner axes agree give `[M, K] @ [K, N]` -> `[M, N]`, taking the left operand's row axis
-  and the right operand's column axis with their names. Anything else (a rank other than 2, a
-  scalar operand, a disagreeing inner extent, disagreeing axis NAMES on the contracted axis) is
-  `TensorMatMulMismatch`. `ArrayLen` equality is what compares the inner axes, so `matmul<M, N, K>`
+  reached instead of the broadcast join. The two trailing axes of each operand are the matrix and
+  contract rather than stretch: inner axes that agree give `[.., M, K] @ [.., K, N]` ->
+  `[.., M, N]`, taking the left operand's row axis and the right operand's column axis with their
+  names. The axes in front are batch axes and go through `broadcast_shapes`, so a splice may
+  stand for them (`[..S, M, K] @ [..S, K, N]`) but not for a matrix axis (`TensorSpliceRank`).
+  Anything else (a rank below 2, a scalar operand, a disagreeing inner extent, disagreeing axis
+  NAMES on the contracted axis, batch axes that do not broadcast) is `TensorMatMulMismatch`. `ArrayLen` equality is what compares the inner axes, so `matmul<M, N, K>`
   checks its repeated `K` once at the declaration rather than per instantiation. A `?` is rejected
   on BOTH operand shapes rather than only the result's (`TensorDynamicExtent`), because the
   contracted axis bounds the loop even though it appears in neither operand's result. Everything
@@ -1582,12 +1584,16 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   accepts `&Tensor<T, S>`. One pass binds every letter to an extent and fixes the element
   type, reporting `EinsumOperandCount`, `EinsumOperandNotTensor`, `EinsumOperandRank`,
   `EinsumElementType`, `EinsumElementMismatch`, `EinsumSymbolicExtent` and
-  `EinsumExtentConflict`; the output letters then have to be distinct
+  `EinsumExtentConflict`. A `...` parses to one `ELLIPSIS` entry; an operand writes it first,
+  and the result writes it exactly when an operand does. It covers the axes in front of the
+  operand's letters, a splice included, and every operand that writes it must cover the same
+  extents (`EinsumEllipsisMismatch`). The output letters then have to be distinct
   (`EinsumOutputLetterRepeated`) and each bound by some input
   (`EinsumOutputLetterUnbound`). The three letter diagnostics name the letter, as the
   language requires: the letter is the only thing in the call that says which axes were meant to
   agree. An empty output subscript yields the ELEMENT type rather than `Tensor<T, []>`,
-  matching the whole-tensor `.sum()`.
+  matching the whole-tensor `.sum()`; an output that writes `...` is a tensor even where the
+  ellipsis covers no axes, so a shape-generic contraction has one result kind per template.
 - **Tensor slicing and indexing, in `type_checkers/tensor_index.rs`.** `check_tensor_index`
   takes one argument per axis and answers one of two types: an axis given a `Position` is
   DROPPED and one given a `Range` (a `..` full axis is the range over the whole extent)

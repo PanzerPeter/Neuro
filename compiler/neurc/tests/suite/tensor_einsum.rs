@@ -9,7 +9,7 @@
 //
 // An exit code is one byte, so each expected value is kept below 256.
 
-use crate::compile_harness::{rejected, run};
+use crate::compile_harness::{assert_check_error, rejected, run, stdout_of};
 
 #[test]
 fn a_contraction_over_one_letter_is_a_matrix_product() {
@@ -430,4 +430,75 @@ func main() -> i32 {
 }
 "#;
     assert_eq!(run("half_contraction.nr", source), 0);
+}
+
+/// `...` takes the leading axes a splice stands for, `S = []` included, and the result may
+/// place them anywhere. With `...` written on the right the result stays a tensor even
+/// where it covers no axes, so `traces` returns one kind at every instance.
+#[test]
+fn an_ellipsis_contracts_over_any_leading_axes() {
+    let source = r#"
+func heads<S>(q: &Tensor<f32, [..S, 3, 4]>, k: &Tensor<f32, [..S, 5, 4]>) -> Tensor<f32, [..S, 3, 5]> {
+    einsum("...qd,...kd->...qk", q, k)
+}
+
+func traces<S>(x: &Tensor<f32, [..S, 3, 3]>) -> Tensor<f32, [..S]> {
+    einsum("...ii->...", x)
+}
+
+func main() -> i32 {
+    val q = Tensor::<f32, [2, 3, 4]>::ones()
+    val k = Tensor::<f32, [2, 5, 4]>::ones()
+    val h = heads(&q, &k)
+    val q0 = Tensor::<f32, [3, 4]>::ones()
+    val k0 = Tensor::<f32, [5, 4]>::ones()
+    val six = Tensor::<f32, [2, 4, 6]>::ones()
+    val moved = einsum("...ij,...jk->k...i", &q, &six)
+    val m = Tensor::<f32, [2, 3, 3]>::ones()
+    val one = Tensor::<f32, [3, 3]>::ones()
+    println("{h.sum()} {h[1, 2, 4]} {heads(&q0, &k0).sum()} {moved.sum()} {moved[5, 1, 2]}")
+    println("{traces(&m).sum()} {traces(&one).sum()}")
+    return 0
+}
+"#;
+    assert_eq!(
+        stdout_of("einsum_ellipsis.nr", source),
+        "120.0 4.0 60.0 144.0 4.0\n6.0 3.0\n"
+    );
+}
+
+#[test]
+fn an_ellipsis_shares_one_run_of_axes() {
+    assert_check_error(
+        "einsum_ellipsis_extents.nr",
+        "func main() -> i32 {\n    val a = Tensor::<f32, [2, 3, 4]>::ones()\n    \
+         val b = Tensor::<f32, [5, 4, 6]>::ones()\n    \
+         val c = einsum(\"...ij,...jk->...ik\", &a, &b)\n    0\n}\n",
+        "writes `...` over [5], but an earlier operand's `...` covers [2]",
+    );
+    assert_check_error(
+        "einsum_ellipsis_splices.nr",
+        "func f<S, R>(a: &Tensor<f32, [..S, 2]>, b: &Tensor<f32, [..R, 2]>) -> f32 {\n    \
+         einsum(\"...i,...i->...\", a, b).sum()\n}\nfunc main() -> i32 { 0 }\n",
+        "over [..R], but an earlier operand's `...` covers [..S]",
+    );
+}
+
+#[test]
+fn an_ellipsis_is_written_where_the_rule_puts_it() {
+    for (subscripts, expected) in [
+        ("i...j->...ij", "an operand writes it before its letters"),
+        (
+            "...ij->ij",
+            "an operand writes `...` but the result does not",
+        ),
+        ("ij->...ij", "the result writes `...` but no operand does"),
+        ("......ij->...ij", "writes `...` twice"),
+    ] {
+        let source = format!(
+            "func main() -> i32 {{\n    val a = Tensor::<f32, [2, 3, 4]>::ones()\n    \
+             val c = einsum(\"{subscripts}\", &a)\n    0\n}}\n"
+        );
+        assert_check_error("einsum_ellipsis_place.nr", &source, expected);
+    }
 }

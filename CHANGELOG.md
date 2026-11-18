@@ -10,6 +10,26 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.55.0] - 2026-11-18
+
+### Added
+
+- Batched `@`. Axes in front of an operand's last two are batch axes: each batch element is
+  multiplied on its own, and the batch axes broadcast like an element-wise operator's shapes, so
+  `[B, H, L, D] @ [D, L]` gives `[B, H, L, L]`. A shape-generic `[..S, M, K] @ [..S, K, N]`
+  serves every batch rank, none included. It runs through the tiled schedule and on the GPU, and
+  `@grad` differentiates it: an operand stretched across the batch gets its gradient summed over it.
+- `...` in `einsum` subscripts stands for an operand's leading axes:
+  `einsum("...qd,...kd->...qk", q, k)` works on `[3, 4]`, `[2, 3, 4]` or `[..S, 3, 4]`. An
+  operand writes it first, the result writes it where those axes go, and every operand that
+  writes it covers the same axes. A result that writes `...` stays a tensor even when the
+  ellipsis covers nothing.
+
+### Changed
+
+- The `@` shape diagnostic now names the batch rule and, for a vector operand, the
+  `m @ v.reshape([-1, 1])` spelling. A rank-1 operand is still refused.
+
 ## [5.54.0] - 2026-11-17
 
 ### Added
