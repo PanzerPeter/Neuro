@@ -71,6 +71,7 @@ impl TypeChecker {
             .unwrap_or_default();
 
         let mut subst: HashMap<String, Type> = HashMap::new();
+        let mut recheck = Vec::new();
         let mut seen: HashMap<String, Span> = HashMap::new();
         for ast_types::FieldInit {
             name: fname,
@@ -106,9 +107,13 @@ impl TypeChecker {
                     let actual = self
                         .check_expr(value, expected_ctx)
                         .unwrap_or(Type::Unknown);
-                    if !matches!(actual, Type::Unknown)
-                        && !self.unify_generic(&expected, &actual, &mut subst)
+                    let unified = matches!(actual, Type::Unknown)
+                        || self.unify_generic(&expected, &actual, &mut subst);
+                    if unified && crate::type_checkers::declarations::writes_extent_expr(&expected)
                     {
+                        recheck.push((expected.clone(), actual.clone(), value.span()));
+                    }
+                    if !unified {
                         let expected = self.substitute_generic(&expected, &subst, value.span());
                         self.record_error(TypeError::Mismatch {
                             expected,
@@ -126,6 +131,20 @@ impl TypeChecker {
                     });
                     let _ = self.check_expr(value, None);
                 }
+            }
+        }
+
+        // An extent expression is compared once every field has bound what it can.
+        for (expected, actual, field_span) in recheck {
+            if !matches!(actual, Type::Unknown)
+                && !self.unify_generic(&expected, &actual, &mut subst)
+            {
+                let expected = self.substitute_generic(&expected, &subst, field_span);
+                self.record_error(TypeError::Mismatch {
+                    expected,
+                    found: actual,
+                    span: field_span,
+                });
             }
         }
 

@@ -93,6 +93,7 @@ tensors/tensor_reductions.nr          21
 tensors/tensor_shape_generics.nr      41
 tensors/tensor_sized_types.nr         28
 tensors/tensor_shape_parameters.nr    65
+tensors/tensor_generic_reshape.nr     36
 tensors/tensor_element_generics.nr    25
 tensors/tensor_shape_manipulation.nr  44
 tensors/tensor_sorting.nr             21
@@ -210,6 +211,7 @@ integration/gpu/gpu_layer.nr                        3  gpu
 
 # --- integration/tensors: tensor surface beyond the feature examples --------
 integration/tensors/batched_heads.nr                80
+integration/tensors/head_split.nr                   10
 integration/tensors/mixed_precision.nr              6
 integration/tensors/model_shapes.nr                 232
 integration/tensors/optimizer_step.nr               32

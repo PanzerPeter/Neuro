@@ -10,6 +10,22 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.56.0] - 2026-11-18
+
+### Added
+
+- `.reshape` and `.flatten` inside a shape-generic function. A tensor extent may be a constant
+  expression over size parameters, `Tensor<f32, [B, H, D / H]>`, `[N + M, D]` or
+  `[S.count(), N]`, and the result of a reshape over parameters is typed with one:
+  `[N, 2].flatten()` is a `Tensor<f32, [2 * N]>`, the same type as `[N * 2]`. Whether the element
+  counts agree is checked at each instance and reported at the call that supplied the extents,
+  with the failing operation as a note; a `where D % H == 0` moves the error to the signature. An
+  extent with no value at an instance, such as `N - 1` at `N = 0`, is reported the same way.
+- The reductions, `.map` / `.zip` / `.reduce` and `einsum` over extent parameters. A reduction
+  over an empty run is refused at the instance that has one. On a spliced shape, a whole-tensor
+  reduction, an axis reduction along a written axis (`axis: -1` of `[..S, N]`), `.reshape`, a
+  whole `.flatten()` and the traversals are accepted.
+
 ## [5.55.1] - 2026-11-18
 
 ### Changed

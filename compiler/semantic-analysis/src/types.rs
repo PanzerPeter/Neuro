@@ -6,6 +6,8 @@ use std::fmt;
 
 pub(crate) use ast_types::FunctionMode;
 
+pub use crate::extents::ExtentExpr;
+
 thread_local! {
     /// The parameter names of each generic struct and enum template, for diagnostics.
     ///
@@ -52,6 +54,10 @@ pub enum ArrayLen {
     /// for any number of axes, so a shape holding one has no rank until monomorphization
     /// substitutes it, and only a tensor shape reaches it.
     Splice(std::string::String),
+    /// A tensor axis computed from size parameters, `D / H` or the `N * 2` of a flattened
+    /// `[N, 2]`. Never a lone constant or parameter: [`ArrayLen::from_extent`] keeps those
+    /// as `Fixed` and `Param`, so one extent has one spelling and equality is structural.
+    Expr(ExtentExpr),
 }
 
 impl ArrayLen {
@@ -69,6 +75,48 @@ impl ArrayLen {
     }
 }
 
+impl ArrayLen {
+    /// The extent as a polynomial, for arithmetic. A splice stands for its element count,
+    /// which is what it contributes to a product; `?` has no compile-time value.
+    pub(crate) fn extent(&self) -> Option<ExtentExpr> {
+        match self {
+            ArrayLen::Fixed(n) => Some(ExtentExpr::constant(*n as i128)),
+            ArrayLen::Param(name) => Some(ExtentExpr::param(name)),
+            ArrayLen::Splice(name) => Some(ExtentExpr::count(name)),
+            ArrayLen::Expr(expr) => Some(expr.clone()),
+            ArrayLen::Dynamic => None,
+        }
+    }
+
+    /// The axis a computed extent is, `None` for a negative constant, which no axis has.
+    pub(crate) fn from_extent(expr: ExtentExpr) -> Option<ArrayLen> {
+        if let Some(value) = expr.as_constant() {
+            return usize::try_from(value).ok().map(ArrayLen::Fixed);
+        }
+        if let Some(name) = expr.as_param() {
+            return Some(ArrayLen::Param(name.to_string()));
+        }
+        Some(ArrayLen::Expr(expr))
+    }
+
+    /// Whether the extent is known only once the generic it is written in is instantiated.
+    pub(crate) fn is_symbolic(&self) -> bool {
+        matches!(
+            self,
+            ArrayLen::Param(_) | ArrayLen::Splice(_) | ArrayLen::Expr(_)
+        )
+    }
+}
+
+/// The element count of a shape, `None` when an axis is `?`.
+pub(crate) fn shape_count(shape: &[TensorAxis]) -> Option<ExtentExpr> {
+    shape
+        .iter()
+        .try_fold(ExtentExpr::constant(1), |count, axis| {
+            count.checked_mul(&axis.extent.extent()?).ok()
+        })
+}
+
 impl fmt::Display for ArrayLen {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -76,6 +124,7 @@ impl fmt::Display for ArrayLen {
             ArrayLen::Param(name) => write!(f, "{}", name),
             ArrayLen::Dynamic => write!(f, "?"),
             ArrayLen::Splice(name) => write!(f, "..{}", name),
+            ArrayLen::Expr(expr) => write!(f, "{}", expr),
         }
     }
 }
@@ -243,6 +292,11 @@ pub enum Type {
     /// substitution and instance mangling. Never appears in a real value/annotation
     /// position and never reaches the HIR (the backend re-derives lengths from the AST).
     ConstValue(u64),
+    /// An extent parameter's argument computed from the caller's own size parameters: the
+    /// `M * 2` that `N` binds to when `func f<M>(x: Tensor<f32, [M, 2]>)` passes
+    /// `x.flatten()` on. Like [`Type::ConstValue`] it lives only in substitutions and
+    /// instance names.
+    Extent(ExtentExpr),
     /// A shape parameter's argument, the shape it stands for: the `[2, 3]` of
     /// `Dense<[2, 3]>`, or `[..S, N]` passed on inside another template. Like
     /// [`Type::ConstValue`] it lives only in substitutions and instance names. A shape
@@ -410,6 +464,7 @@ impl Type {
             // A const generic argument value matches only the same value. This is
             // a monomorphization-internal marker; it never appears in ordinary positions.
             (Type::ConstValue(a), Type::ConstValue(b)) => a == b,
+            (Type::Extent(a), Type::Extent(b)) => a == b,
             (Type::Shape(a), Type::Shape(b)) => shapes_agree(a, b),
 
             // References match when their referents match and their mutability
@@ -690,6 +745,7 @@ impl fmt::Display for Type {
                 write!(f, ">")
             }
             Type::ConstValue(v) => write!(f, "{}", v),
+            Type::Extent(extent) => write!(f, "{}", extent),
             Type::Shape(shape) => write_shape(f, shape),
             Type::Tuple(elements) => {
                 write!(f, "(")?;

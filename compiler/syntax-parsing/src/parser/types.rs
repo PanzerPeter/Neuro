@@ -1,8 +1,8 @@
 use lexical_analysis::TokenKind;
-use shared_types::{Identifier, Span};
+use shared_types::{Identifier, Literal, Span};
 
 use crate::errors::{ParseError, ParseResult};
-use ast_types::{ArraySize, FunctionMode, GenericArg, TensorDim, TensorExtent, Type};
+use ast_types::{ArraySize, Expr, FunctionMode, GenericArg, TensorDim, TensorExtent, Type};
 
 use super::Parser;
 
@@ -558,26 +558,29 @@ impl Parser {
     }
 
     /// Parse one shape entry: a non-negative integer literal, an extent parameter's name,
-    /// a `..S` splice, or `?` for an axis whose extent is not known until run time.
+    /// a constant expression over those (`D / H`), a `..S` splice, or `?` for an axis
+    /// whose extent is not known until run time.
     fn parse_tensor_extent(&mut self) -> ParseResult<TensorExtent> {
+        if matches!(
+            self.peek_kind(),
+            Some(TokenKind::Integer(_) | TokenKind::Identifier(_) | TokenKind::LeftParen)
+        ) {
+            return match self.parse_extent_sum()? {
+                Expr::Literal(Literal::Integer(value, _), span) => usize::try_from(value)
+                    .map(TensorExtent::Literal)
+                    .map_err(|_| ParseError::UnexpectedToken {
+                        found: TokenKind::Integer(value as u64),
+                        expected: "a non-negative integer tensor dimension".to_string(),
+                        span,
+                    }),
+                Expr::Identifier(ident) => Ok(TensorExtent::Param(ident)),
+                expr => Ok(TensorExtent::Expr(Box::new(expr))),
+            };
+        }
         let token = self.advance().ok_or_else(|| ParseError::UnexpectedEof {
             expected: "a tensor dimension".to_string(),
         })?;
         match token.kind {
-            TokenKind::Integer(extent) => {
-                let Ok(extent) = usize::try_from(extent) else {
-                    return Err(ParseError::UnexpectedToken {
-                        found: TokenKind::Integer(extent),
-                        expected: "a non-negative integer tensor dimension".to_string(),
-                        span: token.span,
-                    });
-                };
-                Ok(TensorExtent::Literal(extent))
-            }
-            TokenKind::Identifier(name) => Ok(TensorExtent::Param(Identifier {
-                name,
-                span: token.span,
-            })),
             TokenKind::Question => Ok(TensorExtent::Dynamic(token.span)),
             TokenKind::DotDot => {
                 let name = self.consume(
@@ -599,7 +602,7 @@ impl Parser {
             found => Err(ParseError::UnexpectedToken {
                 found,
                 expected: "a tensor dimension: a non-negative integer, an extent parameter, \
-                           `..S`, or `?`"
+                           an expression over them, `..S`, or `?`"
                     .to_string(),
                 span: token.span,
             }),

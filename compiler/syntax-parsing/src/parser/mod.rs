@@ -11,6 +11,7 @@ mod expr_infix;
 mod expr_prefix;
 mod expr_turbofish;
 mod expressions;
+mod extent_exprs;
 mod interpolation;
 mod item_enums;
 mod item_functions;

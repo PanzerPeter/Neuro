@@ -10,7 +10,7 @@
 
 use super::TypeChecker;
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, TensorAxis, Type};
+use crate::types::{ArrayLen, ExtentExpr, TensorAxis, Type, shape_count};
 use ast_types::{BinaryOp, Expr, UnaryOp};
 use shared_types::{Literal, Span};
 
@@ -97,6 +97,10 @@ impl TypeChecker {
 
     /// `.reshape([...])`: the same elements, re-described. Dimension names are dropped:
     /// a new extent is not the axis the old name documented.
+    ///
+    /// Over extent parameters the counts are compared here only when they are equal or
+    /// both concrete: `[N, 2]` into `[N, 3]` holds at `N = 0`, so whether it holds at all
+    /// is a question for each instance, which lowering answers.
     fn resolve_reshape(
         &mut self,
         shape: &[TensorAxis],
@@ -104,16 +108,14 @@ impl TypeChecker {
         call_span: Span,
     ) -> Option<Vec<TensorAxis>> {
         let entries = self.shape_arg_entries(args, RESHAPE_METHOD, "-1", call_span)?;
-        let total = self.static_element_count(shape, RESHAPE_METHOD, call_span)?;
+        let total = self.element_count(shape, RESHAPE_METHOD, call_span)?;
 
-        let mut extents: Vec<Option<usize>> = Vec::with_capacity(entries.len());
+        let mut extents: Vec<Option<ExtentExpr>> = Vec::with_capacity(entries.len());
         let mut inferred_at: Option<usize> = None;
         for entry in entries {
-            let Some(value) = self.reshape_extent(entry) else {
-                self.record_error(TypeError::TensorReshapeExtentNotConstant { span: entry.span() });
-                return None;
-            };
-            if value == INFERRED_EXTENT {
+            let extent = self.reshape_extent(entry, CONST_FOLD_DEPTH);
+            let value = extent.as_ref().and_then(ExtentExpr::as_constant);
+            if value == Some(INFERRED_EXTENT) {
                 if inferred_at.is_some() {
                     self.record_error(TypeError::TensorReshapeRepeatedInference {
                         span: entry.span(),
@@ -124,45 +126,58 @@ impl TypeChecker {
                 extents.push(None);
                 continue;
             }
-            let Ok(extent) = usize::try_from(value) else {
+            let Some(extent) = extent.filter(|_| value.is_none_or(|value| value >= 0)) else {
                 self.record_error(TypeError::TensorReshapeExtentNotConstant { span: entry.span() });
                 return None;
             };
             extents.push(Some(extent));
         }
 
-        let known: usize = extents.iter().flatten().product();
+        let known = extents
+            .iter()
+            .flatten()
+            .try_fold(ExtentExpr::constant(1), |product, extent| {
+                product.checked_mul(extent)
+            });
+        let Ok(known) = known else {
+            self.record_error(TypeError::TensorReshapeExtentNotConstant { span: call_span });
+            return None;
+        };
+        let concrete = known.as_constant().zip(total.as_constant());
         if let Some(position) = inferred_at {
-            // A zero-extent axis beside a `-1` leaves nothing to divide by, and the
-            // division below would trap rather than diagnose.
-            if known == 0 || total % known != 0 {
+            // A zero-extent axis beside a `-1` leaves nothing to divide by.
+            let divides = concrete.is_none_or(|(known, total)| known != 0 && total % known == 0);
+            let inferred = total.quot(&known).ok().filter(|_| divides);
+            let Some(inferred) = inferred else {
                 self.record_error(TypeError::TensorReshapeIndivisible {
-                    known,
-                    total,
+                    known: known.to_string(),
+                    total: total.to_string(),
                     span: call_span,
                 });
                 return None;
-            }
-            extents[position] = Some(total / known);
-        } else if known != total {
+            };
+            extents[position] = Some(inferred);
+        } else if let Some((known, total)) = concrete
+            && known != total
+        {
             self.record_error(TypeError::TensorReshapeElementCount {
-                expected: total,
-                found: known,
+                expected: total as usize,
+                found: known as usize,
                 span: call_span,
             });
             return None;
         }
 
-        Some(
-            extents
-                .into_iter()
-                .flatten()
-                .map(|extent| TensorAxis {
+        extents
+            .into_iter()
+            .flatten()
+            .map(|extent| {
+                Some(TensorAxis {
                     name: None,
-                    extent: ArrayLen::Fixed(extent),
+                    extent: ArrayLen::from_extent(extent)?,
                 })
-                .collect(),
-        )
+            })
+            .collect()
     }
 
     /// `.permute([...])`: every axis named exactly once, in the order the result wants
@@ -198,10 +213,10 @@ impl TypeChecker {
         call_span: Span,
     ) -> Option<Vec<TensorAxis>> {
         if args.is_empty() {
-            let total = self.static_element_count(shape, FLATTEN_METHOD, call_span)?;
+            let total = self.element_count(shape, FLATTEN_METHOD, call_span)?;
             return Some(vec![TensorAxis {
                 name: None,
-                extent: ArrayLen::Fixed(total),
+                extent: ArrayLen::from_extent(total)?,
             }]);
         }
 
@@ -221,23 +236,13 @@ impl TypeChecker {
             return None;
         }
 
-        let mut merged = 1usize;
-        for axis in &axes {
-            let ArrayLen::Fixed(extent) = shape[*axis].extent else {
-                self.record_error(TypeError::TensorShapeCastSymbolicExtent {
-                    method: FLATTEN_METHOD.to_string(),
-                    name: shape[*axis].extent.to_string(),
-                    span: call_span,
-                });
-                return None;
-            };
-            merged *= extent;
-        }
+        let run: Vec<TensorAxis> = axes.iter().map(|axis| shape[*axis].clone()).collect();
+        let merged = self.element_count(&run, FLATTEN_METHOD, call_span)?;
 
         let mut result: Vec<TensorAxis> = shape[..first].to_vec();
         result.push(TensorAxis {
             name: None,
-            extent: ArrayLen::Fixed(merged),
+            extent: ArrayLen::from_extent(merged)?,
         });
         result.extend_from_slice(&shape[first + axes.len()..]);
         Some(result)
@@ -348,82 +353,78 @@ impl TypeChecker {
         false
     }
 
-    /// The receiver's element count, which only exists once every extent is concrete.
-    fn static_element_count(
+    /// The receiver's element count, symbolic over extent parameters and splices. A `?`
+    /// axis has none until run time, which the dynamic-extent rules own.
+    fn element_count(
         &mut self,
         shape: &[TensorAxis],
         method: &str,
         call_span: Span,
-    ) -> Option<usize> {
-        let mut total = 1usize;
-        for axis in shape {
-            let ArrayLen::Fixed(extent) = axis.extent else {
-                self.record_error(TypeError::TensorShapeCastSymbolicExtent {
-                    method: method.to_string(),
-                    name: axis.extent.to_string(),
-                    span: call_span,
-                });
-                return None;
-            };
-            total *= extent;
+    ) -> Option<ExtentExpr> {
+        let count = shape_count(shape);
+        if count.is_none() {
+            self.record_error(TypeError::TensorShapeCastSymbolicExtent {
+                method: method.to_string(),
+                name: ArrayLen::Dynamic.to_string(),
+                span: call_span,
+            });
         }
-        Some(total)
+        count
     }
-}
 
-impl TypeChecker {
-    /// A `.reshape` extent's folded value. The spec calls the list "a constant-expression
-    /// array", so beyond a literal an extent may name a `const`, or combine either with
-    /// arithmetic. A local binding shadows a constant of its name and is a run-time
-    /// value, so it does not fold. `None` when the extent is not a constant.
-    fn reshape_extent(&self, expr: &Expr) -> Option<i128> {
-        fold_extent(expr, CONST_FOLD_DEPTH, &|name| {
-            if self.symbols.lookup(name).is_some() {
-                return None;
+    /// A `.reshape` extent's value. The spec calls the list "a constant-expression
+    /// array", so beyond a literal an extent may name a `const` or an extent parameter in
+    /// scope, or combine them with arithmetic. A local binding shadows both and is a
+    /// run-time value, so it does not fold. `None` when the extent is not a constant.
+    fn reshape_extent(&self, expr: &Expr, depth: u32) -> Option<ExtentExpr> {
+        let depth = depth.checked_sub(1)?;
+        match expr {
+            Expr::Literal(Literal::Integer(value, _), _) => Some(ExtentExpr::constant(*value)),
+            Expr::Paren(inner, _) => self.reshape_extent(inner, depth),
+            Expr::Unary {
+                op: UnaryOp::Negate,
+                operand,
+                ..
+            } => ExtentExpr::constant(0)
+                .checked_sub(&self.reshape_extent(operand, depth)?)
+                .ok(),
+            Expr::Identifier(ident) => {
+                if self.symbols.lookup(&ident.name).is_some() {
+                    return None;
+                }
+                let extent_param = !self.value_consts.contains(&ident.name)
+                    && !matches!(
+                        self.const_scope.get(&ident.name),
+                        None | Some(Type::Shape(_))
+                    );
+                if extent_param {
+                    return Some(ExtentExpr::param(&ident.name));
+                }
+                self.reshape_extent(self.constant_values.get(&ident.name)?, depth)
             }
-            self.constant_values.get(name)
-        })
+            Expr::Binary {
+                left, op, right, ..
+            } => {
+                let l = self.reshape_extent(left, depth)?;
+                let r = self.reshape_extent(right, depth)?;
+                match op {
+                    BinaryOp::Add => l.checked_add(&r),
+                    BinaryOp::Subtract => l.checked_sub(&r),
+                    BinaryOp::Multiply => l.checked_mul(&r),
+                    BinaryOp::Divide => l.quot(&r),
+                    BinaryOp::Modulo => l.rem(&r),
+                    _ => return None,
+                }
+                .ok()
+            }
+            _ => None,
+        }
     }
 }
 
 /// How many constants deep an extent folds. A constant naming itself through a cycle
 /// would otherwise never bottom out.
 const CONST_FOLD_DEPTH: u32 = 64;
-
-/// Fold an integer constant expression, resolving a name through `constant`. Checked
-/// arithmetic, so a pathological extent is refused rather than overflowing.
-fn fold_extent<'a>(
-    expr: &'a Expr,
-    depth: u32,
-    constant: &dyn Fn(&str) -> Option<&'a Expr>,
-) -> Option<i128> {
-    let depth = depth.checked_sub(1)?;
-    match expr {
-        Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
-        Expr::Paren(inner, _) => fold_extent(inner, depth, constant),
-        Expr::Unary {
-            op: UnaryOp::Negate,
-            operand,
-            ..
-        } => fold_extent(operand, depth, constant)?.checked_neg(),
-        Expr::Identifier(ident) => fold_extent(constant(&ident.name)?, depth, constant),
-        Expr::Binary {
-            left, op, right, ..
-        } => {
-            let l = fold_extent(left, depth, constant)?;
-            let r = fold_extent(right, depth, constant)?;
-            match op {
-                BinaryOp::Add => l.checked_add(r),
-                BinaryOp::Subtract => l.checked_sub(r),
-                BinaryOp::Multiply => l.checked_mul(r),
-                BinaryOp::Divide => l.checked_div(r),
-                BinaryOp::Modulo => l.checked_rem(r),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
 
 /// The value of an integer constant expression written in an axis list: a literal, or a
 /// literal under a negation (`-1`) or parentheses.

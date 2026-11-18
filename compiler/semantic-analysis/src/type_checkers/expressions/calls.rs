@@ -667,6 +667,7 @@ impl TypeChecker {
                     .filter(|(arg, param)| deferred(arg, param)),
             );
         let mut lent = Vec::new();
+        let mut recheck = Vec::new();
         for (arg, param) in order {
             // A scalar or `&string` parameter, written as one or through a type parameter
             // the turbofish or an earlier argument has bound, types its argument as a
@@ -707,7 +708,12 @@ impl TypeChecker {
             self.function_value_slot = None;
             self.temporary_borrow_slot = None;
             let arg_ty = shared_reborrow(checked.unwrap_or(Type::Unknown), param);
-            if !matches!(arg_ty, Type::Unknown) && !self.unify_generic(param, &arg_ty, &mut subst) {
+            let unified =
+                matches!(arg_ty, Type::Unknown) || self.unify_generic(param, &arg_ty, &mut subst);
+            if unified && declarations::writes_extent_expr(param) {
+                recheck.push((param, arg_ty.clone(), arg.span()));
+            }
+            if !unified {
                 // A shape parameter this argument contradicts is reported by name: the
                 // expected type below was itself inferred from an earlier argument, so
                 // printing it alone leaves the reader to work out which extent moved.
@@ -728,6 +734,14 @@ impl TypeChecker {
             }
             // A by-value argument moves a non-Copy binding into the callee.
             self.pass_argument(arg, param, &mut lent);
+        }
+        // An extent expression accepts until the names it reads are bound, which a later
+        // argument may do, so it is compared once every argument has bound what it can.
+        for (param, arg_ty, arg_span) in recheck {
+            if !matches!(arg_ty, Type::Unknown) && !self.unify_generic(param, &arg_ty, &mut subst) {
+                let expected = self.substitute_generic(param, &subst, arg_span);
+                self.record_type_mismatch(&expected, arg_ty, arg_span);
+            }
         }
         let lends = self.lend_arguments(lent);
         self.end_lends(lends);

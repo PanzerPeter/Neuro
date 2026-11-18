@@ -13,7 +13,7 @@
 use super::TypeChecker;
 use super::tensor_shape::{const_integer, declared_names};
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, TensorAxis, Type};
+use crate::types::{ArrayLen, TensorAxis, Type, shape_count};
 use ast_types::Expr;
 use shared_types::Span;
 
@@ -54,20 +54,20 @@ impl TypeChecker {
             return Type::Unknown;
         }
 
-        // Every extent has to be concrete here: the reduced run's length decides whether
-        // the reduction has a value at all, and the backend walks the buffer at strides
-        // the shape supplies. A shape parameter has neither until it is instantiated.
-        if let Some(symbolic) = shape.iter().find(|axis| !is_fixed(&axis.extent)) {
+        // A `?` axis has no run length until run time, which the dynamic-extent rules own.
+        // An extent parameter or a splice has one at each instance: whether that run is
+        // empty is checked there, by lowering, and only a concrete one here.
+        if shape.iter().any(|axis| axis.extent == ArrayLen::Dynamic) {
             self.record_error(TypeError::TensorShapeCastSymbolicExtent {
                 method: method.to_string(),
-                name: symbolic.extent.to_string(),
+                name: ArrayLen::Dynamic.to_string(),
                 span: call_span,
             });
             return Type::Unknown;
         }
 
         if args.is_empty() {
-            let count: usize = extents(shape).product();
+            let count = shape_count(shape).and_then(|count| count.as_constant());
             if !self.reduced_run_is_populated(count, method, call_span) {
                 return Type::Unknown;
             }
@@ -85,8 +85,9 @@ impl TypeChecker {
         let Some(axis) = self.resolve_reduce_axis(shape, &args[0], method) else {
             return Type::Unknown;
         };
-        let ArrayLen::Fixed(extent) = shape[axis].extent else {
-            return Type::Unknown;
+        let extent = match &shape[axis].extent {
+            ArrayLen::Fixed(extent) => Some(*extent as i128),
+            _ => None,
         };
         if !self.reduced_run_is_populated(extent, method, call_span) {
             return Type::Unknown;
@@ -102,8 +103,8 @@ impl TypeChecker {
     /// Reject a reduction with nothing to reduce. `.max()` over an empty run has no
     /// answer at all, and reporting the whole family the same way keeps one rule rather
     /// than an identity value per operation.
-    fn reduced_run_is_populated(&mut self, extent: usize, method: &str, span: Span) -> bool {
-        if extent > 0 {
+    fn reduced_run_is_populated(&mut self, extent: Option<i128>, method: &str, span: Span) -> bool {
+        if extent.is_none_or(|extent| extent > 0) {
             return true;
         }
         self.record_error(TypeError::TensorReduceEmpty {
@@ -153,20 +154,23 @@ impl TypeChecker {
                 span: entry.span(),
             });
         }
+        // Around a splice a position names a written axis only when it counts from the
+        // side the axis is written on: `-1` of `[..S, N]` is `N` at every rank, `0` is not.
+        let splice = shape
+            .iter()
+            .position(|axis| matches!(axis.extent, ArrayLen::Splice(_)));
+        if let (Some(at), Some(found)) = (splice, axis)
+            && !(if value < 0 { found > at } else { found < at })
+        {
+            let ty = Type::Shape(shape.to_vec());
+            self.reject_splice(
+                shape,
+                &format!("`.{method}` along axis {value}"),
+                &ty,
+                entry.span(),
+            );
+            return None;
+        }
         axis
     }
-}
-
-/// Whether one extent is a compile-time number, which every extent of a reduced tensor
-/// is by the time the traversal below runs.
-fn is_fixed(extent: &ArrayLen) -> bool {
-    matches!(extent, ArrayLen::Fixed(_))
-}
-
-/// The extents of a shape. Only reached once every one of them is `Fixed`.
-fn extents(shape: &[TensorAxis]) -> impl Iterator<Item = usize> + '_ {
-    shape.iter().map(|axis| match axis.extent {
-        ArrayLen::Fixed(extent) => extent,
-        _ => 0,
-    })
 }

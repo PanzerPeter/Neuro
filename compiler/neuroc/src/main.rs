@@ -586,17 +586,39 @@ fn report_type_errors(
     anyhow::anyhow!("{} type error(s) found", errors.len())
 }
 
-/// Render a lowering failure. The derivative transform's refusal is a user-facing
-/// diagnostic with a location; every other variant is a checker escape and has none.
+/// Render a lowering failure. The derivative transform's refusal and a shape check that
+/// fails at one instance are user-facing diagnostics with a location; every other variant
+/// is a checker escape and has none.
 fn report_lowering_error(
     sources: &SourceMap,
     error: &hir_lowering::LoweringError,
 ) -> anyhow::Error {
-    let hir_lowering::LoweringError::NotDifferentiable { span, .. } = error else {
-        return anyhow::anyhow!("HIR lowering error: {}", error);
-    };
-    eprintln!("{}", render_diagnostic(sources, &error.to_string(), *span));
-    anyhow::anyhow!("`@grad` function could not be differentiated")
+    match error {
+        hir_lowering::LoweringError::NotDifferentiable { span, .. } => {
+            eprintln!("{}", render_diagnostic(sources, &error.to_string(), *span));
+            anyhow::anyhow!("`@grad` function could not be differentiated")
+        }
+        // Reported where the extents came from, as a violated `where` predicate is, with
+        // the operation that needed them as a note.
+        hir_lowering::LoweringError::InstanceShape {
+            span,
+            origin,
+            instance,
+            ..
+        } => {
+            eprintln!(
+                "{}",
+                render_diagnostic(sources, &error.to_string(), origin.unwrap_or(*span))
+            );
+            let note = match instance {
+                Some(instance) => format!("checked here, in the instance {instance}"),
+                None => "checked here".to_string(),
+            };
+            eprintln!("{}\n", render_labeled("note", sources, &note, *span));
+            anyhow::anyhow!("a shape check failed at one instance of a generic")
+        }
+        _ => anyhow::anyhow!("HIR lowering error: {}", error),
+    }
 }
 
 /// Check a Neuro source file for syntax and type errors

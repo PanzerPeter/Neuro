@@ -132,6 +132,71 @@ pub enum LoweringError {
         "a tensor's element must be an integer, a floating-point type or `bool`, but this instance makes it `{ty}`: bound the parameter by `Numeric` to refuse such a type argument at the call"
     )]
     NonScalarTensorElement { ty: String },
+
+    /// A shape rule a generic body can only check once its extents are concrete:
+    /// at this instance a reshape changes the element count, a reduction runs over no
+    /// elements, or an extent expression has no value. `span` is the operation; `origin`
+    /// is the call in ordinary code whose instance chain reached it, which is where the
+    /// extents were supplied, and `instance` names the instance and its extents.
+    #[error("{check}")]
+    InstanceShape {
+        check: String,
+        span: Span,
+        origin: Option<Span>,
+        instance: Option<String>,
+    },
+}
+
+impl LoweringError {
+    /// Name the instance an [`LoweringError::InstanceShape`] arose in, the first time it
+    /// passes out of one: the innermost instance is the one whose extents failed.
+    fn in_instance(self, chain: Chain, instance: impl FnOnce() -> String) -> Self {
+        match self {
+            LoweringError::InstanceShape {
+                check,
+                span,
+                origin: None,
+                instance: None,
+            } => LoweringError::InstanceShape {
+                check,
+                span,
+                origin: chain.origin,
+                instance: Some(instance()),
+            },
+            other => other,
+        }
+    }
+}
+
+/// An [`LoweringError::InstanceShape`] at `span`, named for its instance on the way out.
+pub(crate) fn instance_shape(check: String, span: Span) -> LoweringError {
+    LoweringError::InstanceShape {
+        check,
+        span,
+        origin: None,
+        instance: None,
+    }
+}
+
+/// Where an instance sits among the instances that requested one another: how deep, and
+/// the call in ordinary code the chain started from, which supplied its arguments.
+#[derive(Clone, Copy, Default)]
+struct Chain {
+    depth: u32,
+    origin: Option<Span>,
+}
+
+/// An instance and the size arguments it was built with, for a diagnostic.
+fn describe_instance(name: &str, const_subst: &HashMap<String, u64>) -> String {
+    let mut sizes: Vec<String> = const_subst
+        .iter()
+        .map(|(param, value)| format!("{param} = {value}"))
+        .collect();
+    if sizes.is_empty() {
+        return format!("`{name}`");
+    }
+    sizes.sort();
+    format!("`{name}` with {}", sizes.join(", "))
 }
 
 /// How many generic instances deep one instantiation chain may run before lowering
@@ -317,7 +382,7 @@ struct Lowerer {
     mono_pending: Vec<MonoInstance>,
     /// How many instances deep the body being lowered sits: 0 for an ordinary item, and
     /// one more than its requester for an instance's body or methods.
-    mono_depth: u32,
+    mono_chain: Chain,
     /// Mangled names already queued or emitted, so each instance is produced once.
     mono_seen: HashSet<String>,
     /// Concrete instance functions produced by monomorphization, appended to the
@@ -387,7 +452,7 @@ struct OpDispatch {
 /// the call site refers to.
 #[derive(Clone)]
 struct MonoInstance {
-    depth: u32,
+    chain: Chain,
     mangled: String,
     fn_name: String,
     subst: HashMap<String, HirType>,
@@ -409,7 +474,7 @@ enum MonoArg {
 /// `HirItem::Impl` per matching generic impl.
 #[derive(Clone)]
 struct MonoStruct {
-    depth: u32,
+    chain: Chain,
     base: String,
     mangled: String,
     subst: HashMap<String, HirType>,
@@ -433,7 +498,7 @@ struct GenericMethod {
 /// within the type, and the full substitution its body lowers under.
 #[derive(Clone)]
 struct MonoMethod {
-    depth: u32,
+    chain: Chain,
     key: String,
     name: String,
     subst: HashMap<String, HirType>,
@@ -445,7 +510,7 @@ struct MonoMethod {
 /// produces one `HirItem::Enum` carrying fully concrete payloads.
 #[derive(Clone)]
 struct MonoEnum {
-    depth: u32,
+    chain: Chain,
     base: String,
     mangled: String,
     subst: HashMap<String, HirType>,
@@ -517,7 +582,7 @@ impl Lowerer {
             param_receivers: HashMap::new(),
             probing_returns: HashSet::new(),
             mono_pending: Vec::new(),
-            mono_depth: 0,
+            mono_chain: Chain::default(),
             mono_seen: HashSet::new(),
             mono_items: Vec::new(),
             derive_helpers: HashSet::new(),
@@ -813,16 +878,20 @@ impl Lowerer {
         }
     }
 
-    /// The depth a new instance requested by the body being lowered sits at.
-    fn next_instance_depth(&self, name: &str) -> Result<u32, LoweringError> {
-        let depth = self.mono_depth + 1;
+    /// Where a new instance requested by the body being lowered sits: one deeper, and
+    /// started from `request` when the body is ordinary code rather than an instance.
+    fn next_link(&self, name: &str, request: Option<Span>) -> Result<Chain, LoweringError> {
+        let depth = self.mono_chain.depth + 1;
         if depth > MAX_INSTANCE_DEPTH {
             return Err(LoweringError::InstantiationTooDeep {
                 name: name.to_string(),
                 limit: MAX_INSTANCE_DEPTH,
             });
         }
-        Ok(depth)
+        Ok(Chain {
+            depth,
+            origin: self.mono_chain.origin.or(request),
+        })
     }
 
     /// The template a struct or enum instance was built from, with its arguments.
@@ -841,6 +910,7 @@ impl Lowerer {
 fn resolve_tensor_dim(
     dim: &ast_types::TensorDim,
     const_subst: &HashMap<String, u64>,
+    count: &dyn Fn(&str) -> Option<i128>,
 ) -> Result<Option<usize>, LoweringError> {
     match &dim.extent {
         ast_types::TensorExtent::Literal(extent) => Ok(Some(*extent)),
@@ -855,6 +925,21 @@ fn resolve_tensor_dim(
             "the splice `..{}` reached a single tensor axis",
             id.name
         ))),
+        ast_types::TensorExtent::Expr(expr) => {
+            let value = tensor_shape::extent_value(expr, const_subst, count)
+                .and_then(|value| usize::try_from(value).ok());
+            match value {
+                Some(value) => Ok(Some(value)),
+                None => Err(instance_shape(
+                    format!(
+                        "the extent `{}` has no value at this instance: it divides by zero or \
+                         is negative, and an axis has a non-negative extent",
+                        tensor_shape::extent_text(expr)
+                    ),
+                    expr.span(),
+                )),
+            }
+        }
     }
 }
 

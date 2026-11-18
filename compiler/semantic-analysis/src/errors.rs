@@ -500,8 +500,8 @@ pub enum TypeError {
         "`-1` cannot be inferred: the other extents multiply to {known}, which does not divide the receiver's {total} elements"
     )]
     TensorReshapeIndivisible {
-        known: usize,
-        total: usize,
+        known: String,
+        total: String,
         span: Span,
     },
 
@@ -682,8 +682,8 @@ pub enum TypeError {
     )]
     EinsumExtentConflict {
         letter: char,
-        first: usize,
-        second: usize,
+        first: String,
+        second: String,
         span: Span,
     },
 
@@ -708,7 +708,7 @@ pub enum TypeError {
     },
 
     #[error(
-        "`einsum` needs every extent of operand {position} at compile time, but '{name}' is not a number here; contract tensors whose shapes are known where the call is written"
+        "`einsum` needs every lettered extent of operand {position} before run time, but '{name}' is a dynamic axis; contract tensors whose lettered axes are static"
     )]
     EinsumSymbolicExtent {
         position: usize,

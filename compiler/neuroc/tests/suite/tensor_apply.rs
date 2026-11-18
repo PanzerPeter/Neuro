@@ -310,10 +310,10 @@ func main() -> i32 {
     );
 }
 
-/// The traversal's length and its result buffer are both built from the extents, so a
-/// shape parameter is rejected on the template, exactly as a contraction's is.
+/// A traversal keeps the shape it walks, so a template types it over an extent parameter and
+/// each instance walks its own length.
 #[test]
-fn a_traversal_over_a_shape_generic_tensor_is_rejected() {
+fn a_traversal_over_a_shape_generic_tensor_walks_each_instance() {
     let source = r#"
 func twice<N>(t: &Tensor<i32, [N]>) -> Tensor<i32, [N]> {
     return t.map(|x: i32| -> i32 { x * 2 })
@@ -321,15 +321,11 @@ func twice<N>(t: &Tensor<i32, [N]>) -> Tensor<i32, [N]> {
 
 func main() -> i32 {
     val t: Tensor<i32, [2]> = [1, 2]
-    val m = twice(&t)
-    return m[0]
+    val u: Tensor<i32, [3]> = [1, 2, 3]
+    return twice(&t)[1] * 10 + twice(&u).sum()
 }
 "#;
-    let diagnostics = rejected("apply_symbolic.nr", source);
-    assert!(
-        diagnostics.contains("`.map` needs every extent of the receiver to be known here"),
-        "unexpected diagnostics: {diagnostics}"
-    );
+    assert_eq!(run("apply_symbolic.nr", source), 52);
 }
 
 /// A `?` axis is not a shape parameter: nothing later instantiates it to a number, so

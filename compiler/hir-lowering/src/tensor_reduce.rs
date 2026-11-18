@@ -13,7 +13,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirReduceOp, HirType};
 use shared_types::Span;
 
 use crate::tensor_shape::const_integer;
-use crate::{Lowerer, LoweringError, malformed};
+use crate::{Lowerer, LoweringError, instance_shape, malformed};
 
 pub(crate) const SUM_METHOD: &str = "sum";
 pub(crate) const MEAN_METHOD: &str = "mean";
@@ -51,6 +51,9 @@ impl Lowerer {
         let op = reduce_op(method)?;
 
         let Some(entry) = args.first() else {
+            if shape.iter().product::<usize>() == 0 {
+                return Err(empty_run(method, span));
+            }
             return Ok(HirExpr::new(
                 HirExprKind::TensorReduce {
                     receiver: Box::new(receiver),
@@ -63,6 +66,9 @@ impl Lowerer {
         };
 
         let axis = resolve_axis(&shape, &names, entry, method)?;
+        if shape[axis] == 0 {
+            return Err(empty_run(method, span));
+        }
         let mut result_shape = shape;
         result_shape.remove(axis);
         let mut result_names = names.0;
@@ -81,6 +87,18 @@ impl Lowerer {
             span,
         ))
     }
+}
+
+/// A reduction over no elements. The checker refuses one over concrete extents; over
+/// extent parameters or a splice the run length first exists at an instance.
+fn empty_run(method: &str, span: Span) -> LoweringError {
+    instance_shape(
+        format!(
+            "`.{method}()` reduces over no elements at this instance, so it has no value to \
+             produce; reduce a tensor whose reduced axis is non-empty"
+        ),
+        span,
+    )
 }
 
 fn reduce_op(method: &str) -> Result<HirReduceOp, LoweringError> {

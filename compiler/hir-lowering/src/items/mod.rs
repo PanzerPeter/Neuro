@@ -298,23 +298,35 @@ impl Lowerer {
         // turn enqueue generic-function instances.
         loop {
             if let Some(me) = self.mono_enum_pending.pop() {
-                self.mono_depth = me.depth;
+                self.mono_chain = me.chain;
                 self.emit_mono_enum(&me)?;
                 continue;
             }
             if let Some(ms) = self.mono_struct_pending.pop() {
-                self.mono_depth = ms.depth;
-                self.emit_mono_struct(&ms)?;
+                self.mono_chain = ms.chain;
+                self.emit_mono_struct(&ms).map_err(|error| {
+                    error.in_instance(ms.chain, || {
+                        crate::describe_instance(&ms.base, &ms.const_subst)
+                    })
+                })?;
                 continue;
             }
             if let Some(mm) = self.mono_method_pending.pop() {
-                self.mono_depth = mm.depth;
-                self.emit_mono_method(&mm)?;
+                self.mono_chain = mm.chain;
+                self.emit_mono_method(&mm).map_err(|error| {
+                    error.in_instance(mm.chain, || {
+                        crate::describe_instance(&mm.key.replace("__", "::"), &mm.const_subst)
+                    })
+                })?;
                 continue;
             }
             if let Some(instance) = self.mono_pending.pop() {
-                self.mono_depth = instance.depth;
-                let hir_fn = self.lower_mono_instance(&instance)?;
+                self.mono_chain = instance.chain;
+                let hir_fn = self.lower_mono_instance(&instance).map_err(|error| {
+                    error.in_instance(instance.chain, || {
+                        crate::describe_instance(&instance.fn_name, &instance.const_subst)
+                    })
+                })?;
                 // A `@grad` template's derivative is derived per instance, where the
                 // shapes the reverse pass builds its gradients from are concrete.
                 let attributes = self

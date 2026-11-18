@@ -66,7 +66,12 @@ impl TypeChecker {
     fn check_storable(&mut self, kind: CollectionKind, ty: &Type, span: Span) -> Option<()> {
         let storable = !matches!(
             ty,
-            Type::ConstValue(_) | Type::Shape(_) | Type::Void | Type::DynObject(_) | Type::Unknown
+            Type::ConstValue(_)
+                | Type::Extent(_)
+                | Type::Shape(_)
+                | Type::Void
+                | Type::DynObject(_)
+                | Type::Unknown
         ) && !self.type_holds_reference(ty)
             && !self.holds_function_value(ty);
         if storable {

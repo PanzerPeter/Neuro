@@ -15,7 +15,10 @@ pub(crate) mod traits;
 use super::derivable::{CLONE_TRAIT, COPY_TRAIT, DEBUG_TRAIT, HASHABLE_TRAIT, PARTIAL_EQ_TRAIT};
 use super::{BoundInfo, GenericScope, TypeChecker};
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type, shape_argument};
+use crate::extents::Atom;
+use crate::types::{
+    ArrayLen, CollectionKind, ExtentExpr, TensorAxis, Type, shape_argument, shape_count,
+};
 use ast_types::{Attribute, Item};
 use shared_types::{Identifier, Span};
 use std::collections::HashMap;
@@ -628,9 +631,18 @@ pub(super) fn unify_array_len(
     arg: &ArrayLen,
     subst: &mut HashMap<String, Type>,
 ) -> bool {
+    // An extent expression binds nothing, since `N + 1` against 5 would need solving:
+    // it is compared once every name it reads is bound, and until then it accepts.
+    if let ArrayLen::Expr(expr) = param {
+        if expr.names().iter().any(|name| !subst.contains_key(name)) {
+            return true;
+        }
+        return substitute_array_len(param, subst) == *arg;
+    }
     let bound = match arg {
         ArrayLen::Fixed(v) => Type::ConstValue(*v as u64),
         ArrayLen::Param(name) => Type::Generic(name.clone()),
+        ArrayLen::Expr(expr) => Type::Extent(expr.clone()),
         ArrayLen::Dynamic | ArrayLen::Splice(_) => return param == arg,
     };
     match param {
@@ -641,7 +653,28 @@ pub(super) fn unify_array_len(
                 true
             }
         },
-        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) => param == arg,
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) | ArrayLen::Expr(_) => {
+            param == arg
+        }
+    }
+}
+
+/// Whether `ty` writes an extent expression, which [`unify_array_len`] accepts until the
+/// names it reads are bound: a caller that unified it early checks it again once they are.
+pub(crate) fn writes_extent_expr(ty: &Type) -> bool {
+    match ty {
+        Type::Tensor { element, shape } => {
+            shape
+                .iter()
+                .any(|axis| matches!(axis.extent, ArrayLen::Expr(_)))
+                || writes_extent_expr(element)
+        }
+        Type::Reference { inner, .. } => writes_extent_expr(inner),
+        Type::Array { element, .. } | Type::Slice(element) => writes_extent_expr(element),
+        Type::Tuple(elements) | Type::Collection { args: elements, .. } => {
+            elements.iter().any(writes_extent_expr)
+        }
+        _ => false,
     }
 }
 
@@ -807,7 +840,7 @@ pub(crate) fn conflicting_shape_param(
 fn extent_param_name(extent: &ArrayLen) -> Option<&str> {
     match extent {
         ArrayLen::Param(name) => Some(name),
-        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) => None,
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) | ArrayLen::Expr(_) => None,
     }
 }
 
@@ -820,9 +853,29 @@ pub(super) fn substitute_array_len(size: &ArrayLen, subst: &HashMap<String, Type
             Some(Type::ConstValue(v)) => ArrayLen::Fixed(*v as usize),
             // A rename: conformance maps a trait method's const parameter to the impl's.
             Some(Type::Generic(renamed)) => ArrayLen::Param(renamed.clone()),
+            Some(Type::Extent(extent)) => ArrayLen::Expr(extent.clone()),
             _ => size.clone(),
         },
+        // An extent with no value at these arguments is left as written: lowering
+        // reports it at the call, with the arguments that left it none.
+        ArrayLen::Expr(extent) => extent
+            .substitute(&|atom| substituted_atom(atom, subst))
+            .ok()
+            .and_then(ArrayLen::from_extent)
+            .unwrap_or_else(|| size.clone()),
         ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) => size.clone(),
+    }
+}
+
+/// What a parameter or a shape's count stands for under `subst`, `None` when unbound.
+fn substituted_atom(atom: &Atom, subst: &HashMap<String, Type>) -> Option<ExtentExpr> {
+    match (atom, subst.get(atom.name()?)?) {
+        (Atom::Param(_), Type::ConstValue(v)) => Some(ExtentExpr::constant(i128::from(*v))),
+        (Atom::Param(_), Type::Generic(renamed)) => Some(ExtentExpr::param(renamed)),
+        (Atom::Param(_), Type::Extent(extent)) => Some(extent.clone()),
+        (Atom::Count(_), Type::Shape(axes)) => shape_count(axes),
+        (Atom::Count(_), Type::Generic(renamed)) => Some(ExtentExpr::count(renamed)),
+        _ => None,
     }
 }
 

@@ -11,11 +11,13 @@
 //! not work out here is a divergence between the two surfaces and becomes a
 //! `LoweringError`, exactly as the governing rule in this slice's CONTEXT.md requires.
 
+use std::collections::HashMap;
+
 use ast_types::{BinaryOp, Expr, UnaryOp};
 use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirType};
 use shared_types::{Literal, Span};
 
-use crate::{Lowerer, LoweringError, malformed};
+use crate::{Lowerer, LoweringError, instance_shape, malformed};
 
 pub(crate) const TRANSPOSE_METHOD: &str = "t";
 pub(crate) const RESHAPE_METHOD: &str = "reshape";
@@ -64,7 +66,12 @@ impl Lowerer {
         let shape = crate::static_extents(&shape)?;
         let cast = match method {
             TRANSPOSE_METHOD => transpose(&shape, &names)?,
-            RESHAPE_METHOD => reshape(&shape, args, &|name| self.reshape_constant(name))?,
+            RESHAPE_METHOD => reshape(
+                &shape,
+                args,
+                &|expr| self.reshape_extent(expr, CONST_FOLD_DEPTH),
+                span,
+            )?,
             PERMUTE_METHOD => permute(&shape, &names, args)?,
             FLATTEN_METHOD => flatten(&shape, &names, args)?,
             other => return Err(malformed(format!("`.{other}` is not a shape method"))),
@@ -86,53 +93,49 @@ impl Lowerer {
 }
 
 impl Lowerer {
-    /// The value expression a `.reshape` extent's name folds through, mirroring the
-    /// checker: a local binding shadows a constant and is a run-time value.
-    fn reshape_constant(&self, name: &str) -> Option<&Expr> {
-        if self.lookup_local(name).is_some() {
-            return None;
+    /// A `.reshape` extent's value, mirroring the checker: a literal, a constant or an
+    /// extent parameter of the instance, or arithmetic over these. A local binding
+    /// shadows both and is a run-time value. Checked, like the checker's fold.
+    fn reshape_extent(&self, expr: &Expr, depth: u32) -> Option<i128> {
+        let depth = depth.checked_sub(1)?;
+        match expr {
+            Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
+            Expr::Paren(inner, _) => self.reshape_extent(inner, depth),
+            Expr::Unary {
+                op: UnaryOp::Negate,
+                operand,
+                ..
+            } => self.reshape_extent(operand, depth)?.checked_neg(),
+            Expr::Identifier(ident) => {
+                if self.lookup_local(&ident.name).is_some() {
+                    return None;
+                }
+                if let Some(value) = self.const_subst.get(&ident.name) {
+                    return Some(i128::from(*value));
+                }
+                self.reshape_extent(self.constant_values.get(&ident.name)?, depth)
+            }
+            Expr::Binary {
+                left, op, right, ..
+            } => {
+                let l = self.reshape_extent(left, depth)?;
+                let r = self.reshape_extent(right, depth)?;
+                match op {
+                    BinaryOp::Add => l.checked_add(r),
+                    BinaryOp::Subtract => l.checked_sub(r),
+                    BinaryOp::Multiply => l.checked_mul(r),
+                    BinaryOp::Divide if l >= 0 && r > 0 => l.checked_div(r),
+                    BinaryOp::Modulo if l >= 0 && r > 0 => l.checked_rem(r),
+                    _ => None,
+                }
+            }
+            _ => None,
         }
-        self.constant_values.get(name)
     }
 }
 
 /// How many constants deep an extent folds; the checker uses the same bound.
 const CONST_FOLD_DEPTH: u32 = 64;
-
-/// Fold a `.reshape` extent: a literal, a negation or parentheses around one, a
-/// constant's name, or arithmetic over these. Checked, like the checker's fold.
-fn fold_extent<'a>(
-    expr: &'a Expr,
-    depth: u32,
-    constant: &dyn Fn(&str) -> Option<&'a Expr>,
-) -> Option<i128> {
-    let depth = depth.checked_sub(1)?;
-    match expr {
-        Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
-        Expr::Paren(inner, _) => fold_extent(inner, depth, constant),
-        Expr::Unary {
-            op: UnaryOp::Negate,
-            operand,
-            ..
-        } => fold_extent(operand, depth, constant)?.checked_neg(),
-        Expr::Identifier(ident) => fold_extent(constant(&ident.name)?, depth, constant),
-        Expr::Binary {
-            left, op, right, ..
-        } => {
-            let l = fold_extent(left, depth, constant)?;
-            let r = fold_extent(right, depth, constant)?;
-            match op {
-                BinaryOp::Add => l.checked_add(r),
-                BinaryOp::Subtract => l.checked_sub(r),
-                BinaryOp::Multiply => l.checked_mul(r),
-                BinaryOp::Divide => l.checked_div(r),
-                BinaryOp::Modulo => l.checked_rem(r),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
 
 fn transpose(shape: &[usize], names: &AxisNames) -> Result<ShapeCast, LoweringError> {
     if shape.len() != 2 {
@@ -148,10 +151,14 @@ fn transpose(shape: &[usize], names: &AxisNames) -> Result<ShapeCast, LoweringEr
     })
 }
 
-fn reshape<'a>(
+/// `.reshape`'s result shape. Over a concrete receiver the checker has validated every
+/// count; inside a shape-generic instance this is where they are first known, so a count
+/// that does not work out is the language's per-instance error, not a checker escape.
+fn reshape(
     shape: &[usize],
-    args: &'a [Expr],
-    constant: &dyn Fn(&str) -> Option<&'a Expr>,
+    args: &[Expr],
+    extent: &dyn Fn(&Expr) -> Option<i128>,
+    span: Span,
 ) -> Result<ShapeCast, LoweringError> {
     let total: usize = shape.iter().product();
     let entries = axis_list(args, RESHAPE_METHOD)?;
@@ -159,35 +166,47 @@ fn reshape<'a>(
     let mut extents: Vec<Option<usize>> = Vec::with_capacity(entries.len());
     let mut inferred_at = None;
     for entry in entries {
-        let value = fold_extent(entry, CONST_FOLD_DEPTH, constant).ok_or_else(|| {
-            malformed("`.reshape` reached lowering with a non-constant extent".to_string())
-        })?;
-        if value == INFERRED_EXTENT {
+        let value = extent(entry);
+        if value == Some(INFERRED_EXTENT) {
             inferred_at = Some(extents.len());
             extents.push(None);
             continue;
         }
-        let extent = usize::try_from(value)
-            .map_err(|_| malformed("`.reshape` reached lowering with a negative extent".into()))?;
-        extents.push(Some(extent));
+        let Some(value) = value.and_then(|value| usize::try_from(value).ok()) else {
+            return Err(instance_shape(
+                "a `.reshape` extent has no value at this instance: it divides by zero or is \
+                 negative, and an axis has a non-negative extent"
+                    .to_string(),
+                entry.span(),
+            ));
+        };
+        extents.push(Some(value));
     }
 
     let known: usize = extents.iter().flatten().product();
     if let Some(position) = inferred_at {
         if known == 0 || !total.is_multiple_of(known) {
-            return Err(malformed(
-                "`.reshape` reached lowering with an extent that cannot be inferred".to_string(),
+            return Err(instance_shape(
+                format!(
+                    "`-1` cannot be inferred at this instance: the other extents multiply to \
+                     {known}, which does not divide the receiver's {total} elements"
+                ),
+                span,
             ));
         }
         extents[position] = Some(total / known);
     }
 
     let resolved: Vec<usize> = extents.into_iter().flatten().collect();
-    if resolved.iter().product::<usize>() != total {
-        return Err(malformed(format!(
-            "`.reshape` reached lowering changing {total} elements into {}",
-            resolved.iter().product::<usize>()
-        )));
+    let count: usize = resolved.iter().product();
+    if count != total {
+        return Err(instance_shape(
+            format!(
+                "`.reshape` would hold {count} elements at this instance but the receiver \
+                 holds {total}; a reshape cannot change how many elements a tensor has"
+            ),
+            span,
+        ));
     }
     Ok(ShapeCast {
         names: AxisNames(vec![None; resolved.len()]),
@@ -303,6 +322,70 @@ fn reorder_names(names: &AxisNames, order: &[usize]) -> AxisNames {
             .map(|axis| names.0.get(*axis).cloned().flatten())
             .collect(),
     )
+}
+
+/// The value of an extent expression written in a type, `D / H`, under the instance's
+/// extents. `None` where it has none: a zero divisor, or a negative operand of `/` or
+/// `%`, which no extent is. The caller refuses a negative result. `count` is a shape
+/// parameter's element count, for `S.count()`.
+pub(crate) fn extent_value(
+    expr: &Expr,
+    const_subst: &HashMap<String, u64>,
+    count: &dyn Fn(&str) -> Option<i128>,
+) -> Option<i128> {
+    match expr {
+        Expr::Literal(Literal::Integer(value, _), _) => Some(*value),
+        Expr::Identifier(ident) => const_subst.get(&ident.name).map(|v| i128::from(*v)),
+        Expr::Paren(inner, _) => extent_value(inner, const_subst, count),
+        Expr::Call { func, .. } => match &**func {
+            Expr::FieldAccess { object, .. } => match &**object {
+                Expr::Identifier(shape) => count(&shape.name),
+                _ => None,
+            },
+            _ => None,
+        },
+        Expr::Binary {
+            left, op, right, ..
+        } => {
+            let l = extent_value(left, const_subst, count)?;
+            let r = extent_value(right, const_subst, count)?;
+            match op {
+                BinaryOp::Add => l.checked_add(r),
+                BinaryOp::Subtract => l.checked_sub(r),
+                BinaryOp::Multiply => l.checked_mul(r),
+                BinaryOp::Divide if l >= 0 && r > 0 => l.checked_div(r),
+                BinaryOp::Modulo if l >= 0 && r > 0 => l.checked_rem(r),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// An extent expression as the program spells it, for a diagnostic.
+pub(crate) fn extent_text(expr: &Expr) -> String {
+    match expr {
+        Expr::Literal(Literal::Integer(value, _), _) => value.to_string(),
+        Expr::Identifier(ident) => ident.name.clone(),
+        Expr::Paren(inner, _) => format!("({})", extent_text(inner)),
+        Expr::Call { func, .. } => match &**func {
+            Expr::FieldAccess { object, .. } => format!("{}.count()", extent_text(object)),
+            _ => "?".to_string(),
+        },
+        Expr::Binary {
+            left, op, right, ..
+        } => {
+            let symbol = match op {
+                BinaryOp::Add => "+",
+                BinaryOp::Subtract => "-",
+                BinaryOp::Multiply => "*",
+                BinaryOp::Divide => "/",
+                _ => "%",
+            };
+            format!("{} {symbol} {}", extent_text(left), extent_text(right))
+        }
+        _ => "?".to_string(),
+    }
 }
 
 /// The value of an integer constant expression written in an axis list.

@@ -10,7 +10,7 @@ use crate::type_checkers::backward::{
 };
 use crate::type_checkers::tensor_apply::is_apply_method;
 use crate::type_checkers::tensor_reduce::is_reduce_method;
-use crate::type_checkers::tensor_shape::is_shape_method;
+use crate::type_checkers::tensor_shape::{FLATTEN_METHOD, RESHAPE_METHOD, is_shape_method};
 use crate::type_checkers::tensor_sort::is_sort_method;
 use crate::type_checkers::tensors::DEVICE_TYPE_NAME;
 use crate::types::{CollectionKind, Type};
@@ -90,10 +90,16 @@ impl TypeChecker {
         call_span: Span,
     ) -> Option<Type> {
         // Every method below that counts or picks axes needs a rank, and a spliced shape
-        // has none until it is instantiated.
+        // has none until it is instantiated. What is valid at every rank goes on to its
+        // own check: a reshape or a whole flatten only counts elements, a traversal
+        // keeps the shape it walks, and a reduction finds its axis among the written ones.
+        let rank_free = method == RESHAPE_METHOD
+            || (method == FLATTEN_METHOD && args.is_empty())
+            || is_reduce_method(method)
+            || is_apply_method(method);
         if let Type::Tensor { shape, .. } = recv.referent()
+            && !rank_free
             && (is_shape_method(method)
-                || is_reduce_method(method)
                 || is_apply_method(method)
                 || is_sort_method(method)
                 || method == ITEM_METHOD)

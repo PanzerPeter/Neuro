@@ -5,7 +5,8 @@ use super::declarations::traits::names_self;
 use super::operator_traits::is_operator_trait;
 use super::tensors::TENSOR_TYPE_NAME;
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, CollectionKind, TensorAxis, Type, shape_argument};
+use crate::types::{ArrayLen, CollectionKind, ExtentExpr, TensorAxis, Type, shape_argument};
+use shared_types::Literal;
 
 /// The qualifier an associated-type path carries in its name, as the parser spells it.
 pub(crate) const SELF_ASSOC_PREFIX: &str = "Self::";
@@ -366,15 +367,8 @@ impl TypeChecker {
                     _ => Some(count),
                 });
                 if elements.is_none_or(|count| count > u64::from(u32::MAX)) {
-                    let extents: Vec<String> = shape
-                        .iter()
-                        .map(|dim| match &dim.extent {
-                            ast_types::TensorExtent::Literal(extent) => extent.to_string(),
-                            ast_types::TensorExtent::Dynamic(_) => "?".to_string(),
-                            ast_types::TensorExtent::Param(ident) => ident.name.clone(),
-                            ast_types::TensorExtent::Splice(ident) => format!("..{}", ident.name),
-                        })
-                        .collect();
+                    let extents: Vec<String> =
+                        axes.iter().map(|axis| axis.extent.to_string()).collect();
                     self.record_error(TypeError::TensorTooLarge {
                         shape: format!("[{}]", extents.join(", ")),
                         max: u32::MAX,
@@ -426,6 +420,18 @@ impl TypeChecker {
     fn resolve_tensor_dim(&mut self, dim: &ast_types::TensorDim) -> Option<ArrayLen> {
         match &dim.extent {
             ast_types::TensorExtent::Literal(extent) => Some(ArrayLen::Fixed(*extent)),
+            ast_types::TensorExtent::Expr(expr) => {
+                let extent = self.resolve_extent_expr(expr)?;
+                let resolved = ArrayLen::from_extent(extent);
+                if resolved.is_none() {
+                    self.record_error(TypeError::ConstHasNoValue {
+                        reason: "the extent is negative, and no axis has a negative extent"
+                            .to_string(),
+                        span: expr.span(),
+                    });
+                }
+                resolved
+            }
             ast_types::TensorExtent::Dynamic(_) => Some(ArrayLen::Dynamic),
             ast_types::TensorExtent::Param(ident) => {
                 if self.value_consts.contains(&ident.name) {
@@ -474,6 +480,67 @@ impl TypeChecker {
                     None
                 }
             },
+        }
+    }
+
+    /// An extent expression over literals and extent parameters in scope, in normal form.
+    /// The parser admits nothing else, so a parameter that is unknown, a shape, or a
+    /// `const` is the only way one can fail here, apart from an operation with no value.
+    fn resolve_extent_expr(&mut self, expr: &ast_types::Expr) -> Option<ExtentExpr> {
+        let no_value = |span| TypeError::ConstHasNoValue {
+            reason: "it divides by zero or overflows, so the extent has no value".to_string(),
+            span,
+        };
+        match expr {
+            ast_types::Expr::Literal(Literal::Integer(value, _), _) => {
+                Some(ExtentExpr::constant(*value))
+            }
+            ast_types::Expr::Paren(inner, _) => self.resolve_extent_expr(inner),
+            ast_types::Expr::Identifier(ident) => {
+                let dim = ast_types::TensorDim {
+                    name: None,
+                    extent: ast_types::TensorExtent::Param(ident.clone()),
+                };
+                self.resolve_tensor_dim(&dim)?.extent()
+            }
+            ast_types::Expr::Binary {
+                left,
+                op,
+                right,
+                span,
+            } => {
+                let left = self.resolve_extent_expr(left)?;
+                let right = self.resolve_extent_expr(right)?;
+                let combined = match op {
+                    ast_types::BinaryOp::Add => left.checked_add(&right),
+                    ast_types::BinaryOp::Subtract => left.checked_sub(&right),
+                    ast_types::BinaryOp::Multiply => left.checked_mul(&right),
+                    ast_types::BinaryOp::Divide => left.quot(&right),
+                    ast_types::BinaryOp::Modulo => left.rem(&right),
+                    _ => Err(crate::extents::NoValue),
+                };
+                combined
+                    .map_err(|_| self.record_error(no_value(*span)))
+                    .ok()
+            }
+            // `S.count()`, which the parser builds only over a name.
+            ast_types::Expr::Call { func, .. } => {
+                let ast_types::Expr::FieldAccess { object, .. } = &**func else {
+                    return None;
+                };
+                let ast_types::Expr::Identifier(ident) = &**object else {
+                    return None;
+                };
+                let dim = ast_types::TensorDim {
+                    name: None,
+                    extent: ast_types::TensorExtent::Splice(ident.clone()),
+                };
+                self.resolve_tensor_dim(&dim)?.extent()
+            }
+            other => {
+                self.record_error(no_value(other.span()));
+                None
+            }
         }
     }
 

@@ -244,7 +244,11 @@ impl Lowerer {
         let mut names = Vec::with_capacity(shape.len());
         for dim in shape {
             let ast_types::TensorExtent::Splice(id) = &dim.extent else {
-                extents.push(crate::resolve_tensor_dim(dim, &self.const_subst)?);
+                extents.push(crate::resolve_tensor_dim(
+                    dim,
+                    &self.const_subst,
+                    &|shape| self.shape_count(shape),
+                )?);
                 names.push(dim.name.as_ref().map(|n| n.name.clone()));
                 continue;
             };
@@ -258,6 +262,14 @@ impl Lowerer {
             names.extend(bound_names.0.iter().cloned());
         }
         Ok((extents, names))
+    }
+
+    /// The element count of the shape a shape parameter is bound to, for `S.count()`.
+    fn shape_count(&self, shape: &str) -> Option<i128> {
+        let (extents, _) = carried_shape(self.type_subst.get(shape)?)?;
+        extents.iter().try_fold(1i128, |count, extent| {
+            count.checked_mul(i128::try_from((*extent)?).ok()?)
+        })
     }
 
     /// A shape argument, `[2, 3]` in `Dense<[2, 3]>`, as the value a shape parameter is

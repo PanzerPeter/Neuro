@@ -707,7 +707,7 @@ impl TypeChecker {
     /// `Type::Generic` whatever its kind, so its declaration decides.
     pub(crate) fn arg_kind(&self, arg: &Type) -> &'static str {
         match arg {
-            Type::ConstValue(_) => "const",
+            Type::ConstValue(_) | Type::Extent(_) => "const",
             Type::Shape(_) => "shape",
             Type::Generic(name) => match self.const_scope.get(name) {
                 Some(Type::Shape(_)) => "shape",

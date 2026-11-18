@@ -960,9 +960,11 @@ which size nothing; `enter/exit_generic_scope` sets the scopes. An array length 
 extent naming a `value_consts` entry, and an `impl` passing one to its type's extent
 (`register_generic_impl`), is `ConstParamSizes`, whose hint is the bare form. `Type::Array.size` and the `extent` of every
 `TensorAxis` in `Type::Tensor.shape` are an `ArrayLen`
-(`Fixed` / `Param` / `Dynamic`, the last reachable only from a tensor's `?`) and a
+(`Fixed` / `Param` / `Dynamic`, the last reachable only from a tensor's `?`, plus a tensor's
+`Splice` and `Expr`, below) and a
 `Type::ConstValue` marker carries a const argument through
-monomorphization. `check_generic_call` seeds turbofish arguments, infers const params from
+monomorphization; `Type::Extent` carries one computed from the caller's own parameters
+(`M * 2` passed to `N`). `check_generic_call` seeds turbofish arguments, infers const params from
 array-argument lengths and tensor-argument extents (`unify_array_len`, `unify_tensor_shape`),
 enforces that every param is bound, and checks `where`
 predicates (`eval_const_predicate`); generic-struct instantiation does the same from field values.
@@ -974,7 +976,19 @@ Errors: `UnknownArrayLength`, `ConstParamSizes`, `ConstPredicateViolated`,
 
 **Shape generics.** A tensor extent written as a name is an extent parameter the parser has
 already re-kinded, so nothing here treats it specially except where a symbolic extent has no
-number to check against. `resolve_type` maps a `TensorExtent::Param` to `ArrayLen::Param` when
+number to check against. An extent computed from parameters is `ArrayLen::Expr` over an
+`ExtentExpr` (`extents.rs`): a polynomial with integer coefficients over atoms (a parameter,
+`S.count()`, a floored `/` or `%` that did not divide out), kept in a normal form so equal
+extents compare equal by `==` (`[2 * N]` is `[N, 2].flatten()`'s type). `ArrayLen::from_extent`
+keeps a constant `Fixed` and a lone parameter `Param`, so one extent has one spelling, and
+`shape_count` is a shape's element count. `resolve_extent_expr` builds one from a written
+`TensorExtent::Expr`. `.reshape`, `.flatten`, the reductions, the traversals and `einsum`
+accept extent parameters, and the first three a splice where the operation is valid at every
+rank: the result is typed symbolically, a count or an empty run is refused here only when
+it is concrete, and the rest is the per-instance check lowering makes (`InstanceShape`). A
+symbolic reshape count is never refused here: `[N, 2]` into `[N, 3]` holds at `N = 0`. An `ArrayLen::Expr` in a template binds nothing (`unify_array_len` accepts it while a
+name it reads is unbound), so a call or a struct literal re-unifies such a parameter or field
+once every argument has bound what it can (`writes_extent_expr`). `resolve_type` maps a `TensorExtent::Param` to `ArrayLen::Param` when
 `const_scope` knows the name and reports `UnknownTensorDimension` otherwise.
 `unify_tensor_shape` binds every axis even after one has failed, so a parameter the rest of the
 shape does bind is not also reported as uninferable, and `conflicting_shape_param` turns the
@@ -995,7 +1009,9 @@ splits the argument around the template's one splice and binds the parameter to 
 axis binds none. `check_parameter_splices` refuses a parameter or field shape splicing twice
 (`ShapeSplicedTwice`). `reject_splice` (`tensors.rs`) refuses whatever counts or picks axes on a
 spliced shape (`TensorSpliceRank`): an index, a matrix axis of `@`, a lettered axis of `einsum`,
-and the shape, reduce, apply, sort and `.item()` methods (guarded once at the top of `resolve_builtin_method`). `broadcast_shapes`
+and the shape, sort and `.item()` methods (guarded once at the top of `resolve_builtin_method`),
+except `.reshape`, a whole `.flatten()`, the traversals and the reductions, which are valid at
+every rank; a reduction's axis must then be a written one (`-1` of `[..S, N]`, not `0`). `broadcast_shapes`
 joins a splice only with the same splice. A size parameter in scope passed on, to a turbofish or
 as a type argument, resolves to `Type::Generic` (`seed_turbofish`, `resolve_type`), and
 `unify_array_len` binds a callee extent to a caller's the same way. Struct and enum

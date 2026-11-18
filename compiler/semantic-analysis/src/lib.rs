@@ -2,6 +2,7 @@
 // Public API: the `type_check()` entry point.
 
 mod errors;
+mod extents;
 mod symbol_table;
 pub(crate) mod type_checkers;
 mod types;

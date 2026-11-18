@@ -547,8 +547,17 @@ impl Lowerer {
             &mut const_subst,
         )?;
 
-        let (param_tys, ret) =
-            self.instance_signature(&template, subst.clone(), const_subst.clone())?;
+        // The signature is resolved here, at the request, so an extent in it with no value
+        // at these arguments is reported against this call's chain.
+        let request = crate::Chain {
+            depth: self.mono_chain.depth,
+            origin: self.mono_chain.origin.or(Some(span)),
+        };
+        let (param_tys, ret) = self
+            .instance_signature(&template, subst.clone(), const_subst.clone())
+            .map_err(|error| {
+                error.in_instance(request, || crate::describe_instance(name, &const_subst))
+            })?;
         let lowered_args = coerce_to_params(lowered_args, &param_tys);
 
         let mangled = crate::mangle_instance(name, &template.generics, &subst, &const_subst);
@@ -560,10 +569,10 @@ impl Lowerer {
             self.grad_params.insert(mangled.clone(), grad);
         }
         if !self.mono_seen.contains(&mangled) {
-            let depth = self.next_instance_depth(name)?;
+            let chain = self.next_link(name, Some(span))?;
             self.mono_seen.insert(mangled.clone());
             self.mono_pending.push(crate::MonoInstance {
-                depth,
+                chain,
                 mangled: mangled.clone(),
                 fn_name: name.to_string(),
                 subst,
@@ -882,7 +891,7 @@ impl Lowerer {
     ) -> Result<HirExpr, LoweringError> {
         let key = format!("{}__{}", type_name, member);
         let (name, params, ret) =
-            self.instantiate_generic_method(&key, type_args, &lowered_args)?;
+            self.instantiate_generic_method(&key, type_args, &lowered_args, span)?;
         let lowered_args = coerce_to_params(lowered_args, &params);
         let callee = HirExpr::new(
             HirExprKind::Path {
@@ -1200,7 +1209,7 @@ impl Lowerer {
         if let Some(key) = self.generic_method_key(recv.referent(), method) {
             let lowered_args = self.lower_generic_method_args(&key, type_args, args)?;
             let (name, params, ret) =
-                self.instantiate_generic_method(&key, type_args, &lowered_args)?;
+                self.instantiate_generic_method(&key, type_args, &lowered_args, span)?;
             let lowered_args = coerce_to_params(lowered_args, &params);
             let callee = HirExpr::new(
                 HirExprKind::FieldAccess {

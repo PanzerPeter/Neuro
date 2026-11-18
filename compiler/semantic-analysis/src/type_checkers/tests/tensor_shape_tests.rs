@@ -261,15 +261,18 @@ func main() -> i32 {
     );
 }
 
-/// An extent that is a shape parameter is not known until the instantiation, so a
-/// reshape written inside a shape-generic function has no element count to check.
+/// A reshape over extent parameters types its result symbolically, in the normal form a
+/// written extent expression compares against: `[N, 2]` to `[-1]` is `[2 * N]`.
 #[test]
-fn a_shape_parameter_extent_is_rejected_by_reshape() {
+fn a_shape_parameter_extent_reshapes_symbolically() {
     let errors = semantic_errors(
         r#"
-func flatten_rows<N>(t: Tensor<i32, [N, 2]>) -> i32 {
-    val f = t.reshape([-1])
-    return 0
+func flatten_rows<N>(t: Tensor<i32, [N, 2]>) -> Tensor<i32, [N * 2]> {
+    t.reshape([-1])
+}
+
+func split<B, D, H>(t: Tensor<i32, [B, D]>) -> Tensor<i32, [B, H, D / H]> {
+    t.reshape([B, H, -1])
 }
 
 func main() -> i32 {
@@ -277,10 +280,23 @@ func main() -> i32 {
 }
 "#,
     );
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::TensorShapeCastSymbolicExtent { .. })),
-        "a symbolic extent has no element count; got {errors:?}"
+    assert!(errors.is_empty(), "expected no errors; got {errors:?}");
+}
+
+/// Two symbolic counts that differ are not refused in the template: `[N, 2]` into
+/// `[N, 3]` holds at `N = 0`, so each instance answers. Two concrete ones still are.
+#[test]
+fn a_symbolic_count_mismatch_waits_for_the_instance() {
+    let errors = semantic_errors(
+        r#"
+func widen<N>(t: Tensor<i32, [N, 2]>) -> Tensor<i32, [N, 3]> {
+    t.reshape([N, 3])
+}
+
+func main() -> i32 {
+    return 0
+}
+"#,
     );
+    assert!(errors.is_empty(), "expected no errors; got {errors:?}");
 }

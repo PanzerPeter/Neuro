@@ -319,7 +319,7 @@ fn a_parameter_shape_splices_at_most_once() {
 fn an_operation_that_needs_a_rank_is_refused_on_a_splice() {
     for (body, operation) in [
         ("x[0]", "an index"),
-        ("x.sum()", "`.sum`"),
+        ("x.sum(axis: 0)", "`.sum` along axis 0"),
         ("x.item()", "`.item`"),
     ] {
         let source = format!(

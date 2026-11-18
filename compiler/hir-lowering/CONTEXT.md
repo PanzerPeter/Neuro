@@ -26,7 +26,8 @@ would couple two feature slices (VSA: duplicate over couple). Several tables her
 deliberate duplicates of the checker's (the collection method surface, the `val-else` binding
 table, return-position `impl Trait` resolution), and a divergence between the two surfaces as a
 `LoweringError`, which is the point. Lowering assumes well-typedness: a shape the checker should
-have rejected is a `LoweringError`, never a panic. The one exception is `NotDifferentiable`, below.
+have rejected is a `LoweringError`, never a panic. The exceptions are user-facing:
+`NotDifferentiable`, below, and `InstanceShape`, a shape rule only an instance can check.
 
 A registration pre-pass mirrors the checker's: struct field tables (plus the five derives'
 intent, in `copy_structs` / `clone_structs` / `partial_eq_structs` / `debug_structs` /
@@ -219,7 +220,7 @@ exclusive range), forming `high - n` only once `high` clears the type's minimum 
 test overflows. Its stride must be an integer literal: the replay has no run-time guard to stop a
 zero one, so any other stride is refused.
 Anything else, inactive or not, is
-`LoweringError::NotDifferentiable { function, construct, span }`, the one user-facing variant of
+`LoweringError::NotDifferentiable { function, construct, span }`, a user-facing variant of
 this enum: the transform owns its rule set, so it is the one place that can say precisely what
 it cannot differentiate, and it says where. `neuroc` renders it like a type error. The signature
 rules (loss type, `&mut` tensor parameters) are the checker's, in `semantic-analysis`; the
@@ -462,9 +463,23 @@ parameter open), and keeps the arguments in their own order. An argument is lowe
 parameter only when that is a scalar or `&string`, written as one or through a type parameter
 already bound, so a literal there takes it, as the checker types it.
 
-Every function, struct and enum instance records its depth: one more than the body that requested
-it (`mono_depth`, set as each worklist item is emitted). Past `MAX_INSTANCE_DEPTH` the request is
-`InstantiationTooDeep`. A generic that calls itself with a type built from its own parameter
+Every function, struct and enum instance records its `Chain`: a depth one more than the body that
+requested it, and the origin, the call in ordinary code the chain of requests started from
+(`mono_chain`, set as each worklist item is emitted; `next_link` makes the next one). Past
+`MAX_INSTANCE_DEPTH` the request is `InstantiationTooDeep`.
+
+**Per-instance shape checks.** The checker types a shape-generic reshape, flatten or
+reduction symbolically and leaves the counts to the instance, where they are first concrete. So
+`.reshape` (`tensor_shape.rs`) refuses a count that changes, a `-1` that does not divide or an
+entry with no value; a reduction (`tensor_reduce.rs`) refuses an empty run; and an extent
+expression in a type (`resolve_tensor_dim`, `extent_value`) refuses one with no value at the
+instance's extents. Each is `instance_shape(check, span)`, a `LoweringError::InstanceShape`
+with no origin yet: the drain loop (`in_instance`) gives it the instance's chain origin and a
+description (`describe_instance`) as it leaves the instance, and `lower_generic_call` does the same
+for a signature resolved at the request. A generic struct instance is requested by a type, so
+its methods' checks carry no origin and are reported at the operation. A `where` predicate the
+checker refuses first means lowering never runs, which is how a predicate moves the error to the
+signature. A generic that calls itself with a type built from its own parameter
 (`grow(Option::Some(x))` inside `grow<T>`) needs a new instance per level, which the checker, seeing
 one template, cannot tell; without the limit lowering would never finish.
 

@@ -107,8 +107,31 @@ fn collect_shape_names(shape: &[TensorDim], out: &mut Vec<(String, bool)>) {
         match &dim.extent {
             TensorExtent::Param(name) => out.push((name.name.clone(), false)),
             TensorExtent::Splice(name) => out.push((name.name.clone(), true)),
+            TensorExtent::Expr(expr) => collect_extent_expr_names(expr, out),
             TensorExtent::Literal(_) | TensorExtent::Dynamic(_) => {}
         }
+    }
+}
+
+/// Every name an extent expression reads is an extent use (`D / H` sizes by both), and
+/// one it counts is a shape use.
+fn collect_extent_expr_names(expr: &ast_types::Expr, out: &mut Vec<(String, bool)>) {
+    match expr {
+        ast_types::Expr::Identifier(name) => out.push((name.name.clone(), false)),
+        ast_types::Expr::Paren(inner, _) => collect_extent_expr_names(inner, out),
+        ast_types::Expr::Binary { left, right, .. } => {
+            collect_extent_expr_names(left, out);
+            collect_extent_expr_names(right, out);
+        }
+        // `S.count()`: the extent reads `S` as a whole shape.
+        ast_types::Expr::Call { func, .. } => {
+            if let ast_types::Expr::FieldAccess { object, .. } = &**func
+                && let ast_types::Expr::Identifier(name) = &**object
+            {
+                out.push((name.name.clone(), true));
+            }
+        }
+        _ => {}
     }
 }
 

@@ -233,8 +233,11 @@ an `Argument errors found in` header.
 
 `report_lowering_error` renders a lowering failure. `LoweringError::NotDifferentiable`, the
 derivative transform's refusal of a construct in a `@grad` body, carries a span and goes through
-`render_diagnostic` like a type error, in both `check` and `compile`; every other variant is a
-checker escape with no location and keeps the plain `HIR lowering error:` line.
+`render_diagnostic` like a type error, in both `check` and `compile`. `InstanceShape`, a shape
+check that fails at one instance of a generic, is rendered at its origin (the call that
+supplied the extents, else the operation) with a `note` at the operation naming the instance.
+Every other variant is a checker escape with no location and keeps the plain
+`HIR lowering error:` line.
 
 The column counts characters, not bytes: a caret placed at a byte column drifts off the text
 it underlines as soon as the line holds a multi-byte character.

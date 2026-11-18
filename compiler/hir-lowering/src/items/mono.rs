@@ -51,7 +51,7 @@ impl Lowerer {
         };
         let mangled = crate::mangle_struct_instance(base, args);
         if !self.struct_instances.contains_key(&mangled) {
-            let depth = self.next_instance_depth(base)?;
+            let chain = self.next_link(base, None)?;
             self.struct_instances
                 .insert(mangled.clone(), (base.to_string(), args.to_vec()));
             let (subst, const_subst) = split_mono_args(&template.generics, args);
@@ -81,7 +81,7 @@ impl Lowerer {
 
             self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
             self.mono_struct_pending.push(crate::MonoStruct {
-                depth,
+                chain,
                 base: base.to_string(),
                 mangled: mangled.clone(),
                 subst,
@@ -453,7 +453,7 @@ impl Lowerer {
         };
         let mangled = crate::mangle_struct_instance(base, args);
         if !self.enums.contains_key(&mangled) {
-            let depth = self.next_instance_depth(base)?;
+            let chain = self.next_link(base, None)?;
             let (subst, const_subst) = split_mono_args(&template.generics, args);
             let saved_ty = std::mem::replace(&mut self.type_subst, subst.clone());
             let saved_c = std::mem::replace(&mut self.const_subst, const_subst.clone());
@@ -467,7 +467,7 @@ impl Lowerer {
                 .insert(mangled.clone(), args.to_vec());
             self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
             self.mono_enum_pending.push(crate::MonoEnum {
-                depth,
+                chain,
                 base: base.to_string(),
                 mangled: mangled.clone(),
                 subst,
@@ -586,6 +586,7 @@ impl Lowerer {
         key: &str,
         type_args: &[ast_types::GenericArg],
         lowered_args: &[neuro_hir::HirExpr],
+        span: shared_types::Span,
     ) -> Result<(String, Vec<HirType>, HirType), LoweringError> {
         let template = self.generic_methods.get(key).cloned().ok_or_else(|| {
             LoweringError::UnresolvedCall {
@@ -631,9 +632,9 @@ impl Lowerer {
         self.functions
             .insert(instance_key.clone(), (params.clone(), ret.clone()));
         if self.mono_seen.insert(instance_key) {
-            let depth = self.next_instance_depth(key)?;
+            let chain = self.next_link(key, Some(span))?;
             self.mono_method_pending.push(crate::MonoMethod {
-                depth,
+                chain,
                 key: key.to_string(),
                 name: name.clone(),
                 subst,
@@ -808,20 +809,54 @@ pub(crate) fn mentions_any(
         ast_types::Type::Generic { args, .. } => args.iter().any(|arg| match arg {
             ast_types::GenericArg::Type(ty) => inner(ty),
             ast_types::GenericArg::Const { .. } => false,
-            ast_types::GenericArg::Shape { dims, .. } => dims.iter().any(
-                |dim| matches!(&dim.extent, ast_types::TensorExtent::Param(id) if open_const(&id.name))
-                    || matches!(&dim.extent, ast_types::TensorExtent::Splice(id) if open_type(&id.name)),
-            ),
+            ast_types::GenericArg::Shape { dims, .. } => dims
+                .iter()
+                .any(|dim| dim_is_open(dim, &open_type, &open_const)),
         }),
         ast_types::Type::Function { params, ret, .. } => params.iter().any(inner) || inner(ret),
         ast_types::Type::Tensor {
             element_type,
             shape,
             ..
-        } => shape.iter().any(
-            |dim| matches!(&dim.extent, ast_types::TensorExtent::Param(id) if open_const(&id.name))
-                || matches!(&dim.extent, ast_types::TensorExtent::Splice(id) if open_type(&id.name)),
-        ) || inner(element_type),
+        } => {
+            shape
+                .iter()
+                .any(|dim| dim_is_open(dim, &open_type, &open_const))
+                || inner(element_type)
+        }
         ast_types::Type::ImplTrait { .. } | ast_types::Type::DynTrait { .. } => false,
+    }
+}
+
+/// Whether a shape entry reads a parameter nothing has bound yet: an extent parameter,
+/// one inside an extent expression, or a splice.
+fn dim_is_open(
+    dim: &ast_types::TensorDim,
+    open_type: &dyn Fn(&str) -> bool,
+    open_const: &dyn Fn(&str) -> bool,
+) -> bool {
+    match &dim.extent {
+        ast_types::TensorExtent::Param(id) => open_const(&id.name),
+        ast_types::TensorExtent::Splice(id) => open_type(&id.name),
+        ast_types::TensorExtent::Expr(expr) => reads_open(expr, open_type, open_const),
+        ast_types::TensorExtent::Literal(_) | ast_types::TensorExtent::Dynamic(_) => false,
+    }
+}
+
+fn reads_open(
+    expr: &ast_types::Expr,
+    open_type: &dyn Fn(&str) -> bool,
+    open_const: &dyn Fn(&str) -> bool,
+) -> bool {
+    match expr {
+        ast_types::Expr::Identifier(id) => open_const(&id.name),
+        ast_types::Expr::Paren(inner, _) => reads_open(inner, open_type, open_const),
+        ast_types::Expr::Binary { left, right, .. } => {
+            reads_open(left, open_type, open_const) || reads_open(right, open_type, open_const)
+        }
+        ast_types::Expr::Call { func, .. } => matches!(&**func,
+            ast_types::Expr::FieldAccess { object, .. }
+                if matches!(&**object, ast_types::Expr::Identifier(id) if open_type(&id.name))),
+        _ => false,
     }
 }

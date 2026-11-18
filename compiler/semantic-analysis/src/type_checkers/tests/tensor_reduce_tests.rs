@@ -163,12 +163,18 @@ func main() -> i32 {
     );
 }
 
+/// Whether an extent parameter's run is empty is asked at each instance, so the template
+/// reduces; an axis reduction keeps the other extents symbolic.
 #[test]
-fn a_shape_parameter_leaves_the_run_length_unknown() {
+fn a_shape_parameter_reduces_and_defers_the_run_length() {
     let errors = semantic_errors(
         r#"
 func total<N>(t: Tensor<i32, [N]>) -> i32 {
     t.sum()
+}
+
+func rows<N, K>(t: &Tensor<i32, [N, K]>) -> Tensor<i32, [N]> {
+    t.sum(axis: -1)
 }
 
 func main() -> i32 {
@@ -176,12 +182,7 @@ func main() -> i32 {
 }
 "#,
     );
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::TensorShapeCastSymbolicExtent { .. })),
-        "a symbolic extent should be rejected; got {errors:?}"
-    );
+    assert!(errors.is_empty(), "expected no errors; got {errors:?}");
 }
 
 #[test]

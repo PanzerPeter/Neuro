@@ -227,12 +227,20 @@ the tuple-index parse, so it needs no expression grammar of its own.
   before it becomes a tensor type. A shape with no element type, or with a
   second type argument, is `ParseError::TensorTypeArity`. A shape is a list of
   `TensorDim { name, extent }`: the extent is a non-negative integer literal
-  (`TensorExtent::Literal`), an extent parameter's name (`TensorExtent::Param`), a `..S` splice
+  (`TensorExtent::Literal`), an extent parameter's name (`TensorExtent::Param`), a constant
+  expression over those (`TensorExtent::Expr`), a `..S` splice
   (`TensorExtent::Splice`, which takes no dimension name), or `?` (`TensorExtent::Dynamic`),
   and the optional name is the `batch:` of a named dimension, which a `?` axis may carry like
   any other. A lone identifier-led `[N]` is ambiguous with the slice type `[T]`, so it is read
   as a shape only under the name `Tensor`: everywhere else `Foo<[T]>` parses as it always did,
   and the checker reads a slice of an extent name as that shape.
+- **An extent expression has its own grammar.** `parser/extent_exprs.rs` reads a shape entry
+  that starts with a literal, a name or `(` as `+ -` over `* / %` over operands, where an
+  operand is a literal, a name, a parenthesized sum or a shape parameter's `S.count()` (built as
+  the `Expr::Call` the body would parse). Nothing else is an operand, so a call or a comparison
+  in a shape is a parse error and the shape stays a type. A result that is a lone literal or name
+  is `Literal` / `Param`, so one extent has one spelling. `rekind_size_params` reads every name
+  an expression uses as an extent use, and a counted one as a shape use.
 - **A dimension name is decided by the colon after it.** `[N]` names the extent and `[batch: N]`
   names the axis, so `parse_dimension_name` looks one token past the identifier and claims the
   name only when a `:` follows. Nothing else distinguishes the two spellings, and the

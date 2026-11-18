@@ -151,11 +151,12 @@ walkers.
   `shape` is a `Vec<TensorDim>`, one axis per dimension: `TensorDim { name, extent }`, where the
   extent is a `TensorExtent::Literal`, the `TensorExtent::Param` naming an extent
   parameter, the `TensorExtent::Splice` of a shape parameter (`..S`, any number of axes; the
-  parser writes `Tensor<T, S>` as `[..S]`), or `TensorExtent::Dynamic` for a `?` axis (an
-  empty shape is the rank-0 scalar tensor) and `name` is the optional dimension name
-  (`[batch: 32]`, never on a splice).
+  parser writes `Tensor<T, S>` as `[..S]`), `TensorExtent::Expr` for a constant expression
+  over those (`D / H`, `N + 1`, `S.count()`, held as the `Expr` the body would parse), or
+  `TensorExtent::Dynamic` for a `?` axis (an empty shape is the rank-0 scalar tensor) and
+  `name` is the optional dimension name (`[batch: 32]`, never on a splice).
   `TensorExtent` is the tensor counterpart of `ArraySize`, and
-  for a reason that holds for two of its three cases: a symbolic extent is resolved by
+  for a reason that holds for all its cases but one: a symbolic extent is resolved by
   monomorphization and never reaches a backend. `Dynamic` is the exception: it has no value to
   resolve, so it survives every stage. A dimension name is frontend-only for a stronger reason: it is checked between two
   shapes and then dropped, so no later pass has to carry it. It is the one type
@@ -244,7 +245,7 @@ walkers.
   one it found standing for a whole shape or spliced into one,
   `Const` a written `const NAME: T` that sizes nothing, `ArraySize`
   (`Literal` / `Const`) on `Type::Array`, `TensorExtent` (`Literal` / `Param` / `Splice` /
-  `Dynamic`) inside each `TensorDim` of `Type::Tensor.shape`, `GenericArg` (`Type` / `Const` /
+  `Expr` / `Dynamic`) inside each `TensorDim` of `Type::Tensor.shape`, `GenericArg` (`Type` / `Const` /
   `Shape`, a written `[2, 3]` for a shape parameter) in `Type::Generic.args`,
   `Expr::Call.type_args` for turbofish, and `where_predicates` on
   `FunctionDef` / `StructDef` / `ImplDef`.

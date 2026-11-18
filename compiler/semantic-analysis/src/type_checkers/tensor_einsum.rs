@@ -165,7 +165,7 @@ impl TypeChecker {
             return Some(Type::Unknown);
         }
 
-        let mut extents: HashMap<char, usize> = HashMap::new();
+        let mut extents: HashMap<char, ArrayLen> = HashMap::new();
         let mut leading: Option<Vec<TensorAxis>> = None;
         let mut element: Option<Type> = None;
         for (position, ((operand, ty), subscript)) in operands
@@ -226,7 +226,7 @@ impl TypeChecker {
             };
             shape.push(TensorAxis {
                 name: None,
-                extent: ArrayLen::Fixed(*extent),
+                extent: extent.clone(),
             });
         }
 
@@ -253,7 +253,7 @@ impl TypeChecker {
         span: Span,
         ty: &Type,
         subscript: &[char],
-        (extents, leading): (&mut HashMap<char, usize>, &mut Option<Vec<TensorAxis>>),
+        (extents, leading): (&mut HashMap<char, ArrayLen>, &mut Option<Vec<TensorAxis>>),
         element: &mut Option<Type>,
     ) -> bool {
         if matches!(ty, Type::Unknown) {
@@ -349,28 +349,32 @@ impl TypeChecker {
             Some(_) => {}
         }
 
+        // A letter binds an extent parameter as it binds a number, so a shape-generic
+        // contraction types once and each instance supplies the lengths. Two different
+        // parameters are two extents, as they are to `@`. A `?` axis has no length
+        // until run time, which the dynamic-extent rules own.
         for (letter, axis) in letters.iter().zip(shape.iter()) {
-            let ArrayLen::Fixed(extent) = axis.extent else {
+            if axis.extent == ArrayLen::Dynamic {
                 self.record_error(TypeError::EinsumSymbolicExtent {
                     position,
                     name: axis.extent.to_string(),
                     span,
                 });
                 return false;
-            };
+            }
             match extents.get(letter) {
-                Some(bound) if *bound != extent => {
+                Some(bound) if *bound != axis.extent => {
                     self.record_error(TypeError::EinsumExtentConflict {
                         letter: *letter,
-                        first: *bound,
-                        second: extent,
+                        first: bound.to_string(),
+                        second: axis.extent.to_string(),
                         span,
                     });
                     return false;
                 }
                 Some(_) => {}
                 None => {
-                    extents.insert(*letter, extent);
+                    extents.insert(*letter, axis.extent.clone());
                 }
             }
         }

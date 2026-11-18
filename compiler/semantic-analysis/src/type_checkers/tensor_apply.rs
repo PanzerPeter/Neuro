@@ -50,15 +50,13 @@ impl TypeChecker {
         args: &[Expr],
         call_span: Span,
     ) -> Type {
-        // Every extent has to be concrete: the traversal's length is the product of them
-        // and the result buffer is allocated from them, both before any element exists.
-        if let Some(symbolic) = shape
-            .iter()
-            .find(|axis| !matches!(axis.extent, ArrayLen::Fixed(_)))
-        {
+        // The result has the receiver's shape, so an extent parameter or a splice types it
+        // as written and each instance walks its own length. A `?` axis has no length
+        // until run time, which the dynamic-extent rules own.
+        if shape.iter().any(|axis| axis.extent == ArrayLen::Dynamic) {
             self.record_error(TypeError::TensorShapeCastSymbolicExtent {
                 method: method.to_string(),
-                name: symbolic.extent.to_string(),
+                name: ArrayLen::Dynamic.to_string(),
                 span: call_span,
             });
             return Type::Unknown;

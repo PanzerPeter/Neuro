@@ -17,7 +17,7 @@ func loss(l: Tensor<f32, []>) { }        // rank-0 scalar tensor
 func image(px: Tensor<u8, [3, 224, 224]>) { }
 ```
 
-The shape is a bracketed list of non-negative integer literals, of extent parameters inside a generic definition ([Shape generics](#shape-generics)), or of `?`. A shape parameter stands for a whole shape, written `Tensor<T, S>` or spliced into a longer one as `[..S, N]` ([Shape parameters](#shape-parameters)). `[]` is the rank-0 scalar tensor. The element type is a fixed-width scalar: any integer type, `f16`, `bf16`, `f32`, `f64` or `bool`, or a type parameter inside a generic definition ([Element-type generics](#element-type-generics)).
+The shape is a bracketed list of non-negative integer literals, of extent parameters and constant expressions over them inside a generic definition ([Shape generics](#shape-generics)), or of `?`. A shape parameter stands for a whole shape, written `Tensor<T, S>` or spliced into a longer one as `[..S, N]` ([Shape parameters](#shape-parameters)). `[]` is the rank-0 scalar tensor. The element type is a fixed-width scalar: any integer type, `f16`, `bf16`, `f32`, `f64` or `bool`, or a type parameter inside a generic definition ([Element-type generics](#element-type-generics)).
 
 Rank and every extent are part of the type, so a mismatch is a compile error naming both types:
 
@@ -348,7 +348,37 @@ Some things an extent parameter does not do:
 
 - A tensor **literal** cannot be written against a symbolic extent, since one literal would have to serve every instantiation. Build the tensor with a constructor instead.
 - A name that no enclosing signature declares is an error naming the dimension, not a silently accepted extent: ``tensor dimension 'N' is not a known extent``. A struct or enum declares its extents by bare name the same way, as in `struct Dense<IN, OUT> { w: Tensor<f32, [IN, OUT]> }`, and `impl<IN, OUT> Dense<IN, OUT>` passes them on.
-- `.reshape` and `.flatten` are not available on a receiver whose extent is a parameter, since there is no element count to check against. `.t()` and `.permute` are, because they only reorder axes.
+
+### Reshaping over parameters
+
+A shape may write an extent as a constant expression over its parameters: integer literals, extent parameters, a shape parameter's `S.count()`, parentheses and `+ - * / %`, with `/` and `%` floored as on `u64`. A generic body is checked once, before its extents have values, so `.reshape`, `.flatten` and the reductions work over parameters and their results are typed with such expressions:
+
+```neuro
+func split<B, D, H>(x: Tensor<f32, [B, D]>) -> Tensor<f32, [B, H, D / H]>
+where D % H == 0
+{
+    x.reshape([B, H, D / H])         // `x.reshape([B, H, -1])` has the same type
+}
+
+func merge<B, H, W>(x: Tensor<f32, [B, H, W]>) -> Tensor<f32, [B, H * W]> {
+    x.flatten(dims: [1, 2])
+}
+
+func head_peaks<B, H, W>(x: &Tensor<f32, [B, H, W]>) -> Tensor<f32, [B, H]> {
+    x.max(axis: -1)
+}
+```
+
+Two extents are the same when they agree by the laws of `+`, `-` and `*`, so `[N, 2].flatten()` is a `[2 * N]` and also a `[N * 2]`. A quotient simplifies only where it divides exactly or by a factor both sides share: a `[B, D]` reshaped with `-1` into `[B, H, -1]` gets the head width `D / H`.
+
+Whether the element counts agree is a question about values, so it is answered at each instance rather than in the template: `[N, 2]` into `[N, 3]` holds at `N = 0`. An instance where a reshape changes the element count, a `-1` does not divide, a reduction runs over no elements, or an extent has no value (`N - 1` at `N = 0`) is a compile error. It is reported at the call in non-generic code that supplied the extents, with the failing operation as a note:
+
+```text
+error: `.reshape` would hold 4 elements at this instance but the receiver holds 6; a reshape cannot change how many elements a tensor has
+note: checked here, in the instance `heads` with B = 1, D = 6, H = 4
+```
+
+A `where` predicate such as `D % H == 0` above states the requirement in the signature, so a caller that misses it is refused there, before any instance is built. An extent expression in a parameter type binds nothing: `[N + 1]` against a `[5]` does not solve for `N`, and is compared once another argument or the turbofish has bound `N`.
 
 ### Shape parameters
 
@@ -368,7 +398,7 @@ func describe<S>(x: &Tensor<f32, S>) -> u64 {
 }
 ```
 
-In a body, `S` is read through `S.rank()` and `S.count()`, both `u64`. A shape-generic body accepts what is valid at every rank: moving and borrowing, `.clone()`, element-wise arithmetic and the scalar broadcast, the math methods, and the constructors (`Tensor::<f32, S>::zeros()`). A splice broadcasts only against the same splice, aligned at the trailing axis, so `[..S, N] + [N]` works and `Tensor<f32, S> + Tensor<f32, [3]>` is an error. An operation that counts or picks axes (an index, `@`, `einsum`, the shape casts, the reductions, sorting, the traversals, `.item()`) is refused on a spliced shape: `` `.sum` needs the rank of `Tensor<f32, [..S]>`, which the shape parameter 'S' leaves open ``.
+In a body, `S` is read through `S.rank()` and `S.count()`, both `u64`. A shape-generic body accepts what is valid at every rank: moving and borrowing, `.clone()`, element-wise arithmetic and the scalar broadcast, the math methods, the constructors (`Tensor::<f32, S>::zeros()`), the traversals, a whole-tensor reduction, `.reshape`, and a whole `.flatten()`, which gives a `Tensor<f32, [S.count()]>`. An axis reduction works along an axis the shape writes, counted from its own side, so `axis: -1` of `[..S, N]` is `N` at every rank. A splice broadcasts only against the same splice, aligned at the trailing axis, so `[..S, N] + [N]` works and `Tensor<f32, S> + Tensor<f32, [3]>` is an error. A splice may stand for the batch axes of `@` and for an `einsum` `...`. Anything else that counts or picks axes (an index, `.t()`, `.permute`, `.flatten(dims:)`, sorting, `.item()`, a reduction along `axis: 0` of `[..S, N]`) is refused on a spliced shape: `` `.t` needs the rank of `Tensor<f32, [..S, 2, 2]>`, which the shape parameter 'S' leaves open ``.
 
 A shape argument is written as a bracketed shape where a call or a type needs it spelled, and a parameter in scope is passed on by its bare name:
 
@@ -564,7 +594,7 @@ Three rules are compile-time errors:
 
 - The element type must be an integer or a float. A `bool` tensor has nothing to fold: `` `.sum()` reduces a tensor's elements, which requires an integer or float element type; this tensor holds bool ``.
 - `.mean()` is for floats only, because an integer mean would have to pick a rounding rule the language does not give: `` `.mean()` averages i32 elements, which has no rounding rule ``. Sum and divide explicitly instead.
-- A reduction over **no** elements is rejected, since `.max()` of nothing has no answer. A receiver whose extent is a parameter, whose shape splices a shape parameter, or which has a `?` axis has no run length either, so a reduction needs a tensor whose shape is numbers.
+- A reduction over **no** elements is rejected, since `.max()` of nothing has no answer. Over an extent or shape parameter the run length is known only at each instance, which is where an empty one is refused ([Reshaping over parameters](#reshaping-over-parameters)). A `?` axis has no run length at compile time, so a reduction refuses one.
 
 A half-precision reduction accumulates in `f32`, so a long `bf16` sum does not stall.
 
@@ -669,7 +699,7 @@ A subscript that disagrees with its operands is a compile error **naming the let
 - An output letter no input binds: `` `einsum` writes 'k' on the right of `->` but no operand's subscript binds it ``.
 - An output letter written twice: `` `einsum` writes 'i' twice on the right of `->` ``.
 
-The rest are checked the same way: one comma-separated subscript per operand, one letter per axis, every operand a tensor, and every operand sharing one integer or float element type, half precision included. Every lettered extent must be a number, so a parameter or a `?` axis is rejected; the axes `...` covers may be a shape parameter. The result's shape and strides are both built from those extents.
+The rest are checked the same way: one comma-separated subscript per operand, one letter per axis, every operand a tensor, and every operand sharing one integer or float element type, half precision included. A lettered extent may be an extent parameter, so `einsum("ij,jk->ik", a, b)` serves every `[M, K]` and `[K, N]`, and a letter bound to two different parameters is the same conflict as one bound to two numbers. A `?` axis is rejected, and the axes `...` covers may be a shape parameter.
 
 A result axis carries no dimension name. A subscript letter is a local label for the contraction, not a name the type keeps. The result's axes are unnamed, and an annotation may name them.
 
@@ -712,7 +742,7 @@ func main() -> i32 {
 }
 ```
 
-Like a reduction, all three **read** their operands. Each allocates its own result and leaves the walked buffers in place, so all three are offered on `&Tensor<T, S>`, and a chain such as `t.map(f).map(g)` releases its intermediate. Every extent must be a number, for the same reason a contraction's must: the walk's length and the result buffer are both built from it.
+Like a reduction, all three **read** their operands. Each allocates its own result and leaves the walked buffers in place, so all three are offered on `&Tensor<T, S>`, and a chain such as `t.map(f).map(g)` releases its intermediate. The result has the walked shape, so a traversal works over extent and shape parameters, and each instance walks its own length. A `?` axis is rejected.
 
 There is deliberately **no `.filter`**. A filter's output length depends on the values in the buffer, so its result would have no shape the type system can name. Use a `Vec<T>` where a data-dependent length is what you want. The shape-preserving alternative is a boolean mask. A `Tensor<bool, S>` is a tensor like any other and already selects as the second operand of a `.zip`. Nothing produces one yet, though: a traversal cannot answer `bool`, and `a > b` is not defined on two tensors, so a mask must be written out by hand.
 
@@ -938,6 +968,7 @@ These are the limits a reader is most likely to hit. Each one is described in fu
 
 - A `?` axis is a widening only. Nothing that needs an extent works on it, and no run-time check narrows it back to a literal (see [Dynamic shapes](#dynamic-shapes)).
 - There is no `.filter`, and no operation produces a `Tensor<bool, S>` mask, so a mask is written by hand (see [Functional traversals](#functional-traversals)).
+- `.sort`, `.argsort` and `.topk` need every extent to be a number, so they are not available inside a shape-generic function (see [Sorting and selection](#sorting-and-selection)).
 - `@gpu` is not accepted on a method (see [Running on a GPU](#running-on-a-gpu-gpu)).
 - Operations on `f16`, `bf16` and `bool` tensors have no device form (see [Device transfer](#device-transfer)).
 
