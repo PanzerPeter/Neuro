@@ -1,6 +1,6 @@
 // `@test` form rules.
 //
-// `neurc test` calls each test from a generated entry point with no arguments and ignores what
+// `neuroc test` calls each test from a generated entry point with no arguments and ignores what
 // it returns, so a test is a free, non-generic function of no parameters returning unit. How
 // tests are found and run is the driver's; what is checked here is only the attribute's shape
 // and the places it may not go.

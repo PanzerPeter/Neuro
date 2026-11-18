@@ -7,7 +7,7 @@ HIR lowering turns the type-checked surface AST into the typed High-Level IR (`n
 
 ## Overview
 
-The type checker validates types but does not expose them, so lowering re-derives each expression's type while it walks the AST. `neurc` runs lowering immediately after `semantic_analysis::type_check`, in both `check` and `compile`. The output feeds the [LLVM backend](llvm-backend.md), which emits scalar code, and the [MLIR backend](mlir-backend.md), which computes the tensor operations lowering outlined.
+The type checker validates types but does not expose them, so lowering re-derives each expression's type while it walks the AST. `neuroc` runs lowering immediately after `semantic_analysis::type_check`, in both `check` and `compile`. The output feeds the [LLVM backend](llvm-backend.md), which emits scalar code, and the [MLIR backend](mlir-backend.md), which computes the tensor operations lowering outlined.
 
 ## Architecture
 
@@ -76,7 +76,7 @@ A `@grad` function lowers to itself plus two generated items: a `GradsOf_<f>` st
 - `@grad(order: 2)` applies the transform twice. It generates `__<f>__hvp__<param>`, a Hessian-vector product, which the first derivative calls once per unit direction to build the Hessian row by row.
 - A `@grad` method is derived the same way. Its derivative `__<m>__rev` is a method of the same `impl`, and its struct is `GradsOf_<Type>__<m>`. The receiver is treated as a constant, except for a `wrt:` path, which is differentiated.
 
-A construct the transform has no rule for is `LoweringError::NotDifferentiable`. It carries the construct's span, and `neurc` renders it as a located diagnostic. The accepted body is described in the [autodiff reference](../../language-reference/autodiff.md).
+A construct the transform has no rule for is `LoweringError::NotDifferentiable`. It carries the construct's span, and `neuroc` renders it as a located diagnostic. The accepted body is described in the [autodiff reference](../../language-reference/autodiff.md).
 
 ### `.backward()`
 
@@ -104,8 +104,8 @@ Any other `LoweringError` reaches the user as `HIR lowering error: <message>`, a
 ## Testing
 
 - Slice unit tests are in [`src/tests/`](../../../compiler/hir-lowering/src/tests/), including the autodiff tests.
-- End-to-end coverage is in [`compiler/neurc/tests/suite/hir_lowering.rs`](../../../compiler/neurc/tests/suite/hir_lowering.rs) and [`autodiff.rs`](../../../compiler/neurc/tests/suite/autodiff.rs).
-- The workspace architecture test in [`compiler/neurc/tests/architecture_tests.rs`](../../../compiler/neurc/tests/architecture_tests.rs) enforces the infrastructure-only dependency rule.
+- End-to-end coverage is in [`compiler/neuroc/tests/suite/hir_lowering.rs`](../../../compiler/neuroc/tests/suite/hir_lowering.rs) and [`autodiff.rs`](../../../compiler/neuroc/tests/suite/autodiff.rs).
+- The workspace architecture test in [`compiler/neuroc/tests/architecture_tests.rs`](../../../compiler/neuroc/tests/architecture_tests.rs) enforces the infrastructure-only dependency rule.
 
 ## Source
 

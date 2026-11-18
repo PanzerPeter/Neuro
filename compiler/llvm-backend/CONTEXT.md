@@ -11,7 +11,7 @@ Emit native object code, or the textual LLVM module behind it, from the typed Ne
   from `compile_to_ir`, which prints the module instead of selecting instructions. `CodegenResult<T>`
   is the exported alias for `Result<T, CodegenError>`
 - `compile_tests` takes the same inputs plus `tests: &[String]` and returns the object code of a
-  `neurc test` executable (see Test Entry)
+  `neuroc test` executable (see Test Entry)
 - `compile_executable` takes `compile`'s inputs and returns object code that is linked straight
   into an executable: every symbol but `main` is internal (see Symbol Visibility). `compile` keeps
   every function callable, since its object may be a library
@@ -41,7 +41,7 @@ nothing in a program that never reaches a GPU.
 
 `sources` holds every file of the program in the one offset space its spans share, kept solely
 to render `file:line:col` in panic-family runtime diagnostics: a span resolves to the file it
-falls in, a module's or the prelude's. The column counts characters, as `neurc`'s compile-time
+falls in, a module's or the prelude's. The column counts characters, as `neuroc`'s compile-time
 diagnostics do. It affects nothing else.
 
 `optimization` selects two independent things. It picks the `TargetMachine`'s level, which
@@ -91,10 +91,10 @@ transforms.
 inkwell (feature `llvm23-1`) is a third-party crate, not Shared Kernel. Requires LLVM 23;
 set `LLVM_SYS_231_PREFIX` to the one prefix holding LLVM and MLIR 23 (the Arch build installs
 `/opt/llvm-mlir-23`; `/usr` has no MLIR C library) before building. `semantic-analysis` is not a
-production dependency: neurc orders type-check then HIR lowering before codegen.
+production dependency: neuroc orders type-check then HIR lowering before codegen.
 `syntax-parsing`, `hir-lowering` and `mlir-backend` appear only in `[dev-dependencies]` (tests and
 benches lower source to HIR before compiling, and a test compiling a tensor operation links the
-host body `mlir-backend` computes for it, as `neurc` does).
+host body `mlir-backend` computes for it, as `neuroc` does).
 
 `resolve_builtin_method` is duplicated from `semantic-analysis`, and `is_panic_builtin` /
 `is_io_builtin` restate the builtin names it knows, to keep the backend independent of the
@@ -134,7 +134,7 @@ load-bearing:
 
 ## External Bodies
 `ExternalBodies` is LLVM IR text plus `(function, symbol)` pairs: a free function whose body some
-other backend computed. `external` is a list of them, one per memory kind, each linked in turn (today `mlir-backend`, through `neurc`). The function is
+other backend computed. `external` is a list of them, one per memory kind, each linked in turn (today `mlir-backend`, through `neuroc`). The function is
 declared like any other, so every call site and every function value is unchanged; only its body
 differs. `codegen_external_body` (`codegen/external_bodies.rs`) emits it as a call to the symbol
 in MLIR's calling convention: each tensor as an exploded row-major `memref` descriptor (its `data`
@@ -280,7 +280,7 @@ that name none (the launchers', the arena's) act on it; device 0 is current exce
 staged call or a transfer, and each switches back. The device-tensor calls take the device a
 buffer is on, read from the handle's DLPack `device` field. `__neuro_device_check` refuses an
 index at or past the device count. The runtime assumes one thread, since a context is current per
-thread. The executable needs `dlopen`, which `neurc` links `-ldl` for.
+thread. The executable needs `dlopen`, which `neuroc` links `-ldl` for.
 
 **`@gpu(fallback: true)`.** A `Device` body whose `HirFunction::target` is `GpuOrHost` goes
 through `codegen_gpu_fallback` instead: it emits `f.gpu` (the staging wrapper), `f.host` (this
@@ -1208,7 +1208,7 @@ restoring the builder position because they are built lazily mid-function:
   line-by-line while a pipe or file gets the full buffer. The compiler knows where the line
   boundary is, so the runtime never scans bytes for `\n`. `print` writes no terminator and so
   calls this not at all: the same rule C's line-buffered stdio follows. `isatty` is declared as
-  `_isatty` on Windows, chosen with `cfg!(windows)` since `neurc` compiles for the host.
+  `_isatty` on Windows, chosen with `cfg!(windows)` since `neuroc` compiles for the host.
 - `neuro.print.write_all(ptr, i64)`: the drain primitive, holding the short-write retry loop:
   `write` may consume less than it was offered (a pipe with a full buffer does exactly that), and
   a bare call per site would silently truncate the language's primary result channel. The loop

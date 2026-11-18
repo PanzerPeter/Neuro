@@ -69,7 +69,7 @@ jobs:
 
   test:
     name: Test Suite
-    # The VSA architecture tests run here too: they are part of the neurc test
+    # The VSA architecture tests run here too: they are part of the neuroc test
     # target that `cargo test --workspace` builds, so a separate job would only
     # install LLVM a second time to run them again.
     #
@@ -197,8 +197,8 @@ jobs:
           key: ${{ matrix.os }}-stable
       - name: Setup LLVM 23 + MLIR 23
         uses: ./.github/actions/setup-llvm
-      - name: Build release neurc
-        run: cargo build -p neurc --release
+      - name: Build release neuroc
+        run: cargo build -p neuroc --release
 
       # Each example returns a known value from `main`; the release binary must link it
       # and the program must exit with exactly that value.
@@ -208,7 +208,7 @@ jobs:
           ext='${{ runner.os == 'Windows' && '.exe' || '' }}'
           for case in function_call:8 factorial:120; do
             name=${case%%:*}; want=${case##*:}; exe="target/smoke-$name$ext"
-            "target/release/neurc$ext" compile "examples/basics/$name.nr" -O 2 -o "$exe"
+            "target/release/neuroc$ext" compile "examples/basics/$name.nr" -O 2 -o "$exe"
             "$exe" && got=0 || got=$?
             [ "$got" -eq "$want" ] || { echo "$name: expected exit $want, got $got"; exit 1; }
             echo "Smoke test passed: $name -> exit $got"
@@ -217,8 +217,8 @@ jobs:
       - name: Upload Compiler Artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: neurc-${{ runner.os }}
-          path: target/release/neurc${{ runner.os == 'Windows' && '.exe' || '' }}
+          name: neuroc-${{ runner.os }}
+          path: target/release/neuroc${{ runner.os == 'Windows' && '.exe' || '' }}
 
   coverage:
     name: Code Coverage

@@ -233,7 +233,7 @@ pub fn compile_tests(
 ///
 /// The same pipeline as [`compile`], stopped one step earlier: the module is built,
 /// verified and run through `optimization`'s pass pipeline, then printed instead of
-/// handed to instruction selection. What reaches this is `neurc compile --emit llvm-ir`,
+/// handed to instruction selection. What reaches this is `neuroc compile --emit llvm-ir`,
 /// whose output is the input an out-of-process IR consumer reads.
 pub fn compile_to_ir(
     program: &HirProgram,

@@ -1,6 +1,6 @@
 # End-to-End Compilation
 
-`neurc` turns a Neuro source file (`.nr`) into a native executable, an object file or textual LLVM IR. This page gives the stage order, what each stage hands the next, how failures are reported, and what `check`, `compile` and `run` do. Each stage's rules live on its component page, linked from the table below.
+`neuroc` turns a Neuro source file (`.nr`) into a native executable, an object file or textual LLVM IR. This page gives the stage order, what each stage hands the next, how failures are reported, and what `check`, `compile` and `run` do. Each stage's rules live on its component page, linked from the table below.
 
 ## Stages
 
@@ -8,7 +8,7 @@ Every command runs the same front half in the same order, so none can skip a ste
 
 | # | Stage | Entry point | Hands the next stage |
 |---|---|---|---|
-| 1 | Read the root file | the driver (`compiler/neurc`) | Checks the `.nr` extension, then reads the source. A leading UTF-8 byte order mark is dropped. |
+| 1 | Read the root file | the driver (`compiler/neuroc`) | Checks the `.nr` extension, then reads the source. A leading UTF-8 byte order mark is dropped. |
 | 2 | [Lexical analysis](components/lexical-analysis.md) | `syntax_parsing::parse` | A token stream |
 | 3 | [Parsing](components/syntax-parsing.md) | `syntax_parsing::parse` | An AST for each file |
 | 4 | [Module resolution](components/module-resolution.md) | `module_resolution::resolve_program` | One flat item list covering every reachable module and the standard library. |
@@ -25,13 +25,13 @@ The `-O` level reaches stage 8 and stage 9. At `-O0` the tensor bodies check int
 
 ## Commands
 
-**`neurc check <FILE>`** runs stages 1 to 7 and stops. It needs no `main`, and it does not invoke LLVM or the linker. On Linux, when the program has a `@gpu` or `@kernel` function, it also builds the GPU bodies for the default chip, so a body that cannot become a kernel fails `check` as it fails `compile`. On success it prints `Type checking passed for "<FILE>" (<N> module(s), <M> HIR items)`.
+**`neuroc check <FILE>`** runs stages 1 to 7 and stops. It needs no `main`, and it does not invoke LLVM or the linker. On Linux, when the program has a `@gpu` or `@kernel` function, it also builds the GPU bodies for the default chip, so a body that cannot become a kernel fails `check` as it fails `compile`. On success it prints `Type checking passed for "<FILE>" (<N> module(s), <M> HIR items)`.
 
-**`neurc compile <FILE>`** runs all ten stages. With the default `--emit exe` the program must define `main`. The driver checks this after HIR lowering and before stage 8, so a missing entry point is reported as a compile error instead of as the linker's `undefined reference to 'main'`. `--emit obj` and `--emit llvm-ir` need no `main`, since an object or IR module may be a library. They stop before linking and before instruction selection respectively. On success it prints `Successfully compiled <FILE> -> <OUTPUT>`. The output path may not be one of the program's own source files, and that is refused before anything is written.
+**`neuroc compile <FILE>`** runs all ten stages. With the default `--emit exe` the program must define `main`. The driver checks this after HIR lowering and before stage 8, so a missing entry point is reported as a compile error instead of as the linker's `undefined reference to 'main'`. `--emit obj` and `--emit llvm-ir` need no `main`, since an object or IR module may be a library. They stop before linking and before instruction selection respectively. On success it prints `Successfully compiled <FILE> -> <OUTPUT>`. The output path may not be one of the program's own source files, and that is refused before anything is written.
 
-**`neurc run <FILE>`** compiles as `compile` does, into a temporary directory, runs the executable and exits with its status. The executable keeps the source's name, so `argv[0]` is meaningful. The directory is removed on exit, and no success line is printed, so the program's stdout is its own.
+**`neuroc run <FILE>`** compiles as `compile` does, into a temporary directory, runs the executable and exits with its status. The executable keeps the source's name, so `argv[0]` is meaningful. The directory is removed on exit, and no success line is printed, so the program's stdout is its own.
 
-**`neurc test <FILE>`** runs the same front half and the same backend as `compile`, but needs no `main`: the executable's entry runs the `@test` function its first argument indexes. The driver runs it once per test, each in its own process, and a test passes when its process exits `0`. It prints a verdict per test and the output of each failure.
+**`neuroc test <FILE>`** runs the same front half and the same backend as `compile`, but needs no `main`: the executable's entry runs the `@test` function its first argument indexes. The driver runs it once per test, each in its own process, and a test passes when its process exits `0`. It prints a verdict per test and the output of each failure.
 
 Flags are documented in the [CLI Usage Guide](../guides/cli-usage.md), including `--gpu-arch`, which `compile`, `run` and `test` accept.
 
@@ -84,10 +84,10 @@ The compiler needs LLVM 23 and MLIR, with the `LLVM_SYS_231_PREFIX`, `MLIR_SYS_2
 
 ## Testing
 
-- [`compiler/neurc/tests/suite/`](../../compiler/neurc/tests/suite/) compiles and runs real programs per feature, asserting exit codes and output.
-- [`cli_contract.rs`](../../compiler/neurc/tests/suite/cli_contract.rs) covers the command-line contract and the exit codes above.
-- [`compiler/neurc/tests/examples.rs`](../../compiler/neurc/tests/examples.rs) builds and runs every program in `examples/` against its pinned exit code and stdout.
-- [`compiler/neurc/tests/architecture_tests.rs`](../../compiler/neurc/tests/architecture_tests.rs) enforces the slice dependency rules.
+- [`compiler/neuroc/tests/suite/`](../../compiler/neuroc/tests/suite/) compiles and runs real programs per feature, asserting exit codes and output.
+- [`cli_contract.rs`](../../compiler/neuroc/tests/suite/cli_contract.rs) covers the command-line contract and the exit codes above.
+- [`compiler/neuroc/tests/examples.rs`](../../compiler/neuroc/tests/examples.rs) builds and runs every program in `examples/` against its pinned exit code and stdout.
+- [`compiler/neuroc/tests/architecture_tests.rs`](../../compiler/neuroc/tests/architecture_tests.rs) enforces the slice dependency rules.
 
 `cargo test --workspace` runs all of it.
 
@@ -98,9 +98,9 @@ The compiler needs LLVM 23 and MLIR, with the `LLVM_SYS_231_PREFIX`, `MLIR_SYS_2
 
 ## Source
 
-- [`compiler/neurc/src/main.rs`](../../compiler/neurc/src/main.rs): the driver, the command line and the link step
-- [`compiler/neurc/std/prelude.nr`](../../compiler/neurc/std/prelude.nr) and [`std_library.rs`](../../compiler/neurc/src/std_library.rs): the standard library the driver embeds and hands to module resolution
-- [`compiler/neurc/CONTEXT.md`](../../compiler/neurc/CONTEXT.md): why the stages run in this order
+- [`compiler/neuroc/src/main.rs`](../../compiler/neuroc/src/main.rs): the driver, the command line and the link step
+- [`compiler/neuroc/std/prelude.nr`](../../compiler/neuroc/std/prelude.nr) and [`std_library.rs`](../../compiler/neuroc/src/std_library.rs): the standard library the driver embeds and hands to module resolution
+- [`compiler/neuroc/CONTEXT.md`](../../compiler/neuroc/CONTEXT.md): why the stages run in this order
 
 ## See also
 

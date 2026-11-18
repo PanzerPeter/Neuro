@@ -36,7 +36,7 @@ without a second dependency. The types stay owned by `ast-types`.
 
 The `lexical-analysis` dependency is deliberate intra-pipeline coupling, not a VSA violation:
 syntax-parsing is the sole token-stream consumer, and externalising tokenisation would add an
-unnecessary neurc coordination step. The architecture test allowlists this pairing.
+unnecessary neuroc coordination step. The architecture test allowlists this pairing.
 
 ## Notes
 
@@ -258,7 +258,7 @@ the tuple-index parse, so it needs no expression grammar of its own.
   An `impl` header, a signature or a field passing a name to a type declared elsewhere
   (`impl<S> Layer<S>`, `func f<N>(r: &Ring<N>)`) is settled by `kind_passed_sizes` from that
   declaration's kinds: `parse_program` runs it over the file, skipping a name the
-  file declares twice, and `neurc` runs it again over the resolved program, where every name is
+  file declares twice, and `neuroc` runs it again over the resolved program, where every name is
   canonical and a type from another module is in reach.
 - **Tensor constructor turbofish.** `Tensor::<f32, [3, 3]>::zeros()` is the one turbofish that
   qualifies a *type* rather than a callee, so `parse_tensor_qualified_call` handles it in the

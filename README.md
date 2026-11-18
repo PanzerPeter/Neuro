@@ -3,7 +3,7 @@
 > An AOT-compiled language for high-performance AI development.
 
 <p align="center">
-  <img src="assets/demo.gif" alt="neurc rejects a swapped matrix product at compile time, then the fixed program trains a model with @grad and predicts on the GPU" width="880">
+  <img src="assets/demo.gif" alt="neuroc rejects a swapped matrix product at compile time, then the fixed program trains a model with @grad and predicts on the GPU" width="880">
 </p>
 
 [![License: Neuro Shared Source License v2.2](https://img.shields.io/badge/License-NSSL%20v2.2-blue.svg)](LICENSE)
@@ -19,7 +19,7 @@
 ## What Neuro is
 
 Neuro is a programming language for building AI. You write your program in a text file, and
-Neuro's compiler, `neurc`, turns it into a standalone program that runs directly on your computer,
+Neuro's compiler, `neuroc`, turns it into a standalone program that runs directly on your computer,
 the way a program written in C or Rust does. You can hand that program to someone else, and they
 can run it without installing Python.
 
@@ -122,11 +122,11 @@ On x86-64 Linux, the prebuilt compiler needs only a C compiler (`cc`) on the mac
 
 ```bash
 base=https://github.com/PanzerPeter/Neuro/releases/latest/download
-curl -fLO "$base/neurc-x86_64-unknown-linux-gnu.tar.gz"
-curl -fLO "$base/neurc-x86_64-unknown-linux-gnu.tar.gz.sha256"
-sha256sum -c neurc-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar -xzf neurc-x86_64-unknown-linux-gnu.tar.gz
-mkdir -p ~/.local/bin && cp neurc-x86_64-unknown-linux-gnu/neurc ~/.local/bin/
+curl -fLO "$base/neuroc-x86_64-unknown-linux-gnu.tar.gz"
+curl -fLO "$base/neuroc-x86_64-unknown-linux-gnu.tar.gz.sha256"
+sha256sum -c neuroc-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf neuroc-x86_64-unknown-linux-gnu.tar.gz
+mkdir -p ~/.local/bin && cp neuroc-x86_64-unknown-linux-gnu/neuroc ~/.local/bin/
 ```
 
 It runs on glibc 2.28 and newer. The [installation guide](docs/getting-started/installation.md#prebuilt-linux-binary)
@@ -172,7 +172,7 @@ cd Neuro
 cargo build --release
 cargo test --workspace
 
-cargo install --path compiler/neurc   # optional, puts neurc on your PATH
+cargo install --path compiler/neuroc   # optional, puts neuroc on your PATH
 ```
 
 The same four commands run unchanged in PowerShell on Windows.
@@ -180,12 +180,12 @@ The same four commands run unchanged in PowerShell on Windows.
 ### 3. Run something
 
 ```bash
-neurc check examples/basics/hello.nr        # type-check only, no binary
-neurc run   examples/basics/factorial.nr    # compile and run, leaving no binary behind
-neurc compile examples/basics/factorial.nr  # native executable next to the source
+neuroc check examples/basics/hello.nr        # type-check only, no binary
+neuroc run   examples/basics/factorial.nr    # compile and run, leaving no binary behind
+neuroc compile examples/basics/factorial.nr  # native executable next to the source
 ```
 
-Without `cargo install`, prefix each command with `cargo run -p neurc --`. Flags, `--emit obj` and
+Without `cargo install`, prefix each command with `cargo run -p neuroc --`. Flags, `--emit obj` and
 the zero-copy NumPy recipe are in the [CLI guide](docs/guides/cli-usage.md).
 
 ---
@@ -211,7 +211,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 | **Strings** | Immutable `string` slices, interpolation `"{x:.2}"`, triple-quoted blocks, codepoint iteration, `.lines()` / `.split(sep)`, `.parse::<T>()`, growable `StringBuilder` ([reference](docs/language-reference/strings.md)) |
 | **Errors** | `Option<T>` / `Result<T, E>` in the prelude, `??` fallbacks, `?` propagation, `checked_*` arithmetic, `.to_checked::<T>()` conversions |
 | **Ownership** | Moves, `Copy`, borrow exclusivity, references in fields, lifetimes, deterministic `Drop`, `pool { }` arenas ([reference](docs/language-reference/ownership.md)) |
-| **Modules and toolchain** | File and inline modules, each its own namespace, `import` and re-exports, a `std` library embedded in `neurc`: the prelude, `std::fs` files, `std::safetensors` weights, `std::env` arguments, `std::io` input, `std::time` ([reference](docs/language-reference/standard-library.md)); `neurc check` / `run` / `compile` on LLVM 23, `neurc test` for `@test` functions, `--emit obj` for C and NumPy ([reference](docs/language-reference/modules.md)) |
+| **Modules and toolchain** | File and inline modules, each its own namespace, `import` and re-exports, a `std` library embedded in `neuroc`: the prelude, `std::fs` files, `std::safetensors` weights, `std::env` arguments, `std::io` input, `std::time` ([reference](docs/language-reference/standard-library.md)); `neuroc check` / `run` / `compile` on LLVM 23, `neuroc test` for `@test` functions, `--emit obj` for C and NumPy ([reference](docs/language-reference/modules.md)) |
 
 > **Alpha memory note.** Memory is reclaimed deterministically, except in a few shapes that leak a
 > buffer rather than risk a dangling one. The
@@ -222,7 +222,7 @@ Every row is implemented, tested and usable today. Depth lives in the
 
 ## Performance
 
-`neurc compile -O 3` runs LLVM's `-O3` pipeline, the same level the C++ and Rust rows are
+`neuroc compile -O 3` runs LLVM's `-O3` pipeline, the same level the C++ and Rust rows are
 built at (`clang++ -O3`, `rustc -C opt-level=3`), and all three target the generic x86-64 CPU
 with no `-march=native`. The default is `-O 0`, checked arithmetic with no optimization, so pass
 `-O 3` before drawing any conclusion about speed.
@@ -309,12 +309,12 @@ compiler/
 ├── hir-lowering/            # Type-checked AST -> typed HIR
 ├── llvm-backend/            # HIR -> object code (inkwell / LLVM 23)
 ├── mlir-backend/            # HIR -> MLIR linalg and GPU kernels
-└── neurc/                   # CLI compiler driver
+└── neuroc/                   # CLI compiler driver
 ```
 
 Today a `.nr` file travels: **tokens → AST → merged program → type-checked AST → typed HIR →
 LLVM object code → system linker**. Automatic differentiation runs inside HIR lowering. The
-`mlir-backend` slice lowers the same typed HIR to MLIR `linalg`; `neurc` links the tensor
+`mlir-backend` slice lowers the same typed HIR to MLIR `linalg`; `neuroc` links the tensor
 bodies it computes into the program, and on Linux lowers `@gpu` and `@kernel` bodies on through the
 MLIR GPU dialects to NVIDIA or AMD kernels. Stage by stage:
 [docs/compiler/compilation.md](docs/compiler/compilation.md).

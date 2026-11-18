@@ -1,11 +1,11 @@
 # Quick Start Guide
 
-A tour of the `neurc` workflow: check a program, compile it, run it, and read the errors it
+A tour of the `neuroc` workflow: check a program, compile it, run it, and read the errors it
 reports. Build the compiler first with the [Installation Guide](installation.md). The
 [Your First Program](first-program.md) tutorial covers the language step by step.
 
-The commands below call `neurc`. Without `cargo install`, run `cargo run -p neurc --` in its
-place, or call `target/release/neurc` directly. Run them from the repository root so the example
+The commands below call `neuroc`. Without `cargo install`, run `cargo run -p neuroc --` in its
+place, or call `target/release/neuroc` directly. Run them from the repository root so the example
 paths resolve.
 
 ## Check a program
@@ -13,7 +13,7 @@ paths resolve.
 `check` parses and type-checks a file without producing a binary:
 
 ```bash
-neurc check examples/basics/hello.nr
+neuroc check examples/basics/hello.nr
 ```
 
 ```text
@@ -28,7 +28,7 @@ the file. See [`check`](../guides/cli-usage.md#check).
 `compile` writes a native executable beside the source, named after it without the extension:
 
 ```bash
-neurc compile examples/basics/hello.nr
+neuroc compile examples/basics/hello.nr
 ```
 
 ```text
@@ -58,7 +58,7 @@ byte in a sibling `.out` file.
 status. Nothing is left beside the source, so it is the command to reach for while iterating:
 
 ```bash
-neurc run examples/basics/hello.nr
+neuroc run examples/basics/hello.nr
 ```
 
 Its output is the program's output alone, with no compiler banner.
@@ -69,10 +69,10 @@ The commands take a few flags. The [CLI guide](../guides/cli-usage.md) has the f
 defaults:
 
 ```bash
-neurc compile -o hello_custom examples/basics/hello.nr   # output path
-neurc compile -O2 examples/basics/hello.nr               # optimization level, 0 to 3
-neurc compile --emit llvm-ir examples/basics/hello.nr    # textual LLVM IR, not an executable
-neurc run -O2 examples/basics/hello.nr
+neuroc compile -o hello_custom examples/basics/hello.nr   # output path
+neuroc compile -O2 examples/basics/hello.nr               # optimization level, 0 to 3
+neuroc compile --emit llvm-ir examples/basics/hello.nr    # textual LLVM IR, not an executable
+neuroc run -O2 examples/basics/hello.nr
 ```
 
 The default `-O0` is a debug build, where integer overflow panics. `-O1` and up wrap.
@@ -91,7 +91,7 @@ func main() -> i32 {
 }
 ```
 
-`neurc check bad.nr` prints:
+`neuroc check bad.nr` prints:
 
 ```text
 error: unexpected token RightBrace, expected expression
@@ -113,7 +113,7 @@ func main() -> i32 {
 }
 ```
 
-`neurc check mismatch.nr` prints:
+`neuroc check mismatch.nr` prints:
 
 ```text
 Type errors found in "mismatch.nr":
@@ -135,10 +135,10 @@ Use `check` while you write, since it gives the fastest feedback. Use `run` to t
 `compile` when you want a binary to keep:
 
 ```bash
-neurc check program.nr
-neurc run program.nr
-neurc test program.nr
-neurc compile program.nr -o program
+neuroc check program.nr
+neuroc run program.nr
+neuroc test program.nr
+neuroc compile program.nr -o program
 ./program
 ```
 

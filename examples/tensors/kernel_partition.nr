@@ -7,7 +7,7 @@
 // each thread `k` of them in row-major order: `slice` is the run, indexed from 0, and
 // `base` is the position of its first element. `.flat(i)` reads any tensor at row-major
 // position `i`. The element count must divide evenly among the grid's threads, or the
-// compiler refuses. A GPU and a Linux `neurc` are needed.
+// compiler refuses. A GPU and a Linux `neuroc` are needed.
 
 // One thread per row of `m`: the grid tensor is `totals`, 6 rows in blocks of 4, so the
 // last 2 threads of the second block own nothing. A thread's run of `scaled` is its

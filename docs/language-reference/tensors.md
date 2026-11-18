@@ -105,7 +105,7 @@ The buffer keeps one address for its whole life and is aligned to 64 bytes, as D
 
 A tensor held in a struct field, array element or enum payload is released with the value that holds it (see the [memory model](memory-model.md)).
 
-The handle is checked, not only asserted. `neurc compile --emit obj` on a module of tensor-returning functions, linked into a shared library, yields results that `numpy.from_dlpack` imports, reading the dtype, rank, extents and strides off the handle. `tools/dlpack_differential.py` runs this for a representative set of operations (broadcasting, matrix product, reductions, integer element types, transposes, reshapes, rank-0 results and chained operators) and compares the elements with NumPy's answer. See [emitting an object file](../guides/cli-usage.md#emitting-an-object-file).
+The handle is checked, not only asserted. `neuroc compile --emit obj` on a module of tensor-returning functions, linked into a shared library, yields results that `numpy.from_dlpack` imports, reading the dtype, rank, extents and strides off the handle. `tools/dlpack_differential.py` runs this for a representative set of operations (broadcasting, matrix product, reductions, integer element types, transposes, reshapes, rank-0 results and chained operators) and compares the elements with NumPy's answer. See [emitting an object file](../guides/cli-usage.md#emitting-an-object-file).
 
 ## Element-wise arithmetic
 
@@ -813,7 +813,7 @@ Reading or writing one element copies only that element between the host and the
 
 Some operations have no device form. These are an operation on an `f16`, `bf16` or `bool` tensor, `.map`, `.zip` or `.reduce` whose function uses a construct the GPU path lacks (a tuple, say), calls a function (a function passed by name does), or is passed through a local, and elementwise math or a float `%` when the compiler found no device math library. A tensor reached through a struct field works like any other: `layer.w.sum()` and `layer.w -= g` run where `layer.w` lives. Given a device tensor, each of these aborts at the operation with ``panic: this tensor lives on a GPU, where host code cannot read it: move it back with `.to(Device::CPU)` first``, plus its location. Moving a device tensor, passing it, returning it, storing it in a struct and dropping it all work as they do for a host tensor.
 
-A transfer needs a usable GPU of the vendor the program was built for: NVIDIA, unless [`--gpu-arch`](../guides/cli-usage.md#choosing-a-gpu) names an AMD chip. A program whose only GPU use is `.to` looks for one at its first transfer, not at startup. If none is usable, the transfer aborts with ``panic: `Device::GPU` needs an NVIDIA GPU, and none is usable:`` (or `an AMD GPU`), followed by the reason. `Device::GPU(n)` for a GPU the machine does not have aborts with ``panic: `Device::GPU(n)` names no GPU: this machine has <count>``. Any `neurc` compiles a transfer, but on Windows a transfer to a GPU aborts.
+A transfer needs a usable GPU of the vendor the program was built for: NVIDIA, unless [`--gpu-arch`](../guides/cli-usage.md#choosing-a-gpu) names an AMD chip. A program whose only GPU use is `.to` looks for one at its first transfer, not at startup. If none is usable, the transfer aborts with ``panic: `Device::GPU` needs an NVIDIA GPU, and none is usable:`` (or `an AMD GPU`), followed by the reason. `Device::GPU(n)` for a GPU the machine does not have aborts with ``panic: `Device::GPU(n)` names no GPU: this machine has <count>``. Any `neuroc` compiles a transfer, but on Windows a transfer to a GPU aborts.
 
 ```neuro
 @gpu
@@ -856,7 +856,7 @@ A program with a `@gpu` function checks for a usable GPU when it starts, before 
 
 The attribute goes on a free function. The checker refuses it on a method (`` `@gpu` on a method is not supported yet ``) and refuses any argument other than `fallback:` (`` `@gpu` takes only `fallback: true` or `fallback: false` ``). A `@grad` body cannot differentiate through a `@gpu` call, with or without a fallback, unless the callee is also `@no_grad`, because the derivative would be computed on the host.
 
-Compiling `@gpu` needs a Linux `neurc`. On any other platform `neurc` refuses a bare `@gpu` function. By default the kernels are for NVIDIA and ship as PTX that the CUDA driver compiles for the GPU it finds. The machine that compiles therefore needs no CUDA toolkit, except for the elementwise math noted above, and the machine that runs needs only the NVIDIA driver. `--gpu-arch gfxNNN` builds for that AMD chip instead. That needs ROCm to compile and HIP to run (see [Choosing a GPU](../guides/cli-usage.md#choosing-a-gpu)). [examples/tensors/tensor_gpu.nr](../../examples/tensors/tensor_gpu.nr) runs the `blend` example above.
+Compiling `@gpu` needs a Linux `neuroc`. On any other platform `neuroc` refuses a bare `@gpu` function. By default the kernels are for NVIDIA and ship as PTX that the CUDA driver compiles for the GPU it finds. The machine that compiles therefore needs no CUDA toolkit, except for the elementwise math noted above, and the machine that runs needs only the NVIDIA driver. `--gpu-arch gfxNNN` builds for that AMD chip instead. That needs ROCm to compile and HIP to run (see [Choosing a GPU](../guides/cli-usage.md#choosing-a-gpu)). [examples/tensors/tensor_gpu.nr](../../examples/tensors/tensor_gpu.nr) runs the `blend` example above.
 
 ### A CPU fallback: `@gpu(fallback: true)`
 
@@ -872,7 +872,7 @@ func hidden(x: &Tensor<f32, [4, 3]>, w: &Tensor<f32, [3, 5]>, b: &Tensor<f32, [5
 
 The body still has to be one the GPU path can lower, because the host copy is built only beside a kernel. The value must be the literal `true` or `false`. `fallback: false` means bare `@gpu`. A program that also has a bare `@gpu` function still aborts at startup without a GPU, because that function has no host copy.
 
-Off Linux, `neurc` compiles a fallback function to its host copy only, and warns that it always runs on the host. [examples/showcase/gpu_fallback.nr](../../examples/showcase/gpu_fallback.nr) uses two fallback layers and prints the same output with or without a GPU.
+Off Linux, `neuroc` compiles a fallback function to its host copy only, and warns that it always runs on the host. [examples/showcase/gpu_fallback.nr](../../examples/showcase/gpu_fallback.nr) uses two fallback layers and prints the same output with or without a GPU.
 
 ## Writing a kernel: `@kernel`
 
@@ -930,7 +930,7 @@ The element count of `out` must be a multiple of the grid tensor's, and the comp
 
 The body may use locals, arithmetic and comparisons, casts, `&&` and `||`, and `if` (as a statement or with a value). It may use `match` on an integer, `bool` or `char` (literal, range and `_` patterns, guards), `while`, `loop` (with a `break` value too), and `for` over a range (`.rev()` and `.step(n)` included). It may also use `break`, `continue` and `return`, the integer methods `.wrapping_*`, `.saturating_*` and `.shr(n)`, shifts with `<<`, `.is_nan()`, reads and writes of single tensor elements, `.flat(i)` and `partition`. Integer arithmetic follows the build's tier, as on the host. An overflow stops the kernel in a debug build (`-O0`) and wraps from `-O1` up. Anything else, such as a function call, is a compile error at that construct: ``` `@kernel` function 'k' cannot lower a function call to the GPU```.
 
-The attribute goes on a free function, never beside `@gpu` or `@grad`. A kernel needs a GPU and a Linux `neurc`, exactly as bare `@gpu` does. [examples/tensors/tensor_kernel.nr](../../examples/tensors/tensor_kernel.nr) runs the first example above, and [examples/tensors/kernel_partition.nr](../../examples/tensors/kernel_partition.nr) runs the second. [examples/showcase/heat_diffusion.nr](../../examples/showcase/heat_diffusion.nr) steps a simulation with two kernels over tensors that stay on the GPU.
+The attribute goes on a free function, never beside `@gpu` or `@grad`. A kernel needs a GPU and a Linux `neuroc`, exactly as bare `@gpu` does. [examples/tensors/tensor_kernel.nr](../../examples/tensors/tensor_kernel.nr) runs the first example above, and [examples/tensors/kernel_partition.nr](../../examples/tensors/kernel_partition.nr) runs the second. [examples/showcase/heat_diffusion.nr](../../examples/showcase/heat_diffusion.nr) steps a simulation with two kernels over tensors that stay on the GPU.
 
 ## What tensors cannot do yet
 

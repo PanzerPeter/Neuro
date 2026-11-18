@@ -127,7 +127,7 @@ Parsing stops at the first error. Parser error recovery is on the [Quick Roadmap
 
 - [`compiler/syntax-parsing/tests/`](../../../compiler/syntax-parsing/tests/) has one file per subject. They drive `parse` from source strings, and `error_tests.rs` drives `parse_expr` on fragments.
 - A few parser modules carry unit tests of their own.
-- The end-to-end programs are in `compiler/neurc/tests/suite/`.
+- The end-to-end programs are in `compiler/neuroc/tests/suite/`.
 
 The tests in `tests/` carry no link to the code they exercise, so run the crate's suite after any grammar change.
 

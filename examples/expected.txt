@@ -5,7 +5,7 @@
 # Blank lines and lines beginning with '#' are ignored.
 #
 # This file is the single source of truth for the exit code the example test
-# harness (compiler/neurc/tests/examples.rs) expects. The harness walks
+# harness (compiler/neuroc/tests/examples.rs) expects. The harness walks
 # examples/ recursively, compiles and runs every *.nr file, and asserts its
 # exit code matches the value here. A *.nr file with no entry below, or an
 # entry with no file, fails the test, so adding an example is one new line

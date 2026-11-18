@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Fixes for the errors people hit when building the compiler and when running `neurc`. Each message quoted here is what `neurc` prints today. Anything not listed is worth searching for in [GitHub Issues](https://github.com/PanzerPeter/Neuro/issues) before you report it.
+Fixes for the errors people hit when building the compiler and when running `neuroc`. Each message quoted here is what `neuroc` prints today. Anything not listed is worth searching for in [GitHub Issues](https://github.com/PanzerPeter/Neuro/issues) before you report it.
 
 ## Installation Issues
 
@@ -34,14 +34,14 @@ On Windows, the `LLVM-*-win64.exe` installer lacks the development files and MLI
 error: linker `cc` not found
 ```
 
-and `neurc compile` fails with
+and `neuroc compile` fails with
 
 ```text
 Compilation failed: Failed to link object file to executable
   Caused by (1): Failed to execute cc - ensure a C compiler (gcc/clang) is installed
 ```
 
-**Cause**: no C compiler is on `PATH`. `cc` is the linker driver for both Cargo and `neurc`.
+**Cause**: no C compiler is on `PATH`. `cc` is the linker driver for both Cargo and `neuroc`.
 
 **Solution**:
 
@@ -300,7 +300,7 @@ bash: ./program: Permission denied
 
 ### Panics and Aborts
 
-**Symptoms**: the program prints a located message and aborts. A compiled program exits with status `134` (`SIGABRT`). Under `neurc run` the status is `1`.
+**Symptoms**: the program prints a located message and aborts. A compiled program exits with status `134` (`SIGABRT`). Under `neuroc run` the status is `1`.
 
 ```text
 panic: division by zero at program.nr:4:12
@@ -336,13 +336,13 @@ A program that dies on a signal such as `SIGSEGV` with no `panic:` line has eith
 
 **Symptoms**: compiling takes longer than expected.
 
-**Causes**: a debug build of `neurc`, a large program, or a constrained machine.
+**Causes**: a debug build of `neuroc`, a large program, or a constrained machine.
 
 **Solution**: run the compiler from a release build:
 
 ```bash
-cargo build --release -p neurc
-target/release/neurc compile program.nr
+cargo build --release -p neuroc
+target/release/neuroc compile program.nr
 ```
 
 ## Development Environment Issues
@@ -363,20 +363,20 @@ target/release/neurc compile program.nr
 
 ### Enable Debug Logging
 
-`RUST_LOG` makes `neurc` log each pipeline stage to stderr. The levels are listed under [RUST_LOG](cli-usage.md#rust_log).
+`RUST_LOG` makes `neuroc` log each pipeline stage to stderr. The levels are listed under [RUST_LOG](cli-usage.md#rust_log).
 
 ```bash
-RUST_LOG=debug neurc compile program.nr 2> debug.log    # Unix
-$env:RUST_LOG="debug"; neurc compile program.nr 2> debug.log   # PowerShell
+RUST_LOG=debug neuroc compile program.nr 2> debug.log    # Unix
+$env:RUST_LOG="debug"; neuroc compile program.nr 2> debug.log   # PowerShell
 ```
 
 ### Check Each Stage
 
-Narrow the failure to a stage: `neurc check` runs the front end only, `neurc compile` adds code generation and linking, and running the output tests the program itself.
+Narrow the failure to a stage: `neuroc check` runs the front end only, `neuroc compile` adds code generation and linking, and running the output tests the program itself.
 
 ```bash
-neurc check program.nr
-neurc compile program.nr
+neuroc check program.nr
+neuroc compile program.nr
 ./program
 ```
 
@@ -426,7 +426,7 @@ Features that are planned but not built yet are on the [Quick Roadmap](../../REA
 
 ### Why does my program compile but do nothing?
 
-Check that `main` returns the expected exit code and performs the operations you expect. `neurc run` passes `main`'s return value through as its own exit status.
+Check that `main` returns the expected exit code and performs the operations you expect. `neuroc run` passes `main`'s return value through as its own exit status.
 
 ### Why can't I mix i32 and i64?
 
@@ -438,7 +438,7 @@ Use `-O0` for the fastest compile in a debug loop, and `-O2` or `-O3` for faster
 
 ### How do I speed up development?
 
-Use `neurc check` for feedback without code generation.
+Use `neuroc check` for feedback without code generation.
 
 ### Can I use Neuro for production?
 
@@ -449,7 +449,7 @@ Not yet. The language is alpha, and its syntax and semantics can still change be
 Before reporting:
 1. Check this page and the [CLI Usage Guide](cli-usage.md).
 2. Search [GitHub Issues](https://github.com/PanzerPeter/Neuro/issues).
-3. Capture a debug log with `RUST_LOG=debug neurc compile program.nr 2> debug.log`.
+3. Capture a debug log with `RUST_LOG=debug neuroc compile program.nr 2> debug.log`.
 4. Reduce the program to a minimal file that still fails.
 
 Include in the report, following [CONTRIBUTING.md](../../CONTRIBUTING.md):
@@ -457,7 +457,7 @@ Include in the report, following [CONTRIBUTING.md](../../CONTRIBUTING.md):
 ```markdown
 ## Environment
 - OS: Windows 11 / Ubuntu 22.04 / macOS 13
-- Neuro: output of `neurc --version`, and the commit hash
+- Neuro: output of `neuroc --version`, and the commit hash
 - LLVM: 23.x
 - Rust: 1.100+
 

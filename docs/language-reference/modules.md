@@ -5,7 +5,7 @@ Neuro programs may span several files. Every `.nr` file is a module, and a direc
 
 ```text
 examples/modules/
-  main.nr          <- the root module (the file you pass to neurc)
+  main.nr          <- the root module (the file you pass to neuroc)
   geometry.nr      <- module `geometry`
   shapes/
     mod.nr         <- module `shapes`
@@ -15,7 +15,7 @@ examples/modules/
 You compile the **root**. Every module it reaches is pulled in with it.
 
 ```bash
-neurc compile examples/modules/main.nr
+neuroc compile examples/modules/main.nr
 ```
 
 ## Reaching into a module
@@ -94,7 +94,7 @@ import Shape::Circle                 // one variant
 ```
 
 A path written without `./` or `../` starts at the program's root directory, the one holding the file
-you passed to `neurc`. `./` starts at the importing file's own directory, and each `../` climbs one
+you passed to `neuroc`. `./` starts at the importing file's own directory, and each `../` climbs one
 level above it. A brace entry may name a **child module** as well as an item.
 `import ./utils::{io}` binds the module `utils::io`, so `io::read(x)` resolves.
 
@@ -142,7 +142,7 @@ implements: `print`, `println`, `Vec`, `HashMap`, `BTreeMap`, `StringBuilder`, `
 `std::prelude` declares each of these with `@intrinsic` and an empty body, and the compiler supplies
 the rest. A program cannot write `@intrinsic` itself.
 
-The prelude is an ordinary module, `std::prelude`. The standard library is Neuro source embedded in `neurc`
+The prelude is an ordinary module, `std::prelude`. The standard library is Neuro source embedded in `neuroc`
 and compiled with every program, so a compiler binary needs no library files beside it. `std` names it
 from every module, and a `std.nr` beside the program does not change that. `std::prelude::Option`,
 `import std::prelude::{Option}` and a bare `Option` all reach the same declaration.

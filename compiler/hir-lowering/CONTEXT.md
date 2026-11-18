@@ -221,7 +221,7 @@ zero one, so any other stride is refused.
 Anything else, inactive or not, is
 `LoweringError::NotDifferentiable { function, construct, span }`, the one user-facing variant of
 this enum: the transform owns its rule set, so it is the one place that can say precisely what
-it cannot differentiate, and it says where. `neurc` renders it like a type error. The signature
+it cannot differentiate, and it says where. `neuroc` renders it like a type error. The signature
 rules (loss type, `&mut` tensor parameters) are the checker's, in `semantic-analysis`; the
 generated names are duplicated there, and a user name containing `__` is already rejected, so
 `__f__rev` cannot clash.

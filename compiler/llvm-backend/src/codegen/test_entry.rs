@@ -1,4 +1,4 @@
-//! The entry point of a `neurc test` executable.
+//! The entry point of a `neuroc test` executable.
 //!
 //! The harness runs the one executable once per test, naming the test by its index in
 //! `argv[1]`, so a panicking test aborts only its own process. The entry is emitted as the C

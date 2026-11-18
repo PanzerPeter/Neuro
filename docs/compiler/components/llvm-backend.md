@@ -1,6 +1,6 @@
 # LLVM Backend
 
-The LLVM backend turns the typed HIR into native object code, or into textual LLVM IR with `neurc compile --emit llvm-ir`. It owns all scalar code and every tensor operation with no loop, and links in the tensor loops that the [MLIR backend](mlir-backend.md) computes. Read it when a change touches code generation, the runtime ABI, or the panic and output paths.
+The LLVM backend turns the typed HIR into native object code, or into textual LLVM IR with `neuroc compile --emit llvm-ir`. It owns all scalar code and every tensor operation with no loop, and links in the tensor loops that the [MLIR backend](mlir-backend.md) computes. Read it when a change touches code generation, the runtime ABI, or the panic and output paths.
 
 **Crate**: `compiler/llvm-backend`
 **Library**: inkwell (LLVM 23 bindings)
@@ -11,7 +11,7 @@ The LLVM backend turns the typed HIR into native object code, or into textual LL
 
 The backend reads the HIR produced by [HIR lowering](hir-lowering.md), not the AST. Lowering has already attached a resolved type to every expression, so codegen reads types inline and no backend pass collects them again. The language features it generates are described in the [language reference](../../language-reference/).
 
-`compile` returns object code that may be a library, so every function stays callable. `compile_executable` returns object code that `neurc` passes to the system linker, with every symbol but `main` private to it. `compile_to_ir` runs the same pipeline up to the optimizer and returns the module as text. `compile_tests` builds the executable behind `neurc test`, whose `main` runs the test at the index its first argument gives. Each entry also takes a `SourceMap` of every file's text, so that panic messages can name `file:line:col`.
+`compile` returns object code that may be a library, so every function stays callable. `compile_executable` returns object code that `neuroc` passes to the system linker, with every symbol but `main` private to it. `compile_to_ir` runs the same pipeline up to the optimizer and returns the module as text. `compile_tests` builds the executable behind `neuroc test`, whose `main` runs the test at the index its first argument gives. Each entry also takes a `SourceMap` of every file's text, so that panic messages can name `file:line:col`.
 
 ## Architecture
 
@@ -135,7 +135,7 @@ The failure path is emitted into a module-private cold function, a thunk named `
 
 A panic writes its message to stderr with `write(2, ...)`, then calls `abort()`, which ends the process with status 134 on Linux.
 
-Compiling a file `add.nr` that holds this function, at `-O0` with `neurc compile add.nr --emit llvm-ir`, gives the IR below. The panic text names that file. The prelude's own thunks and strings are numbered first, so the numbers in the names change with the prelude:
+Compiling a file `add.nr` that holds this function, at `-O0` with `neuroc compile add.nr --emit llvm-ir`, gives the IR below. The panic text names that file. The prelude's own thunks and strings are numbered first, so the numbers in the names change with the prelude:
 
 ```neuro
 func add(a: i32, b: i32) -> i32 {
@@ -221,7 +221,7 @@ String `slice` and `char_slice` compute a borrowed fat pointer, with bounds and 
 
 ### MLIR bodies
 
-This backend has no loops over a tensor's elements. Each such operation reaches it as a call to a function that [HIR lowering](hir-lowering.md) outlined, and whose body the [MLIR backend](mlir-backend.md) computed. `neurc` passes those bodies as LLVM IR text plus the `(function, symbol)` pairs. A call to one becomes a call to its symbol, and the backend loads each tensor's buffer from its handle and passes it as an exploded row-major `memref` descriptor. It allocates the result tensor itself and passes that buffer as one more descriptor, then releases the tensors the operation took by value.
+This backend has no loops over a tensor's elements. Each such operation reaches it as a call to a function that [HIR lowering](hir-lowering.md) outlined, and whose body the [MLIR backend](mlir-backend.md) computed. `neuroc` passes those bodies as LLVM IR text plus the `(function, symbol)` pairs. A call to one becomes a call to its symbol, and the backend loads each tensor's buffer from its handle and passes it as an exploded row-major `memref` descriptor. It allocates the result tensor itself and passes that buffer as one more descriptor, then releases the tensors the operation took by value.
 
 The linked IR is parsed into the module's own context and optimized at `-O2` whatever the program's level. Nothing in it permits reassociating floats, so the bits do not change. Each linked symbol is made internal so the optimizer can inline it. In a program that moves no tensor to a device, the call is emitted where it is made, so the result is the caller's own allocation, and a `pool` body's operations allocate from its arena.
 
@@ -287,7 +287,7 @@ GPU failures use the same `panic:` path. When no GPU is usable, the message read
 
 - Unit tests sit beside the code in `src/`, including [`tests.rs`](../../../compiler/llvm-backend/src/tests.rs) and the `#[cfg(test)]` modules of `type_mapping.rs` and `codegen/`.
 - Benchmarks are in [`benches/`](../../../compiler/llvm-backend/benches/).
-- End-to-end behavior, including every panic message above, is covered by the `neurc` suites in [`compiler/neurc/tests/suite/`](../../../compiler/neurc/tests/suite/).
+- End-to-end behavior, including every panic message above, is covered by the `neuroc` suites in [`compiler/neuroc/tests/suite/`](../../../compiler/neuroc/tests/suite/).
 
 Run the crate's tests with the three prefix variables set to one LLVM and MLIR 23 install, as [Installation](../../getting-started/installation.md#mlir) describes:
 

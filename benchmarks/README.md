@@ -6,7 +6,7 @@ the same program, so a claim about speed can be checked rather than asserted.
 ## Running
 
 ```bash
-cargo build --release          # the harness benchmarks the release neurc
+cargo build --release          # the harness benchmarks the release neuroc
 cd benchmarks
 uv run python run.py           # every benchmark
 uv run python run.py mandelbrot --reps 9 --levels 0,2,3
@@ -18,13 +18,13 @@ library it links. A distribution package may link the reference BLAS, about a hu
 slower at a large matrix product; the wheel bundles OpenBLAS. PyTorch's Linux wheel bundles
 CUDA, so it needs only the NVIDIA driver.
 
-The harness builds each benchmark with `neurc`, the system C++ compiler (`clang++`, else
+The harness builds each benchmark with `neuroc`, the system C++ compiler (`clang++`, else
 `g++`) and `rustc`, runs every implementation, and **fails if their output differs**. A
 benchmark whose implementations have drifted apart is measuring different work. It reports the
 fastest of several runs, since noise only ever adds time. A missing toolchain is skipped with a
 note, so the harness still runs where only some of them are installed.
 
-The `gpu_*` benchmarks run their Neuro side as `@gpu` kernels, which needs a Linux `neurc` and
+The `gpu_*` benchmarks run their Neuro side as `@gpu` kernels, which needs a Linux `neuroc` and
 an NVIDIA GPU. Without them the Neuro rows are skipped with a note. They have no C++ or Rust row:
 a CPU loop says nothing about a GPU kernel. Their comparisons are PyTorch on the same GPU and
 NumPy on the CPU.

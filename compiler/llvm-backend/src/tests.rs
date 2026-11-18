@@ -1,19 +1,19 @@
 // Unit tests for the llvm-backend entry point: they drive `compile` over real
 // source through parse -> lower, and assert on the emitted module rather than on
-// internals. Integration-level behaviour lives in the neurc suite.
+// internals. Integration-level behaviour lives in the neuroc suite.
 
 use super::*;
 use crate::codegen::context::ALIGNED_ALLOC_FN;
 use crate::type_mapping::TypeMapper;
 
 /// Parse and lower `source` to typed HIR for the backend smoke tests. Mirrors the
-/// `parse → lower → compile` pipeline `neurc` runs (lowering assumes well-typedness).
+/// `parse → lower → compile` pipeline `neuroc` runs (lowering assumes well-typedness).
 fn lower(source: &str) -> neuro_hir::HirProgram {
     let ast = syntax_parsing::parse(source).expect("parsing failed");
     hir_lowering::lower_program(&ast).expect("HIR lowering failed")
 }
 
-/// The host bodies `mlir-backend` computes for `hir`'s tensor operations, as `neurc` hands
+/// The host bodies `mlir-backend` computes for `hir`'s tensor operations, as `neuroc` hands
 /// them over.
 fn host_bodies(
     hir: &neuro_hir::HirProgram,
@@ -132,7 +132,7 @@ fn function_body<'a>(ir: &'a str, name: &str) -> &'a str {
 }
 
 /// The prelude declarations the `PoolAware` tests need. `module_ir` drives the
-/// pipeline without `neurc`, which is what prepends the real prelude.
+/// pipeline without `neuroc`, which is what prepends the real prelude.
 const POOL_AWARE_PRELUDE: &str = "
     struct PoolHandle { id: u64 }
     trait PoolAware {
@@ -2361,7 +2361,7 @@ fn regression_a_long_array_binding_is_planned_without_listing_its_elements() {
     );
 }
 
-/// The prelude enum `.to` takes. `module_ir` drives the pipeline without `neurc`, which
+/// The prelude enum `.to` takes. `module_ir` drives the pipeline without `neuroc`, which
 /// is what prepends the real prelude.
 const DEVICE_PRELUDE: &str = "
     enum Device {

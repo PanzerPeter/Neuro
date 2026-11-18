@@ -19,9 +19,9 @@ Usage, from `benchmarks/` (uv builds `.venv` with NumPy and PyTorch from `pyproj
     uv run python run.py --reps 9         # more repetitions (min is reported)
     uv run python run.py --levels 0,2,3   # which -O levels to build Neuro, C++ and Rust at
 
-Requires `neurc` (built with `cargo build --release`) and python3. A language whose
+Requires `neuroc` (built with `cargo build --release`) and python3. A language whose
 toolchain is missing (a C++ compiler, rustc, NumPy, PyTorch with CUDA) is skipped with
-a note rather than failing the run, as is a `gpu_*` benchmark when neurc cannot compile
+a note rather than failing the run, as is a `gpu_*` benchmark when neuroc cannot compile
 `@gpu` (off Linux) or the machine has no usable GPU.
 """
 
@@ -41,9 +41,9 @@ BUILD = Path(__file__).resolve().parent / "build"
 DEFAULT_REPS = 5
 
 
-def neurc() -> Path | None:
-    """The release `neurc`, which is the only build worth benchmarking with."""
-    candidate = ROOT / "target" / "release" / ("neurc.exe" if sys.platform == "win32" else "neurc")
+def neuroc() -> Path | None:
+    """The release `neuroc`, which is the only build worth benchmarking with."""
+    candidate = ROOT / "target" / "release" / ("neuroc.exe" if sys.platform == "win32" else "neuroc")
     return candidate if candidate.exists() else None
 
 
@@ -59,20 +59,20 @@ def run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 def build_neuro(name: str, level: int) -> tuple[str, Path] | None:
-    compiler = neurc()
+    compiler = neuroc()
     if compiler is None:
         return None
     out = BUILD / f"{name}.neuro.O{level}"
     result = run([str(compiler), "compile", str(PROGRAMS / f"{name}.nr"), "-O", str(level), "-o", str(out)])
     if result.returncode != 0:
-        print(f"  ! neurc -O{level} failed: {result.stderr.strip().splitlines()[-1:]}")
+        print(f"  ! neuroc -O{level} failed: {result.stderr.strip().splitlines()[-1:]}")
         return None
     return (f"neuro -O{level}", out)
 
 
 def build_native(name: str, ext: str, level: int) -> tuple[str, Path] | None:
     """C++ or Rust at `-O{level}`, the same LLVM pipeline level Neuro is built at. Both
-    target the generic CPU, as neurc does: no `-march=native` on either side."""
+    target the generic CPU, as neuroc does: no `-march=native` on either side."""
     source = PROGRAMS / f"{name}.{ext}"
     if not source.exists():
         return None
@@ -180,8 +180,8 @@ def main() -> None:
     parser.add_argument("--levels", default="0,3", help="comma-separated -O levels for Neuro, C++ and Rust")
     args = parser.parse_args()
 
-    if neurc() is None:
-        print("neurc not found; run `cargo build --release` first", file=sys.stderr)
+    if neuroc() is None:
+        print("neuroc not found; run `cargo build --release` first", file=sys.stderr)
         raise SystemExit(1)
 
     names = args.names or sorted({p.stem for p in PROGRAMS.glob("*.nr")})

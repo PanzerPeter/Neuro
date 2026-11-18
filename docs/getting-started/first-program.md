@@ -4,7 +4,7 @@ This tutorial takes you from an empty file to a program with functions, control 
 basic type. Each step builds on the one before, so work through them in order. You need the
 compiler from the [Installation Guide](installation.md) and a text editor.
 
-The commands use `neurc`. Without `cargo install`, substitute `cargo run -p neurc --`, as the
+The commands use `neuroc`. Without `cargo install`, substitute `cargo run -p neuroc --`, as the
 [Quick Start](quick-start.md) explains.
 
 ## Step 1: Create a Project Directory
@@ -34,7 +34,7 @@ This is the simplest valid Neuro program:
 ## Step 3: Check the Program
 
 ```bash
-neurc check hello.nr
+neuroc check hello.nr
 ```
 
 ```text
@@ -47,7 +47,7 @@ declarations in your file.
 ## Step 4: Compile the Program
 
 ```bash
-neurc compile hello.nr
+neuroc compile hello.nr
 ```
 
 ```text
@@ -83,7 +83,7 @@ func main() -> i32 {
 Replace the contents of `hello.nr` with this program and run it:
 
 ```bash
-neurc run hello.nr
+neuroc run hello.nr
 echo $?                # 30
 ```
 

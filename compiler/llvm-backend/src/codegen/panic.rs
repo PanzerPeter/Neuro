@@ -128,7 +128,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Render the ` at file:line:col` suffix for a panic diagnostic from a byte offset in
     /// the program's offset space, naming the file the offset falls in. Empty when no file
     /// holds it. The column counts characters, not bytes, matching the compile-time
-    /// diagnostics `neurc` renders, so a multi-byte character earlier on the line does not
+    /// diagnostics `neuroc` renders, so a multi-byte character earlier on the line does not
     /// shift it.
     fn panic_location_suffix(&mut self, offset: usize) -> String {
         let Some((file, local)) = self.sources.locate(offset) else {

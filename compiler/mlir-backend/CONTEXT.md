@@ -5,7 +5,7 @@ Compute every tensor operation, on the CPU and as NVIDIA or AMD GPU kernels: the
 no tensor loops of its own. It consumes `neuro_hir::HirProgram`, in which lowering has outlined each
 tensor operation into a function of its own, and builds each one's body from the `linalg`, `tensor`
 and `memref` dialects. The module carries on through bufferization and the `llvm` dialect into a
-verified inkwell LLVM module, handed to the driver as linkable LLVM IR, which `neurc` links into
+verified inkwell LLVM module, handed to the driver as linkable LLVM IR, which `neuroc` links into
 every compile. `lower_program` still emits the debugging view: a `func.func` declaration per
 function, or a definition where the body is one this crate builds.
 
@@ -62,7 +62,7 @@ caches.
   lacks is `KernelBodiesNotLowered`, a `KernelRefusal` (function, construct span, what it is) per
   function. A body calling a math function needs the vendor's device math library; without it
   (probed once, see Notes) a `FollowsOperands` one keeps its host body, a `@gpu` one is
-  `GpuBodiesNotLowered` and a `@kernel` one a `KernelRefusal` at the call. `neurc` calls it for a
+  `GpuBodiesNotLowered` and a `@kernel` one a `KernelRefusal` at the call. `neuroc` calls it for a
   program with a `@gpu`, `@kernel` or `FollowsOperands` function.
 `build_smoke_module` is `pub(crate)` and compiled only under `test`. It builds
 `func.func @neuro_smoke(index, index) -> index` with a single `arith.addi` body, and `bridge`'s
@@ -356,7 +356,7 @@ checks report different diagnostics) and the check's number, counted from 1, in 
 The min therefore keeps the failure the host meets first (operations run one after another,
 elements in row-major order), whichever thread wrote it. The checks travel as
 `LinkableBodies::guards` and the caller panics for the one left. A failed divisor is replaced by 1
-so the body stays defined; a body with more than 4095 checks gets no body here, which `neurc`
+so the body stays defined; a body with more than 4095 checks gets no body here, which `neuroc`
 reports as an internal error at the operation.
 `linalg-fuse-elementwise-ops` does not erase a fused producer whose body has a check, since the
 `scf.if` store is a side effect, so its checks run once more in a loop of their own, and every
@@ -385,7 +385,7 @@ no operand walks leaves the function a declaration.
 It answers `Ok(None)`, meaning "leave this function a declaration", for anything else. Scalar
 code stays the LLVM backend's: an outlined body reads its scalars, literals included, as
 parameters, so nothing here lowers a literal. For an outlined function `None` is a compiler bug,
-which `neurc` reports at the operation.
+which `neuroc` reports at the operation.
 
 **A matrix product is a contracting `linalg.generic`.** `build_matmul` reads `@` instead of the
 element-wise path and emits the canonical three-operation shape: a `tensor.empty`, a

@@ -367,7 +367,7 @@ func tenths_add_up() {
 }
 ```
 
-`neurc test file.nr` builds the program with a generated entry point and runs each test in its own process. A failing `assert` aborts only that test's process, so the rest still run. Tests are found in every module the program reaches, but not in the standard library. A test file needs no `main`. If it has one, a test may call it. `neurc compile`, `run` and `check` treat a test as an ordinary function. The [CLI guide](../guides/cli-usage.md#test) shows the output.
+`neuroc test file.nr` builds the program with a generated entry point and runs each test in its own process. A failing `assert` aborts only that test's process, so the rest still run. Tests are found in every module the program reaches, but not in the standard library. A test file needs no `main`. If it has one, a test may call it. `neuroc compile`, `run` and `check` treat a test as an ordinary function. The [CLI guide](../guides/cli-usage.md#test) shows the output.
 
 `std::testing` compares floats:
 

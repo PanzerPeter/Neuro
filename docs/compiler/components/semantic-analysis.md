@@ -86,7 +86,7 @@ These rules live in [`type_checkers/grad.rs`](../../../compiler/semantic-analysi
 
 - `@gpu` marks a free function that is not also `@grad`. It takes no argument, or one `fallback:` set to the literal `true` or `false`. Whether the body can become a GPU kernel is decided by the GPU backend at compile time, so `check` can accept a body that `compile` refuses.
 - `@kernel` has its own form rules (`KernelForm`). It is a free function with one `threads:` array of one to three positive integer literals whose product is at most 1024, and a `void` return. Its parameters are numbers, `bool`s, `Tensor` inputs, or `KernelOut<Tensor>` outputs. The output handles may only be indexed inside an `unsafe` block. The rules are in [Tensors](../../language-reference/tensors.md#writing-a-kernel-kernel) and [`type_checkers/kernel.rs`](../../../compiler/semantic-analysis/src/type_checkers/kernel.rs).
-- `@test` marks a free, non-generic function with no parameters that returns nothing, because `neurc test` calls each one with no arguments and ignores its result. The attribute takes no arguments and is refused on a method or a struct. The rules are in [`type_checkers/test_functions.rs`](../../../compiler/semantic-analysis/src/type_checkers/test_functions.rs).
+- `@test` marks a free, non-generic function with no parameters that returns nothing, because `neuroc test` calls each one with no arguments and ignores its result. The attribute takes no arguments and is refused on a method or a struct. The rules are in [`type_checkers/test_functions.rs`](../../../compiler/semantic-analysis/src/type_checkers/test_functions.rs).
 
 ## Diagnostics
 
@@ -101,7 +101,7 @@ error: name 'add__one' contains '__', which is reserved for compiler-generated s
 
 - Unit tests sit beside the code: `#[cfg(test)]` modules in the files they cover, such as [`types.rs`](../../../compiler/semantic-analysis/src/types.rs), and the subject files in `type_checkers/tests/`.
 - Integration tests are in [`compiler/semantic-analysis/tests/`](../../../compiler/semantic-analysis/tests/), one file per subject. They parse source strings with `syntax_parsing::parse` and call `type_check`.
-- End-to-end behavior is covered by the `neurc` suites in [`compiler/neurc/tests/suite/`](../../../compiler/neurc/tests/suite/).
+- End-to-end behavior is covered by the `neuroc` suites in [`compiler/neuroc/tests/suite/`](../../../compiler/neuroc/tests/suite/).
 
 ## Source
 

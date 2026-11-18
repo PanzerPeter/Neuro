@@ -9,7 +9,7 @@ arithmetic and prove nothing about the exchange structure; here NumPy decides th
 rank, the extents and the strides by reading the handle's own fields, so a wrong `dtype.bits`
 or a stride counted in bytes instead of elements fails a case rather than passing silently.
 
-Pipeline: write one Neuro module holding every case's function, `neurc compile --emit obj`,
+Pipeline: write one Neuro module holding every case's function, `neuroc compile --emit obj`,
 link it into a shared library with the platform C compiler, `ctypes`-load it, call each
 function, wrap the returned pointer in a DLPack capsule, and hand it to `numpy.from_dlpack`.
 
@@ -17,9 +17,9 @@ NumPy takes OWNERSHIP of each array it imports, so releasing them at the end run
 handle's own `deleter`: the single release path the spec requires. A double free or a
 deleter that frees the wrong block crashes the interpreter here instead of going unnoticed.
 
-Run it directly, or through `cargo test -p neurc --test numpy_differential`:
+Run it directly, or through `cargo test -p neuroc --test numpy_differential`:
 
-    python tools/dlpack_differential.py --neurc target/debug/neurc
+    python tools/dlpack_differential.py --neuroc target/debug/neuroc
     python tools/dlpack_differential.py --self-test
 """
 
@@ -62,7 +62,7 @@ def find_c_compiler():
 
 C_COMPILER = find_c_compiler()
 
-# On Windows `neurc` emits MSVC-target objects, which probe any stack frame over a page
+# On Windows `neuroc` emits MSVC-target objects, which probe any stack frame over a page
 # through `__chkstk`. The MinGW `cc` that links them has no such symbol, only libgcc's
 # `___chkstk_ms`, the same probe under the MinGW name (size in RAX, RSP left alone). `-u`
 # pulls it out of libgcc and `--defsym` answers the MSVC name with it.
@@ -352,20 +352,20 @@ def check(produced, expected):
         raise Failure(f"values:\n  neuro = {produced!r}\n  numpy = {expected!r}")
 
 
-def build_library(neurc, work_dir):
+def build_library(neuroc, work_dir):
     """Compile every case into one shared library and return its path."""
     source_path = work_dir / "dlpack_cases.nr"
     source_path.write_text("".join(case.source for case in CASES), encoding="utf-8")
 
     object_path = work_dir / "dlpack_cases.o"
     compile_result = subprocess.run(
-        [str(neurc), "compile", "--emit", "obj", "-o", str(object_path), str(source_path)],
+        [str(neuroc), "compile", "--emit", "obj", "-o", str(object_path), str(source_path)],
         capture_output=True,
         text=True,
     )
     if compile_result.returncode != 0:
         raise Failure(
-            "neurc could not compile the case module:\n"
+            "neuroc could not compile the case module:\n"
             f"{compile_result.stdout}{compile_result.stderr}"
         )
 
@@ -403,7 +403,7 @@ def import_tensor(library, name):
     return imported
 
 
-def run(neurc, corrupt):
+def run(neuroc, corrupt):
     """Compile, import and compare every case. Returns the list of failure reports."""
     failures = []
     imported = []
@@ -411,7 +411,7 @@ def run(neurc, corrupt):
     # so the directory may refuse to go. Losing a temp directory is not a failed
     # comparison; the check below has already run by then.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work_dir:
-        library = ctypes.CDLL(str(build_library(neurc, Path(work_dir))))
+        library = ctypes.CDLL(str(build_library(neuroc, Path(work_dir))))
         for case in CASES:
             expected = case.reference()
             if corrupt:
@@ -434,9 +434,9 @@ def run(neurc, corrupt):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--neurc",
-        default="target/debug/neurc",
-        help="path to the neurc binary to test (default: target/debug/neurc)",
+        "--neuroc",
+        default="target/debug/neuroc",
+        help="path to the neuroc binary to test (default: target/debug/neuroc)",
     )
     parser.add_argument(
         "--self-test",
@@ -458,13 +458,13 @@ def main():
         print("no C compiler on PATH; cannot link a shared library", file=sys.stderr)
         return EXIT_SKIPPED
 
-    neurc = Path(args.neurc)
-    if not neurc.is_file():
-        print(f"neurc not found at {neurc}", file=sys.stderr)
+    neuroc = Path(args.neuroc)
+    if not neuroc.is_file():
+        print(f"neuroc not found at {neuroc}", file=sys.stderr)
         return EXIT_SKIPPED
 
     try:
-        failures = run(neurc, corrupt=args.self_test)
+        failures = run(neuroc, corrupt=args.self_test)
     except Failure as failure:
         print(failure, file=sys.stderr)
         return 1

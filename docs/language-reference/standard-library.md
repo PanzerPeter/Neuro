@@ -126,10 +126,10 @@ val epochs = args.get(1).map(|a| a.parse::<i32>() ?? 10) ?? 10
 val mode = std::env::var("MODE") ?? "train"
 ```
 
-`neurc run` passes everything after `--` to the program:
+`neuroc run` passes everything after `--` to the program:
 
 ```bash
-neurc run train.nr -- 20
+neuroc run train.nr -- 20
 ```
 
 ## Standard input: `std::io::read_line`

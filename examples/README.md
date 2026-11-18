@@ -13,7 +13,7 @@ one and checks two things:
 
 | Directory       | What it covers | Reference |
 | --------------- | -------------- | --------- |
-| `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println`, `@test` functions run by `neurc test` | [Functions](../docs/language-reference/functions.md) |
+| `basics/`       | First programs: functions, variables, arithmetic, recursion, inference, `print` / `println`, `@test` functions run by `neuroc test` | [Functions](../docs/language-reference/functions.md) |
 | `types/`        | Primitives, literal suffixes and separators, casts, overflow, half precision, arrays, tuples, destructuring, newtypes, aliases, enum methods and trait impls, `Option` / `Result`, collections, dispatch | [Types](../docs/language-reference/types.md), [Generics and traits](../docs/language-reference/generics-and-traits.md) |
 | `strings/`      | `string` literals, also where `&string` is expected, and slices, `char`, interpolation, triple-quoted blocks, codepoint iteration, `.lines()` and `.split(sep)`, `.parse::<T>()`, the growable `StringBuilder` | [Strings](../docs/language-reference/strings.md) |
 | `tensors/`      | `Tensor<T, [dims]>`: construction, element-wise operators and broadcasting, matrix multiplication, indexing and slicing, shape generics over extents and whole shapes (`Tensor<T, S>`, `[..S, N]`), structs and `impl`s sized by bare names, element types generic under `Numeric` / `Integer` / `Float`, named dimensions, reshaping, reductions, sorting, Einstein notation, functional traversals, elementwise math, dynamic axes, `@gpu` kernels, hand-written `@kernel` functions and their `partition` write form, device transfer with `.to` and the operations that then run on the device | [Tensors](../docs/language-reference/tensors.md) |
@@ -30,10 +30,10 @@ one and checks two things:
 
 ```bash
 # Type-check only
-cargo run -p neurc -- check examples/basics/hello.nr
+cargo run -p neuroc -- check examples/basics/hello.nr
 
 # Compile to an executable (choose an output path outside the source tree)
-cargo run -p neurc -- compile examples/basics/hello.nr -o /tmp/hello
+cargo run -p neuroc -- compile examples/basics/hello.nr -o /tmp/hello
 /tmp/hello; echo "exit: $?"
 
 # What it prints is exactly what the golden file holds
@@ -45,12 +45,12 @@ keeps them out of the source tree entirely.
 
 ## Testing
 
-One integration test, [`compiler/neurc/tests/examples.rs`](../compiler/neurc/tests/examples.rs),
+One integration test, [`compiler/neuroc/tests/examples.rs`](../compiler/neuroc/tests/examples.rs),
 compiles and runs every example. It finds the programs by walking `examples/` recursively:
 
 ```bash
 cargo test --workspace                 # runs all examples (among everything else)
-cargo test -p neurc --test examples    # just the example harness
+cargo test -p neuroc --test examples    # just the example harness
 ```
 
 Each `expected.txt` line is a path and a marker. The marker is an exit code, optionally
@@ -88,10 +88,10 @@ line, then both texts in full with every line quoted, so trailing whitespace is 
 2. Add one line to [`expected.txt`](expected.txt), in that directory's section:
    `path/from/examples.nr  <exit-code>`.
 3. If it prints, save its output beside it as `<name>.out`:
-   `cargo run -p neurc -- compile examples/<name>.nr -o /tmp/ex && /tmp/ex > examples/<name>.out`.
+   `cargo run -p neuroc -- compile examples/<name>.nr -o /tmp/ex && /tmp/ex > examples/<name>.out`.
    Read the file before committing it. It is an assertion, so it is only worth having if the
    text is what the program should produce.
-4. Run `cargo test -p neurc --test examples`. No Rust edits are needed.
+4. Run `cargo test -p neuroc --test examples`. No Rust edits are needed.
 
 ## Showcase
 
@@ -191,7 +191,7 @@ the full description.
 - [`records_numbers/perceptron.nr`](integration/records_numbers/perceptron.nr): A two-neuron feed-forward pass with structs, `impl` blocks, associated functions, `&self` methods and `as` casts.
 - [`records_numbers/quantized_readings.nr`](integration/records_numbers/quantized_readings.nr): Sensor readings quantized with `.to_checked::<u8>()`, which rejects out-of-range and NaN values where `as u8` would clamp them.
 - [`records_numbers/render_settings.nr`](integration/records_numbers/render_settings.nr): A render pipeline called with named arguments in a different order from the declaration, plus a positional `_` parameter.
-- [`records_numbers/running_stats.nr`](integration/records_numbers/running_stats.nr): An online mean accumulator with mixed `i32` and `f64` fields, direct field mutation and an `.is_nan()` guard, checked by `@test` functions that `neurc test` runs.
+- [`records_numbers/running_stats.nr`](integration/records_numbers/running_stats.nr): An online mean accumulator with mixed `i32` and `f64` fields, direct field mutation and an `.is_nan()` guard, checked by `@test` functions that `neuroc test` runs.
 - [`records_numbers/season_table.nr`](integration/records_numbers/season_table.nr): A league table of non-`Copy` records: `+` moves two half-seasons into one, `+=` and `-=` update a `Vec` element, a field and a `&mut` parameter in place, and one `lt` supplies `<=`, `>` and a generic `T: Comparable`, beside closures and `Option`.
 - [`records_numbers/simulation.nr`](integration/records_numbers/simulation.nr): A bit-flag state machine on a struct field, using `|=`, `&=`, `^=` and `<<=`, and `~` through a `BitNot` impl.
 - [`records_numbers/unit_types.nr`](integration/records_numbers/unit_types.nr): Newtype units of measure (`Meters` and `Seconds` both wrap `i32`) that the compiler keeps apart.

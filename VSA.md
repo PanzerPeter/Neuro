@@ -15,7 +15,7 @@
 |------|-----------|
 | **Slice** | One compiler capability owning its own entry point, internals, and tests. A crate under `compiler/`. Zero runtime dependency on other Slices. |
 | **Shared Kernel** | The crates under `compiler/infrastructure/`. Contract types and adapters only: no compilation logic. |
-| **Driver** | `neurc`. The only crate permitted to depend on every Slice. Owns pipeline orchestration. |
+| **Driver** | `neuroc`. The only crate permitted to depend on every Slice. Owns pipeline orchestration. |
 | **Contract Type** | A type crossing a Slice boundary: AST nodes, HIR nodes, `Span`, diagnostics. Lives in the Shared Kernel, never in a Slice. |
 | **CONTEXT.md** | Contract file at each crate root. The agent's cross-session memory for that Slice. Not documentation. |
 | **Hard Gate** | A point where the agent must pause for explicit written confirmation. |
@@ -77,13 +77,13 @@ Silence, absence of objection, or topic continuation is not approval.
 ## 4. Slice Boundaries
 
 **Pipeline order.** Source, then lexical analysis, syntax parsing, module resolution,
-semantic analysis, HIR lowering, backend codegen, link. `neurc` calls each in turn and
+semantic analysis, HIR lowering, backend codegen, link. `neuroc` calls each in turn and
 carries the value from one to the next. A Slice never calls the next stage itself.
 
 **The one allowlisted exception.** `syntax-parsing` depends on `lexical-analysis`, so that
 `parse()` calls `tokenize()` internally rather than making the Driver orchestrate a pair
 that is never useful apart. It is named in `compiler/syntax-parsing/CONTEXT.md` and
-allowlisted by name in `compiler/neurc/tests/architecture_tests.rs`. A second exception
+allowlisted by name in `compiler/neuroc/tests/architecture_tests.rs`. A second exception
 is a Hard Gate and must pass that test's review, not merely be added to it.
 
 **Dev-dependencies are unrestricted.** A Slice may depend on any other Slice in
@@ -194,14 +194,14 @@ No Slice logs. A compiler's user-visible output is its diagnostics, and a Slice 
 those to the Driver as values (DG-001) rather than emitting them. A Slice must not depend on
 `log`, `tracing`, or any logging crate, and must not write to stdout or stderr.
 
-The Driver is the one exception and is already using it: `neurc` carries `log` + `env_logger`
+The Driver is the one exception and is already using it: `neuroc` carries `log` + `env_logger`
 so `RUST_LOG=debug` traces the pipeline stages, the linker invocation, and the driver that was
 chosen. That is a developer facility on the orchestration layer, off unless asked for, and
 separate from diagnostics. Extending it is fine; pushing it down into a Slice is not.
 
 | ID | Severity | Rule |
 |----|----------|------|
-| `DG-001` | **BLOCKER** | A Slice's errors are one `thiserror` enum on its own entry point, returned to the driver. A Slice must not print a user-facing diagnostic to stderr itself: rendering belongs to `neurc`, which is the only crate that knows whether it is running `check` or `compile`. |
+| `DG-001` | **BLOCKER** | A Slice's errors are one `thiserror` enum on its own entry point, returned to the driver. A Slice must not print a user-facing diagnostic to stderr itself: rendering belongs to `neuroc`, which is the only crate that knows whether it is running `check` or `compile`. |
 | `DG-002` | HIGH | Every diagnostic carries a `Span` locating it in source. A diagnostic without a span is a compiler bug, not a user error. |
 | `DG-003` | HIGH | Infrastructure failures (file IO, linker invocation, LLVM initialisation) are caught at the adapter boundary and surfaced as a typed error, never as a panic at a Slice boundary. |
 | `DG-004` | MEDIUM | A diagnostic states what was found and what was expected. "Invalid syntax" is not a diagnostic. |
@@ -284,7 +284,7 @@ These rules are machine-checked. A rule with a test is not a guideline.
 
 | Check | Enforces |
 |-------|----------|
-| `compiler/neurc/tests/architecture_tests.rs` | AC-002 (no cross-slice deps, one allowlisted exception), AC-009 (infrastructure depends on no Slice), AC-012 (CONTEXT.md presence and sections) |
+| `compiler/neuroc/tests/architecture_tests.rs` | AC-002 (no cross-slice deps, one allowlisted exception), AC-009 (infrastructure depends on no Slice), AC-012 (CONTEXT.md presence and sections) |
 | `cargo clippy --workspace --all-targets -- -D warnings` | CQ-002, and most of CQ-001 and CQ-005 |
 | `cargo fmt --all` | Formatting. Not negotiable and not discussed in review. |
 | `tools/check_docs_hygiene.py` | TS-006, plus the ban on written-down versions and private paths in tracked files |

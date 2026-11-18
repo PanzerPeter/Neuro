@@ -9,7 +9,7 @@
 // `&mut r`. An output is only ever indexed, inside `unsafe { }`, because the compiler
 // cannot prove that no other thread writes that element. The body may use locals,
 // arithmetic, casts, control flow and tensor elements, but not function calls. A kernel
-// needs a GPU and a Linux `neurc`.
+// needs a GPU and a Linux `neuroc`.
 
 // One thread per output element: add, then clamp at zero.
 

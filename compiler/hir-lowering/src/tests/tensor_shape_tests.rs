@@ -1,7 +1,7 @@
 // `.flatten` is written positionally here rather than as `.flatten(dims: [...])`:
 // a label is resolved by the `argument-binding` pass, which runs before lowering in the
 // pipeline but not in this slice's test harness. The labelled spelling is covered end to
-// end by `neurc`'s integration tests.
+// end by `neuroc`'s integration tests.
 
 use super::{binding_init, function_body, lower, operation};
 

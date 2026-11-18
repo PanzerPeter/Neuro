@@ -117,7 +117,7 @@ module per declaration kind beside it. `tests/` is split by subject.
   is the literal `true` or `false` (`GpuForm` at the attribute otherwise). Whether the body can become a kernel is the GPU
   backend's rule, decided at compile time, so `check` accepts a body `compile` refuses.
   `check_test_attributes` (`type_checkers/test_functions.rs`) holds `@test` to the one shape
-  `neurc test`'s entry can call (`TestForm` at the attribute otherwise): bare, on a free
+  `neuroc test`'s entry can call (`TestForm` at the attribute otherwise): bare, on a free
   function that is not generic, takes no parameters and returns unit, read off the registered
   signature so `-> ()` counts as none. A method or a struct carrying it is refused too. Which
   functions are tests, and how they run, is the driver's.
@@ -952,7 +952,7 @@ function value. A generic enum's names its instance from the function type expec
 template unified with the expected parameters. With no function type expected it stays an
 `EnumVariantFormMismatch`. An enum pattern written with the
 base name matches the scrutinee's instance and binds payloads at the instance's concrete types.
-`Option` / `Result` are **not** special-cased anywhere here: `neurc` injects their declarations.
+`Option` / `Result` are **not** special-cased anywhere here: `neuroc` injects their declarations.
 
 **Size and const generics, `where`, turbofish.** `const_scope` holds every value parameter
 (name → int type, `u64` for an extent) and `value_consts` the ones written `const NAME: T`,

@@ -52,7 +52,7 @@ Design goals:
 
 ## User Guides
 
-- [CLI Usage](guides/cli-usage.md): `neurc check`, `neurc run`, `neurc test`, `neurc compile`, flags, `--emit obj` and the NumPy interop recipe
+- [CLI Usage](guides/cli-usage.md): `neuroc check`, `neuroc run`, `neuroc test`, `neuroc compile`, flags, `--emit obj` and the NumPy interop recipe
 - [Editor Support](guides/editor-support.md): syntax highlighting for `.nr` files, and keeping the grammar in step with the lexer
 - [Troubleshooting](guides/troubleshooting.md): common problems and solutions
 - [Known Bugs](BUGS.md): the open defect register

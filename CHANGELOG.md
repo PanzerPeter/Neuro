@@ -10,6 +10,16 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.55.1] - 2026-11-18
+
+### Changed
+
+- The compiler is now `neuroc`, not `neurc`: the binary, the Cargo package (`cargo run -p neuroc`,
+  `cargo install --path compiler/neuroc`), its directory, and the release archive
+  `neuroc-x86_64-unknown-linux-gnu.tar.gz`. The old name read as a misspelling of the language,
+  and `neuro` alone is already a command installed by the Apolo (formerly Neu.ro) platform client.
+  Scripts that call `neurc` need the new name. Entries below keep the name each release shipped.
+
 ## [5.55.0] - 2026-11-18
 
 ### Added

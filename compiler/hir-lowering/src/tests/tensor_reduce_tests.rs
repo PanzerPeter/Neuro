@@ -1,6 +1,6 @@
 // An `axis:` label is resolved by the `argument-binding` pass, which runs before lowering
 // in the pipeline but not in this slice's test harness, so the axis is written
-// positionally here. The labelled spelling is covered end to end by `neurc`'s tests.
+// positionally here. The labelled spelling is covered end to end by `neuroc`'s tests.
 
 use super::{function_body, lower, operation, outlined_operation};
 

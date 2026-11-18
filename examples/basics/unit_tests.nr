@@ -1,5 +1,5 @@
 // Unit tests: a `@test` function takes nothing and returns nothing, and passes unless it
-// panics. `neurc run` enters at `main` as always; `neurc test examples/basics/unit_tests.nr`
+// panics. `neuroc run` enters at `main` as always; `neuroc test examples/basics/unit_tests.nr`
 // builds the same file with a test entry instead and runs every `@test` function in its own
 // process, so one failing `assert` stops only its own test. `std::testing::assert_close`
 // compares floats within a tolerance, absolute near zero and relative above 1.

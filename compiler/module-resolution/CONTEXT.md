@@ -17,7 +17,7 @@ Expand a root `.nr` file into the single item list its program is built from: lo
 Reads `.nr` files from disk; writes nothing.
 
 - The parser is **injected, not imported**. This slice would otherwise depend on
-  `syntax-parsing`, a feature slice; `neurc` is the one place both meet, and it passes
+  `syntax-parsing`, a feature slice; `neuroc` is the one place both meet, and it passes
   `syntax_parsing::parse` in. The slice's own unit tests use a stub parser, so it builds
   and tests with no feature-slice dependency at all. The parser is handed the module's
   display path along with its source, so the error text it returns is already a rendered
@@ -60,7 +60,7 @@ Reads `.nr` files from disk; writes nothing.
 - **A leaf module has no children.** `math.nr` is a file, so `math::io::read` cannot reach
   `io.nr` beside `math.nr`; only a directory with a `mod.nr` opens a level. A directory
   named in a path but *missing* its `mod.nr` is an error rather than a silent miss.
-- **A leading UTF-8 byte order mark is skipped where the file is read**, here and in `neurc`'s
+- **A leading UTF-8 byte order mark is skipped where the file is read**, here and in `neuroc`'s
   `read_source`, never in the lexer: stripping it there would shift every span by three bytes.
 - **An inline `module { }` block is a module with no file.** The loader lifts each block out
   of its parent's items and registers it as an ordinary graph module with its parent recorded,

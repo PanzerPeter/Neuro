@@ -473,8 +473,8 @@ is compared against finite differences of the function with the fenced values fr
 
 A second derivative is read back with `.hessian()` and compared against central finite differences of
 the compiled `.grad()`, which has itself just been checked against the loss. The harness runs as
-`cargo test -p neurc --test grad_differential`, or directly with
-`python tools/grad_differential.py --neurc target/debug/neurc`.
+`cargo test -p neuroc --test grad_differential`, or directly with
+`python tools/grad_differential.py --neuroc target/debug/neuroc`.
 
 ## See also
 

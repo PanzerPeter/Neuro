@@ -77,7 +77,7 @@ fn integer_intrinsics_resolve_to_receiver_type() {
 }
 
 /// A program body wrapped in a `main` that also declares `Option`, which the checker
-/// normally receives from the prelude `neurc` prepends.
+/// normally receives from the prelude `neuroc` prepends.
 fn program_with_option(body: &str) -> String {
     format!("enum Option<T> {{ Some(T), None }}\nfunc main() -> i32 {{\n{body}\n}}\n")
 }

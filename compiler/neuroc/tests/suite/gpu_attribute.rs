@@ -1,0 +1,367 @@
+// `@gpu`: a function whose body must run as a GPU kernel, and nowhere else.
+//
+// Only a Linux neuroc can compile one, and only a machine with an NVIDIA GPU can run the
+// result. CI's Linux legs have no GPU, so the run tests accept either
+// outcome a GPU-less machine can produce, but each asserts it fully: the right answer on a
+// GPU, or the startup diagnostic without one. The diagnostic itself is pinned by hiding
+// every device with `CUDA_VISIBLE_DEVICES`, which works whether or not a GPU is present.
+
+use crate::compile_harness::CompileTest;
+
+/// Two kernels' worth of work, each checked against the same arithmetic done on the host.
+#[cfg(target_os = "linux")]
+const KERNELS: &str = r#"
+@gpu
+func blend(a: &Tensor<f32, [37, 45]>, b: &Tensor<f32, [37, 45]>) -> Tensor<f32, [37, 45]> {
+    val s = a + b
+    s * b
+}
+
+@gpu
+func project(w: Tensor<f64, [3, 2]>, x: &Tensor<f64, [2, 2]>) -> Tensor<f64, [3, 2]> {
+    w @ x
+}
+
+func main() -> i32 {
+    println("main ran")
+    val a = Tensor::<f32, [37, 45]>::ones()
+    val b = &a * 2.0f32
+    val c = blend(&a, &b)
+    if c[0, 0] != 6.0f32 { return 1 }
+    if c[36, 44] != 6.0f32 { return 2 }
+    val w: Tensor<f64, [3, 2]> = [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]
+    val x: Tensor<f64, [2, 2]> = [[1.0, 0.0], [1.0, 1.0]]
+    val p = project(w, &x)
+    if p[0, 0] != 3.0 { return 3 }
+    if p[2, 1] != 6.0 { return 4 }
+    // A pool restores the device arena as well as the host one; a leak would spill.
+    pool {
+        mut i = 0
+        while i < 200 {
+            val t = blend(&a, &b)
+            i += 1
+        }
+    }
+    return 0
+}
+"#;
+
+const GRAD_THROUGH_GPU: &str = r#"
+@gpu
+func double(x: &Tensor<f32, [2]>) -> Tensor<f32, [2]> {
+    x + x
+}
+
+@grad
+func loss(t: &mut Tensor<f32, [2]>) -> Tensor<f32, []> {
+    val d = double(t)
+    return Tensor::scalar(d.sum())
+}
+
+func main() -> i32 {
+    return 0
+}
+"#;
+
+#[test]
+fn a_misplaced_gpu_is_refused_by_the_checker() {
+    for (source, problem) in [
+        (
+            "@gpu(device: 0)\nfunc id(x: f32) -> f32 {\n    x\n}\nfunc main() -> i32 { return 0 }\n",
+            "takes only `fallback: true` or `fallback: false`",
+        ),
+        (
+            "struct S { x: f32 }\nimpl S {\n    @gpu\n    func get(&self) -> f32 {\n        self.x\n    }\n}\nfunc main() -> i32 { return 0 }\n",
+            "on a method is not supported yet",
+        ),
+    ] {
+        let error = CompileTest::new()
+            .check("misplaced.nr", source)
+            .expect_err("`check` should refuse the attribute");
+        assert!(error.contains(problem), "expected `{problem}` in:\n{error}");
+    }
+}
+
+#[test]
+fn a_grad_body_cannot_differentiate_through_a_gpu_call() {
+    let error = CompileTest::new()
+        .check("grad_through_gpu.nr", GRAD_THROUGH_GPU)
+        .expect_err("the derivative would run the kernel's body on the host");
+    assert!(error.contains("a call to a `@gpu` function"), "{error}");
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn off_linux_a_gpu_function_is_a_compile_error() {
+    let test = CompileTest::new();
+    let source = test.write_source(
+        "off_linux.nr",
+        "@gpu\nfunc add(a: &Tensor<f32, [2]>, b: &Tensor<f32, [2]>) -> Tensor<f32, [2]> {\n    a + b\n}\nfunc main() -> i32 { return 0 }\n",
+    );
+    let error = test.compile(&source).expect_err("no host fallback exists");
+    assert!(
+        error.contains("`@gpu` function 'add' needs a GPU")
+            && error.contains("only Linux builds reach")
+            && error.contains("off_linux.nr:2:1"),
+        "{error}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_body_that_cannot_become_a_kernel_is_a_compile_error() {
+    let test = CompileTest::new();
+    let text = "@gpu\nfunc add(a: Tensor<bf16, [4]>, b: Tensor<bf16, [4]>) -> Tensor<bf16, [4]> {\n    a + b\n}\n@gpu\nfunc total(a: &Tensor<f32, [4]>) -> f32 {\n    a.sum()\n}\nfunc main() -> i32 { return 0 }\n";
+    let source = test.write_source("not_a_kernel.nr", text);
+    let compiled = test
+        .compile(&source)
+        .expect_err("neither body can run on a GPU");
+    // `check` refuses what `compile` refuses, rather than passing the program.
+    let checked = test
+        .check("not_a_kernel.nr", text)
+        .expect_err("`check` should refuse the bodies `compile` refuses");
+    for error in [compiled, checked] {
+        for (name, line) in [("add", 2), ("total", 6)] {
+            assert!(
+                error.contains(&format!(
+                    "`@gpu` function '{name}' cannot become a GPU kernel"
+                )) && error.contains(&format!("not_a_kernel.nr:{line}:1")),
+                "expected `{name}` refused at line {line}:\n{error}"
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn gpu_bodies_launch_kernels_and_host_bodies_stay_on_the_host() {
+    let test = CompileTest::new();
+    let source = test.write_source(
+        "mixed.nr",
+        "@gpu\nfunc on_gpu(a: &Tensor<f32, [8]>) -> Tensor<f32, [8]> {\n    a * a\n}\nfunc on_host(a: &Tensor<f32, [8]>) -> Tensor<f32, [8]> {\n    a + a\n}\nfunc main() -> i32 { return 0 }\n",
+    );
+    let ir_path = source.with_extension("ll");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_neuroc"))
+        .args(["compile", "--emit", "llvm-ir", "-o"])
+        .arg(&ir_path)
+        .arg(&source)
+        .output()
+        .expect("Failed to execute neuroc");
+    assert!(output.status.success(), "{output:?}");
+    let ir = std::fs::read_to_string(&ir_path).expect("the IR is written");
+
+    let body = |name: &str| {
+        let start = ir
+            .find(&format!("define ptr @{name}("))
+            .unwrap_or_else(|| panic!("no `{name}`:\n{ir}"));
+        let rest = &ir[start..];
+        rest[..rest.find("\n}").unwrap_or(rest.len())].to_string()
+    };
+    assert!(body("on_gpu").contains("mgpuMemcpy"), "{}", body("on_gpu"));
+    assert!(!body("on_host").contains("mgpu"), "{}", body("on_host"));
+    assert!(ir.contains("mgpuLaunchKernel"), "{ir}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_gpu_program_runs_on_the_gpu_or_aborts_at_startup() {
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("kernels.nr", KERNELS))
+        .expect("the kernels should compile");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("none is usable") {
+        assert_aborted_at_startup(&output);
+        return;
+    }
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "main ran\n");
+}
+
+/// A `@gpu` body reduces along an axis with one thread per result element, folding in the
+/// host's order, so the answer matches the host's exactly.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_gpu_body_reduces_along_an_axis_as_the_host_does() {
+    const SOURCE: &str = r#"
+@gpu
+func row_means(t: &Tensor<f32, [5, 7]>) -> Tensor<f32, [5]> {
+    t.mean(axis: 1)
+}
+
+func main() -> i32 {
+    mut m: Tensor<f32, [5, 7]> = Tensor::zeros()
+    mut i = 0
+    while i < 5 {
+        mut j = 0
+        while j < 7 {
+            m[i, j] = (i * 7 + j) as f32 * 0.3
+            j += 1
+        }
+        i += 1
+    }
+    val gpu = row_means(&m)
+    val host = m.mean(axis: 1)
+    mut wrong = 0
+    i = 0
+    while i < 5 {
+        if gpu[i] != host[i] { wrong += 1 }
+        i += 1
+    }
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("reduce.nr", SOURCE))
+        .expect("an axis reduction lowers to a kernel");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("none is usable") {
+        assert_aborted_at_startup(&output);
+        return;
+    }
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+}
+
+/// A `@gpu` body can sort, and return `.topk`'s values and indices as a pair. Equal
+/// elements keep their order, as on the host.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_gpu_body_sorts_and_returns_topk_as_a_pair() {
+    const SOURCE: &str = r#"
+@gpu
+func ranked(x: &Tensor<f32, [2, 4]>) -> (Tensor<f32, [2, 2]>, Tensor<i32, [2, 2]>) {
+    x.topk(k: 2)
+}
+
+@gpu
+func ordered(x: &Tensor<f32, [2, 4]>) -> Tensor<i32, [2, 4]> {
+    x.argsort(descending: true)
+}
+
+func main() -> i32 {
+    val a: Tensor<f32, [2, 4]> = [[1.0, 4.0, 2.0, 4.0], [0.5, -1.0, 3.0, 0.5]]
+    val (v, i) = ranked(&a)
+    val o = ordered(&a)
+    println("{v[0, 0]} {v[0, 1]} {i[0, 0]} {i[0, 1]} {v[1, 1]} {i[1, 1]} {o[1, 0]} {o[1, 3]}")
+    return i[0, 1]
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("sort.nr", SOURCE))
+        .expect("a sort lowers to kernels");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("none is usable") {
+        assert_aborted_at_startup(&output);
+        return;
+    }
+    assert_eq!(output.status.code(), Some(3), "stderr: {stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "4.0 4.0 1 3 0.5 0 2 1\n"
+    );
+}
+
+/// A scalar constant in a `@gpu` body broadcasts as a scalar parameter does. The body is
+/// lowered whole, without the outliner that turns host code's constants into parameters,
+/// so a literal operand (or a `val` bound to one) used to refuse the whole function.
+#[cfg(target_os = "linux")]
+#[test]
+fn regression_a_gpu_body_scalar_constant_broadcasts_like_a_parameter() {
+    const SOURCE: &str = r#"
+@gpu
+func literal(a: &Tensor<f32, [6, 4]>) -> Tensor<f32, [6, 4]> {
+    a * 2.5f32 + 1.0
+}
+
+@gpu
+func bound(a: &Tensor<f32, [6, 4]>) -> Tensor<f32, [6, 4]> {
+    val s = 2.5f32
+    val t = a * s
+    t + 1.0f32
+}
+
+@gpu
+func parameter(a: &Tensor<f32, [6, 4]>, s: f32, o: f32) -> Tensor<f32, [6, 4]> {
+    a * s + o
+}
+
+@gpu
+func widest(a: &Tensor<u64, [4]>) -> Tensor<u64, [4]> {
+    a + 18446744073709551614u64
+}
+
+func main() -> i32 {
+    mut a: Tensor<f32, [6, 4]> = Tensor::zeros()
+    for i in 0..6 {
+        for k in 0..4 { a[i, k] = (i * 4 + k) as f32 * 0.37f32 }
+    }
+    val x = literal(&a)
+    val y = bound(&a)
+    val z = parameter(&a, 2.5f32, 1.0f32)
+    mut wrong = 0
+    for i in 0..6 {
+        for k in 0..4 {
+            if x[i, k] != z[i, k] || y[i, k] != z[i, k] { wrong += 1 }
+        }
+    }
+    val u: Tensor<u64, [4]> = Tensor::ones()
+    if widest(&u)[3] != 18446744073709551615u64 { wrong += 100 }
+    return wrong
+}
+"#;
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("constants.nr", SOURCE))
+        .expect("a body with scalar constants lowers to kernels");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("none is usable") {
+        assert_aborted_at_startup(&output);
+        return;
+    }
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn without_a_visible_gpu_the_program_aborts_before_main() {
+    let test = CompileTest::new();
+    let exe = test
+        .compile(&test.write_source("hidden.nr", KERNELS))
+        .expect("the kernels should compile");
+    let output = std::process::Command::new(&exe)
+        .env("CUDA_VISIBLE_DEVICES", "")
+        .output()
+        .expect("the program should start");
+    assert_aborted_at_startup(&output);
+}
+
+/// The module loads in a global constructor, so the check runs before `main` prints.
+#[cfg(target_os = "linux")]
+fn assert_aborted_at_startup(output: &std::process::Output) {
+    use std::os::unix::process::ExitStatusExt;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("panic: `@gpu` needs an NVIDIA GPU, and none is usable: "),
+        "{stderr}"
+    );
+    assert_eq!(
+        output.status.signal(),
+        Some(6),
+        "expected SIGABRT: {stderr}"
+    );
+    assert!(output.stdout.is_empty(), "main must not run");
+}

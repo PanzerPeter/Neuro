@@ -15,7 +15,7 @@ The two backends split the work by kind. Every loop over a tensor's elements is 
 
 - **Dependencies**: `neuro-hir` (the HIR it lowers), `ast-types`, `shared-types`, `melior`, `mlir-sys`, `inkwell`, `thiserror`. It depends on no feature slice. `syntax-parsing` and `hir-lowering` are dev-dependencies, used by the `@kernel` tests to build HIR from source.
 - **Public API**: `lower_program`, `translate_to_llvm_ir`, `lower_for_link`, `lower_for_gpu`, `GpuTarget`, `Overflow`, `LinkableBodies`, `Guard`, `GuardKind`, `KernelRefusal`, `MlirError`
-- **Reached from `neurc`** through `lower_for_link`, which every compile calls, and `lower_for_gpu`, which runs for a program with GPU code.
+- **Reached from `neuroc`** through `lower_for_link`, which every compile calls, and `lower_for_gpu`, which runs for a program with GPU code.
 
 ### Entry points
 
@@ -30,7 +30,7 @@ pub fn lower_for_gpu(program: &HirProgram, target: &GpuTarget, overflow: Overflo
 - `translate_to_llvm_ir` carries the same module through the pipeline in [MLIR to LLVM IR](#mlir-to-llvm-ir), translates it into an inkwell LLVM module, verifies it, and returns the LLVM IR text.
 - `lower_for_link` is the driver's entry for host code. It returns the host body of every outlined tensor operation and of every `@gpu(fallback: true)` function, as LLVM IR with the `(function, symbol)` pairs. See [Linking into a compile](#linking-into-a-compile).
 - `lower_for_gpu` returns the `@gpu` functions and the `@kernel` functions as GPU kernels with host functions that launch them. It also takes the tensor operations that run where their operands live. See [GPU kernels](#gpu-kernels).
-- `Overflow` is the integer tier. `Checked` is the debug tier, where an overflowing element is a failed check. `Wrapping` is the release tier. `neurc` passes `Checked` at `-O0` and `Wrapping` above.
+- `Overflow` is the integer tier. `Checked` is the debug tier, where an overflowing element is a failed check. `Wrapping` is the release tier. `neuroc` passes `Checked` at `-O0` and `Wrapping` above.
 - `GpuTarget` is `Nvidia { chip }` (an `sm_NN`) or `Amd { chip }` (a `gfxNNN`).
 
 ### Toolchain
@@ -92,7 +92,7 @@ Shapes align at the **trailing** axis, so a lower-rank operand supplies the inne
 
 A dynamic `?` extent lowers too: `tensor.empty` takes one size operand per dynamic axis, read back with `tensor.dim` on an operand that walks that axis. A stretched operand cannot supply one, since it is size 1 there and says nothing about the result. A `?` operand extent is never stretched either, because nothing can prove at run time that it is 1.
 
-A scalar operand, a literal included, reaches an outlined body as a parameter. For an outlined operation a declaration is a compiler bug, which `neurc` reports at the operation.
+A scalar operand, a literal included, reaches an outlined body as a parameter. For an outlined operation a declaration is a compiler bug, which `neuroc` reports at the operation.
 
 ### The other operations
 
@@ -181,7 +181,7 @@ The `LLVMContext` that step 8 builds into is **inkwell's own**. `mlir-sys` and `
 
 The [LLVM backend](llvm-backend.md#mlir-bodies) emits each call to such a function as a call to its symbol, and links the IR in. The result buffer is the LLVM backend's allocation, so it is a DLPack tensor like any other. A buffer the body needs in between is allocated and freed inside it.
 
-**Integer checks.** The LLVM backend panics on an integer overflow in a debug build and on a zero divisor in every build, naming the operator. A body here cannot panic, and on a GPU nothing can stop the program. A checked body therefore takes one more parameter, a `memref<1xi64>` status word that its caller fills with all ones. A failed check (an `scf.if` in the `linalg` body) lowers the word with an atomic unsigned min to a key: the operation's number on top, the element's row-major position in the middle, and the check's number, counted from 1, in the low 12 bits. The smallest key is the failure the host would have stopped at, whichever GPU thread got there first. `lower_for_link` returns each symbol's checks with it, and the LLVM backend panics for the one left in the word after the call. A failed divisor is replaced by 1 so the body stays defined. `neurc` passes `Overflow::Checked` only at `-O0`, so overflow checks exist only in a debug build. A body with more than 4095 checks gets no MLIR body, which `neurc` reports as the internal error under [Diagnostics](#diagnostics).
+**Integer checks.** The LLVM backend panics on an integer overflow in a debug build and on a zero divisor in every build, naming the operator. A body here cannot panic, and on a GPU nothing can stop the program. A checked body therefore takes one more parameter, a `memref<1xi64>` status word that its caller fills with all ones. A failed check (an `scf.if` in the `linalg` body) lowers the word with an atomic unsigned min to a key: the operation's number on top, the element's row-major position in the middle, and the check's number, counted from 1, in the low 12 bits. The smallest key is the failure the host would have stopped at, whichever GPU thread got there first. `lower_for_link` returns each symbol's checks with it, and the LLVM backend panics for the one left in the word after the call. A failed divisor is replaced by 1 so the body stays defined. `neuroc` passes `Overflow::Checked` only at `-O0`, so overflow checks exist only in a debug build. A body with more than 4095 checks gets no MLIR body, which `neuroc` reports as the internal error under [Diagnostics](#diagnostics).
 
 ### GPU kernels
 
@@ -227,14 +227,14 @@ The same per-thread lowering runs the outlined operations that `linalg` cannot e
 | `AttributeSyntax` | ``MLIR rejected the generated attribute `{attribute}` `` | an internal attribute the builders wrote, which MLIR did not parse |
 | `Melior` | `melior operation failed: {detail}` | a melior call (a block argument or an operation result) failed. This is a lowering bug. |
 
-Before the two GPU refusals, `neurc` prints one diagnostic at each function's span: `` `@gpu` function 'f' cannot become a GPU kernel ``, or `` `@kernel` function 'k' cannot lower a function call to the GPU `` with the refused construct's span.
+Before the two GPU refusals, `neuroc` prints one diagnostic at each function's span: `` `@gpu` function 'f' cannot become a GPU kernel ``, or `` `@kernel` function 'k' cannot lower a function call to the GPU `` with the refused construct's span.
 
-Two cases are not errors. A function the builder cannot express stays a declaration (see [Tensor arithmetic](#tensor-arithmetic)), and a tensor operation outlined out of host code that has no body is a compiler bug. `neurc` reports that one as `internal error: no MLIR body computes the tensor operation`.
+Two cases are not errors. A function the builder cannot express stays a declaration (see [Tensor arithmetic](#tensor-arithmetic)), and a tensor operation outlined out of host code that has no body is a compiler bug. `neuroc` reports that one as `internal error: no MLIR body computes the tensor operation`.
 
 ## Testing
 
 - Unit tests sit beside the code in `#[cfg(test)]` modules, in files such as [`gpu.rs`](../../../compiler/mlir-backend/src/gpu.rs), [`bridge.rs`](../../../compiler/mlir-backend/src/bridge.rs), [`schedule.rs`](../../../compiler/mlir-backend/src/schedule.rs), and the `tensor_*` modules, plus the `kernel/` tree.
-- End-to-end behavior is covered by the `neurc` suites in [`compiler/neurc/tests/suite/`](../../../compiler/neurc/tests/suite/). The tensor files (`tensor_matmul.rs`, `tensor_reductions.rs`, `tensor_sort.rs`, and so on) exercise this crate through real programs. The `gpu_*.rs`, `kernel_*.rs` and `multi_gpu.rs` files cover the GPU paths.
+- End-to-end behavior is covered by the `neuroc` suites in [`compiler/neuroc/tests/suite/`](../../../compiler/neuroc/tests/suite/). The tensor files (`tensor_matmul.rs`, `tensor_reductions.rs`, `tensor_sort.rs`, and so on) exercise this crate through real programs. The `gpu_*.rs`, `kernel_*.rs` and `multi_gpu.rs` files cover the GPU paths.
 
 Run the crate's tests with the three prefix variables set to one LLVM and MLIR 23 install, as [Installation](../../getting-started/installation.md#mlir) describes:
 

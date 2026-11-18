@@ -163,7 +163,7 @@ Expected: exit code 158 (2718 modulo 256). Observed: exit code 160 (100000 modul
 `y.exp()` ran the program's `exp`. `func pow(x: f64, y: f64) -> f64 { 0.0 }` makes `2.0.pow(3.0)`
 return 0. `func free(x: i32) -> i32` or `func write(a: i32, b: i32, c: i32) -> i32` beside a
 string concatenation or a `println` fails with `module verification failed: "Call parameter type
-does not match function signature!"`. `func malloc(n: u64) -> u64` panics `neurc` in
+does not match function signature!"`. `func malloc(n: u64) -> u64` panics `neuroc` in
 `format_helpers.rs` (`expected PointerValue variant`). `func abort() -> i32` turns an index panic
 into a segmentation fault.
 
@@ -177,7 +177,7 @@ for `.exp()` and `.pow()` to the program's definitions.
 
 **Fix sketch**: emit every program function except the root `main` under a symbol no C name can
 take, such as a `neuro.fn.` prefix (a Neuro name holds no `.`). Calls already go through the
-backend's name-keyed function table, so only the declarations, the `neurc test` entry's lookup
+backend's name-keyed function table, so only the declarations, the `neuroc test` entry's lookup
 of each test, and the runtime pruning's removal from that table change. The open question is
 `--emit obj`: `docs/guides/cli-usage.md` and both Python differential harnesses load root
 functions from the object by their bare names, so a library build needs an exported alias per
@@ -338,7 +338,7 @@ names the rule. Programs that compile today stop compiling, so it wants a change
 
 - **Status**: open, confirmed
 - **Area**: `hir-lowering`, `llvm-backend`, `module-resolution`, `argument-binding` (`lib.rs`);
-  `mlir-backend` and `syntax-parsing` (public entries); `neurc` (`architecture_tests.rs`)
+  `mlir-backend` and `syntax-parsing` (public entries); `neuroc` (`architecture_tests.rs`)
 - **Severity**: minor. Nothing misbehaves, but a rule in `VSA.md` is unchecked and broken
 
 `VSA.md` lets a slice's `lib.rs` hold the entry function's own body and nothing else. `lib.rs`
@@ -378,7 +378,7 @@ func main() -> i32 {
 ```
 
 Expected: exit code 3. Observed: `instantiating 'W' nests generic instances more than 128 deep`.
-Before the cap, `neurc check` allocated until the memory cap aborted it. Every instance
+Before the cap, `neuroc check` allocated until the memory cap aborted it. Every instance
 registers the signature of each method of its generic impls, and registering `wrap` for `W<i32>`
 builds `W<W<i32>>`, whose own `wrap` builds `W<W<W<i32>>>`, with no end. A trait's default method
 returning `Wrapper<Self>` does the same, which is why the prelude's iterator adapters are not default

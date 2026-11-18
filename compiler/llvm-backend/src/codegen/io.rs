@@ -97,7 +97,7 @@ const NEWLINE_GLOBAL: &str = "neuro.print.newline";
 const ENTRY_FN: &str = "main";
 
 /// libc's terminal test. MSVC's CRT exposes the POSIX name only under its underscored
-/// spelling; `neurc` compiles for the host, so the choice is made here rather than
+/// spelling; `neuroc` compiles for the host, so the choice is made here rather than
 /// carried through the module.
 const ISATTY_FN: &str = if cfg!(windows) { "_isatty" } else { "isatty" };
 

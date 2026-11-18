@@ -84,7 +84,7 @@ The messages carry no position, since the rendered location already gives the li
 
 - [`compiler/lexical-analysis/src/tests.rs`](../../../compiler/lexical-analysis/src/tests.rs) holds the scanner's unit tests.
 - [`compiler/lexical-analysis/tests/tmlanguage_sync.rs`](../../../compiler/lexical-analysis/tests/tmlanguage_sync.rs) checks the editor grammar against the token set.
-- Literal behaviour end to end is covered by the `compiler/neurc/tests/suite/` files for integer and float suffixes, underscore separators, string interpolation, triple-quoted strings and nested block comments.
+- Literal behaviour end to end is covered by the `compiler/neuroc/tests/suite/` files for integer and float suffixes, underscore separators, string interpolation, triple-quoted strings and nested block comments.
 
 Nothing in the build links `TokenKind` to `neuro-language-support/syntaxes/neuro.tmLanguage.json`, so a token change must update the editor grammar by hand in the same change. The test checks that every keyword appears in the grammar, that the grammar's keyword rule lists no word the lexer does not tokenize, and that declaration rules come before the keyword rule. String bodies, escapes, holes and numeric shapes have no one-to-one token, so the test does not cover them. [`tools/tmlanguage_scopes.mjs`](../../../tools/tmlanguage_scopes.mjs) prints the scopes the grammar assigns to a file, for checking those by eye.
 

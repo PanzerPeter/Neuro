@@ -3,7 +3,7 @@
 // `as`, and `.is_nan()` guarding against a non-finite sample. This program advances the
 // state by assigning fields directly in `main` and keeps the methods read-only. For the
 // in-place `&mut self` style, see `structs/mut_self_accumulator.nr`. The `@test` functions at
-// the end check the same methods: `neurc test` runs each one in its own process, and
+// the end check the same methods: `neuroc test` runs each one in its own process, and
 // `std::testing::assert_close` compares floats within a tolerance.
 
 import std::testing::{assert_close}

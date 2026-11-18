@@ -18,11 +18,11 @@ members = [
     "compiler/mlir-backend",
 
     # Compiler Driver
-    "compiler/neurc",
+    "compiler/neuroc",
 ]
 
 [workspace.package]
-version = "5.55.0"
+version = "5.55.1"
 edition = "2024"
 rust-version = "1.100"
 authors = ["Neuro Contributors"]

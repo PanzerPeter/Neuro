@@ -36,7 +36,7 @@ The valid suffixes are `i8` through `i64` and `u8` through `u64`. A value that d
 
 ### Integer Overflow
 
-When a runtime `+`, `-`, `*`, or unary `-` produces a result outside its type's range, the behavior depends on the optimization level, set with `-O` on `neurc run` and `neurc compile`:
+When a runtime `+`, `-`, `*`, or unary `-` produces a result outside its type's range, the behavior depends on the optimization level, set with `-O` on `neuroc run` and `neuroc compile`:
 
 | Build | Flag | Overflow behavior |
 |-------|------|-------------------|

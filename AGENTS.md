@@ -33,7 +33,7 @@ Workspace layout (`compiler/`):
 | `hir-lowering` | AST → typed HIR |
 | `llvm-backend` | Codegen via inkwell (LLVM 23) |
 | `mlir-backend` | MLIR/melior codegen for tensor bodies and GPU kernels |
-| `neurc` | CLI driver; the only crate allowed to depend on every slice |
+| `neuroc` | CLI driver; the only crate allowed to depend on every slice |
 
 **Architecture: Vertical Slice Architecture (VSA).** Crates are organized by
 language feature, not by technical layer. The rules an agent must not break:
@@ -42,9 +42,9 @@ language feature, not by technical layer. The rules an agent must not break:
   feature slice.
 - One exception is allowlisted, and only one: `syntax-parsing` depends on
   `lexical-analysis`, so `parse()` calls `tokenize()` internally instead of
-  making `neurc` orchestrate the pair. It is named in
+  making `neuroc` orchestrate the pair. It is named in
   `compiler/syntax-parsing/CONTEXT.md` and enforced by
-  `compiler/neurc/tests/architecture_tests.rs`. A second exception requires
+  `compiler/neuroc/tests/architecture_tests.rs`. A second exception requires
   changing that test first. Do not add one casually.
 - Feature slices in each other's `[dev-dependencies]` are fine; the
   architecture test reads `[dependencies]` only.
@@ -89,9 +89,9 @@ python tools/clean_stale_target.py     # garbage-collect stale target/ artifacts
 Running the compiler:
 
 ```bash
-cargo run -p neurc -- check   examples/basics/hello.nr   # type-check only
-cargo run -p neurc -- compile examples/basics/hello.nr   # compile to a binary
-cargo run -p neurc -- compile examples/basics/hello.nr -O2 -o hello
+cargo run -p neuroc -- check   examples/basics/hello.nr   # type-check only
+cargo run -p neuroc -- compile examples/basics/hello.nr   # compile to a binary
+cargo run -p neuroc -- compile examples/basics/hello.nr -O2 -o hello
 ```
 
 **Quality gates.** Every change must leave these green before it is called
@@ -101,7 +101,7 @@ done. Run them; do not assume:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo test -p neurc --test architecture_tests
+cargo test -p neuroc --test architecture_tests
 python tools/check_docs_hygiene.py
 ```
 
@@ -134,7 +134,7 @@ authoritative version):
 - String ABI is a `{ ptr, i64 }` fat pointer. Bit 63 of the length is the owner bit, set when
   the value owns its buffer, and every reader of the length masks it.
 - Struct ABI is an anonymous LLVM struct in declaration order.
-- `semantic-analysis` is not a production dependency of the backend; `neurc`
+- `semantic-analysis` is not a production dependency of the backend; `neuroc`
   owns the pipeline ordering.
 
 **`CONTEXT.md` is a blocker, not a nicety.** Every slice has one, documenting
@@ -167,23 +167,23 @@ Where tests go:
   internal functions.
 - **Slice integration tests**: the crate's `tests/` directory, exercising the
   slice's public entry point.
-- **End-to-end tests**: `compiler/neurc/tests/suite/`, one file per language
+- **End-to-end tests**: `compiler/neuroc/tests/suite/`, one file per language
   feature, each a module of the single `suite` test target (declare it in
   `suite/main.rs`; a new file at `tests/` root would link a whole extra
-  binary). These compile real `.nr` source with the built `neurc` binary and
+  binary). These compile real `.nr` source with the built `neuroc` binary and
   run it. Use the `CompileTest` helper in
-  `compiler/neurc/tests/suite/compile_harness/mod.rs`; it writes sources to a
-  temp dir and resolves the binary through `CARGO_BIN_EXE_neurc`. That module
+  `compiler/neuroc/tests/suite/compile_harness/mod.rs`; it writes sources to a
+  temp dir and resolves the binary through `CARGO_BIN_EXE_neuroc`. That module
   also holds the free functions tests share (`run`, `rejected`, `stdout_of`,
   `compile_tagged` and others). Reach for them before writing a local helper.
 - **Example programs**: `examples/`, grouped by topic. Each program is pinned
   two ways: its `main` return value is its process exit code, registered in
   `examples/expected.txt`, and its stdout is fixed byte for byte in a sibling
-  `.out` file. `compiler/neurc/tests/examples.rs` checks both. Adding an
+  `.out` file. `compiler/neuroc/tests/examples.rs` checks both. Adding an
   example means adding both pins. Programs that combine features live under
   `examples/integration/<theme>/`. `examples/showcase/` is a curated handful
   of flagships: nothing is added there without the maintainer's say.
-- **Architecture tests**: `compiler/neurc/tests/architecture_tests.rs`
+- **Architecture tests**: `compiler/neuroc/tests/architecture_tests.rs`
   enforces the VSA dependency rules. If it fails, the fix is the dependency,
   not the test.
 
@@ -198,8 +198,8 @@ local-only paths.
 
 CI additionally runs the suite on Linux/macOS/Windows against stable, plus a
 Linux nightly leg, OSV-Scanner over the dependency graph, benchmark regression budgets,
-release smoke tests (compile and run two examples with the release `neurc`), and coverage.
-A separate release workflow builds the prebuilt Linux `neurc` from the scripts in
+release smoke tests (compile and run two examples with the release `neuroc`), and coverage.
+A separate release workflow builds the prebuilt Linux `neuroc` from the scripts in
 `tools/release/` and attaches it to each GitHub Release once every example passes in a
 container with only `cc`.
 

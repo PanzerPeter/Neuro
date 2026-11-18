@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Compiles and runs every registered example with a given `neurc`, held to the same two
-# pins as compiler/neurc/tests/examples.rs: the exit code in examples/expected.txt and the
+# Compiles and runs every registered example with a given `neuroc`, held to the same two
+# pins as compiler/neuroc/tests/examples.rs: the exit code in examples/expected.txt and the
 # stdout in the sibling .out file (none means silent). A `gpu` example on a machine with no
 # GPU must instead abort at startup with the runtime's diagnostic.
 #
-#   smoke.sh <neurc> <examples-dir>
+#   smoke.sh <neuroc> <examples-dir>
 #
 # Release CI runs it in a container that holds a C compiler and nothing else, which is
 # what proves the tarball needs no toolchain beside `cc`. Needs only bash, coreutils and grep.
 set -uo pipefail
 
-neurc=${1:?usage: smoke.sh <neurc> <examples-dir>}
-examples=${2:?usage: smoke.sh <neurc> <examples-dir>}
+neuroc=${1:?usage: smoke.sh <neuroc> <examples-dir>}
+examples=${2:?usage: smoke.sh <neuroc> <examples-dir>}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
@@ -24,7 +24,7 @@ while read -r rel code marker _; do
 
   exe=$work/example
   # Both read stdin from /dev/null, not from the manifest this loop is reading.
-  if ! "$neurc" compile "$examples/$rel" -o "$exe" </dev/null >"$work/compile.log" 2>&1; then
+  if ! "$neuroc" compile "$examples/$rel" -o "$exe" </dev/null >"$work/compile.log" 2>&1; then
     failures+=("$rel: compile failed: $(cat "$work/compile.log")")
     continue
   fi

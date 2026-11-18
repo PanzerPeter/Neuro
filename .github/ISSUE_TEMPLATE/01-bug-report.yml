@@ -32,7 +32,7 @@ body:
     attributes:
       label: Command
       description: How you invoked the compiler.
-      placeholder: neurc compile repro.nr
+      placeholder: neuroc compile repro.nr
     validations:
       required: true
 
@@ -66,7 +66,7 @@ body:
         - HIR lowering
         - LLVM backend (bad codegen, wrong runtime behaviour)
         - Linking or the produced binary
-        - neurc CLI (flags, paths, project config)
+        - neuroc CLI (flags, paths, project config)
         - Editor support (neuro-language-support)
     validations:
       required: true
@@ -75,7 +75,7 @@ body:
     id: version
     attributes:
       label: Compiler build
-      description: Output of `neurc --version`, or the commit hash you built from.
+      description: Output of `neuroc --version`, or the commit hash you built from.
     validations:
       required: true
 

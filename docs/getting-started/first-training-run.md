@@ -7,7 +7,7 @@ and compares its weights with the ones Neuro saved.
 
 You need:
 
-- `neurc`, from the [Installation Guide](installation.md)
+- `neuroc`, from the [Installation Guide](installation.md)
 - Python 3 with NumPy and the `safetensors` package: `pip install numpy safetensors`
 - For the GPU half, Linux and an NVIDIA GPU. Without one, the CPU half still runs, and
   [Without a GPU](#without-a-gpu) shows what you see.
@@ -149,7 +149,7 @@ The second `save` reads the weights back from the GPU before writing them.
 ## Step 3: Run It
 
 ```bash
-neurc run train.nr
+neuroc run train.nr
 ```
 
 ```text
@@ -236,4 +236,4 @@ Python's own `safetensors`, so the file Neuro wrote is one PyTorch and NumPy can
   with the GPU half checked step by step against the CPU and the result scored by a `@gpu`
   function
 - [Tensors](../language-reference/tensors.md): devices, operators and reductions
-- [CLI Usage](../guides/cli-usage.md): `neurc run`, `neurc compile` and their flags
+- [CLI Usage](../guides/cli-usage.md): `neuroc run`, `neuroc compile` and their flags

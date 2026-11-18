@@ -63,7 +63,7 @@ runs:
         apt_retry apt-get update -q
         # mlir-sys runs bindgen over the MLIR-C headers and needs a libclang whose
         # major version matches them, which the same channel ships. lld links the AMD
-        # code objects the neurc suite builds for `--gpu-arch gfx*`.
+        # code objects the neuroc suite builds for `--gpu-arch gfx*`.
         apt_retry apt-get install -y \
           llvm-23 \
           llvm-23-dev \

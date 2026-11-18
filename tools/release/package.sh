@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Checks that a Linux `neurc` runs on any glibc 2.28 system and packs it for release.
+# Checks that a Linux `neuroc` runs on any glibc 2.28 system and packs it for release.
 #
-#   package.sh <neurc> <llvm-prefix> <source-dir> <version> <dist-dir>
+#   package.sh <neuroc> <llvm-prefix> <source-dir> <version> <dist-dir>
 #
-# Writes <dist-dir>/neurc-x86_64-unknown-linux-gnu.tar.gz and its .sha256. The names carry
+# Writes <dist-dir>/neuroc-x86_64-unknown-linux-gnu.tar.gz and its .sha256. The names carry
 # no version, so `releases/latest/download/<name>` always fetches the newest release.
 # <source-dir> is the tree the binary was built from, which may be an older tag than this
 # script's. Needs readelf, objdump and cargo-about on PATH.
 set -euo pipefail
 
-usage="usage: package.sh <neurc> <llvm-prefix> <source-dir> <version> <dist-dir>"
+usage="usage: package.sh <neuroc> <llvm-prefix> <source-dir> <version> <dist-dir>"
 bin=${1:?$usage}
 prefix=${2:?$usage}
 src=${3:?$usage}
@@ -17,7 +17,7 @@ version=${4:?$usage}
 dist=${5:?$usage}
 here=$(dirname "$0")
 glibc_floor=2.28
-name=neurc-x86_64-unknown-linux-gnu
+name=neuroc-x86_64-unknown-linux-gnu
 
 fail() {
   echo "error: $*" >&2
@@ -41,15 +41,15 @@ if grep -qE 'GLIBCXX_|CXXABI_' <<<"$symbols"; then
 fi
 
 reported=$("$bin" --version)
-[ "$reported" = "neurc $version" ] || fail "$bin reports '$reported', expected 'neurc $version'"
+[ "$reported" = "neuroc $version" ] || fail "$bin reports '$reported', expected 'neuroc $version'"
 
 stage=$dist/$name
 rm -rf "$stage"
 mkdir -p "$stage/licenses"
-install -m755 "$bin" "$stage/neurc"
+install -m755 "$bin" "$stage/neuroc"
 install -m644 "$src/LICENSE" "$stage/LICENSE"
 install -m644 "$prefix"/licenses/* "$stage/licenses/"
-cargo about generate --fail -c "$here/about.toml" -m "$src/compiler/neurc/Cargo.toml" \
+cargo about generate --fail -c "$here/about.toml" -m "$src/compiler/neuroc/Cargo.toml" \
   -o "$stage/licenses/RUST-CRATES.txt" "$here/about.hbs"
 
 tar -C "$dist" --sort=name --owner=0 --group=0 --numeric-owner -czf "$dist/$name.tar.gz" "$name"

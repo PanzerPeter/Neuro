@@ -3,7 +3,7 @@
 // `std::time::Instant` a reading of a monotonic clock. Arguments for the program follow `--`,
 // and input can be piped in:
 //
-//     printf 'a\nb\n' | neurc run examples/system/command_line.nr -- 4
+//     printf 'a\nb\n' | neuroc run examples/system/command_line.nr -- 4
 
 func sum_to(n: u64) -> u64 {
     mut total: u64 = 0

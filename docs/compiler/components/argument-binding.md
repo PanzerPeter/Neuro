@@ -99,7 +99,7 @@ Error: 1 argument error(s) found
 ## Testing
 
 - [`compiler/argument-binding/src/tests.rs`](../../../compiler/argument-binding/src/tests.rs): unit tests for the signature table, the binder and the hoisting rewrite.
-- [`compiler/neurc/tests/suite/named_arguments.rs`](../../../compiler/neurc/tests/suite/named_arguments.rs): end to end. It runs programs that use every label form, checks that a reordered call evaluates in source order, and asserts the diagnostic text of the rejected calls it covers.
+- [`compiler/neuroc/tests/suite/named_arguments.rs`](../../../compiler/neuroc/tests/suite/named_arguments.rs): end to end. It runs programs that use every label form, checks that a reordered call evaluates in source order, and asserts the diagnostic text of the rejected calls it covers.
 - [`examples/basics/named_arguments.nr`](../../../examples/basics/named_arguments.nr) is built and run by the examples test.
 
 ## Source

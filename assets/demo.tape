@@ -1,7 +1,7 @@
 # Source for assets/demo.gif. Regenerate with:  vhs assets/demo.tape
 #
 # Requires: vhs, ttyd, ffmpeg, bat, an NVIDIA GPU, and a build of the compiler:
-#   cargo build -p neurc
+#   cargo build -p neuroc
 # Run from the repository root. Every command below is real; the recorded
 # output is whatever the compiler actually prints.
 #
@@ -53,7 +53,7 @@ Ctrl+L
 Type "# Tensor shapes are part of the type, so this never reaches a run."
 Enter
 Sleep 300ms
-Type "neurc check fit.nr"
+Type "neuroc check fit.nr"
 Sleep 300ms
 Enter
 Sleep 5000ms
@@ -66,7 +66,7 @@ Sleep 300ms
 Type "sed -i 's/w @ x/x @ w/' fit.nr"
 Enter
 Sleep 400ms
-Type "neurc compile -O3 fit.nr -o fit"
+Type "neuroc compile -O3 fit.nr -o fit"
 Enter
 Sleep 900ms
 Type "ls -sh fit"

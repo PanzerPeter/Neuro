@@ -1,6 +1,6 @@
 name: Release
 
-# Builds the prebuilt Linux `neurc` and attaches it to a GitHub Release, once it has
+# Builds the prebuilt Linux `neuroc` and attaches it to a GitHub Release, once it has
 # compiled and run every example in containers that hold nothing but a C compiler.
 #
 # A `release` event runs this file as it stands at the tagged commit, so a release
@@ -42,7 +42,7 @@ env:
   # manylinux_2_28 is AlmaLinux 8: glibc 2.28 and GCC 14, so the binary runs on any
   # x86-64 Linux from that glibc on. Pinned by digest like every action here.
   BUILD_IMAGE: quay.io/pypa/manylinux_2_28_x86_64@sha256:9555ba6c479fa69a2aa80ad1dc57154a60d562b19df159361d9379a02beb1e36
-  ASSET: neurc-x86_64-unknown-linux-gnu
+  ASSET: neuroc-x86_64-unknown-linux-gnu
 
 jobs:
   toolchain:
@@ -106,10 +106,10 @@ jobs:
           key: llvm-mlir-23.1.2-linux-manylinux_2_28-${{ hashFiles('tools/release/build-prefix.sh') }}
           fail-on-cache-miss: true
 
-      - name: Build neurc
+      - name: Build neuroc
         run: |
           docker run --rm -v "$PWD/llvm-prefix:/llvm:ro" -v "$PWD/src:/src" \
-            -v "$PWD/tools/release:/tools:ro" "$BUILD_IMAGE" bash /tools/build-neurc.sh /llvm /src
+            -v "$PWD/tools/release:/tools:ro" "$BUILD_IMAGE" bash /tools/build-neuroc.sh /llvm /src
 
       - name: Install cargo-about
         uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
@@ -117,7 +117,7 @@ jobs:
           tool: cargo-about@0.9.2
 
       - name: Check portability and package
-        run: bash tools/release/package.sh src/target/release/neurc llvm-prefix src "${TAG#v}" dist
+        run: bash tools/release/package.sh src/target/release/neuroc llvm-prefix src "${TAG#v}" dist
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -164,8 +164,8 @@ jobs:
             -v "$PWD/tools/release/smoke.sh:/smoke.sh:ro" "$IMAGE" bash -ec "
               $INSTALL_CC
               tar -xzf /dist/\$ASSET.tar.gz -C /opt
-              /opt/\$ASSET/neurc --version
-              bash /smoke.sh /opt/\$ASSET/neurc /examples"
+              /opt/\$ASSET/neuroc --version
+              bash /smoke.sh /opt/\$ASSET/neuroc /examples"
 
   publish:
     name: Attach to Release

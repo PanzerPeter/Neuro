@@ -159,7 +159,7 @@ short:
 - A feature slice depends only on infrastructure crates (`shared-types`, `ast-types`, `neuro-hir`),
   never on another feature slice. The one exception is `syntax-parsing` on `lexical-analysis`.
   Duplication is preferred over coupling.
-- `neurc` is the only crate that depends on every slice.
+- `neuroc` is the only crate that depends on every slice.
 - No business logic in infrastructure crates.
 - `pub(crate)` is the default visibility. No permissive `pub use` of slice internals.
 - Update a slice's `CONTEXT.md` when its entry point or dependencies change.
@@ -169,9 +169,9 @@ short:
 1. `cargo new compiler/feature-name --lib`
 2. Add it to `members` in the root `Cargo.toml`, and inherit the workspace fields and lints as the
    other slices do
-3. Add it to the slice lists in `compiler/neurc/tests/architecture_tests.rs`
+3. Add it to the slice lists in `compiler/neuroc/tests/architecture_tests.rs`
 4. Depend only on infrastructure crates
-5. Design a single public entry point, keep all internals `pub(crate)`, and call it from `neurc`
+5. Design a single public entry point, keep all internals `pub(crate)`, and call it from `neuroc`
 6. Write comprehensive tests
 7. Add a `CONTEXT.md` with Purpose, Entry Point, Shared Kernel, and Notes sections
 
@@ -193,7 +193,7 @@ cargo test <test_name>            # one test by name
 cargo test -- --nocapture         # show test output
 ```
 
-End-to-end tests live in `compiler/neurc/tests/suite/`, one file per language feature, all compiled
+End-to-end tests live in `compiler/neuroc/tests/suite/`, one file per language feature, all compiled
 into the single `suite` test target. A new file goes there and gets a `mod` line in
 `suite/main.rs`: Cargo links one executable per `tests/*.rs`, so a file added at the `tests/` root
 costs a whole extra binary on every build. Example programs are pinned by their exit code and
@@ -228,11 +228,11 @@ boundaries are preserved.
 | `tools/clean_stale_target.py` | Reclaims disk. Cargo keeps every old build, and a test binary here statically links LLVM. `--dry-run` reports first |
 | `tools/regen_gpu_runtime.sh` | Rebuilds the embedded `.ll` runtimes after a change to their `.c` sources |
 | `tools/tmlanguage_scopes.mjs <file.nr>` | Prints the scopes the editor grammar really produces |
-| `tools/grad_differential.py`, `tools/dlpack_differential.py` | Differential harnesses behind the `neurc` tests: gradients against finite differences, tensors against NumPy |
+| `tools/grad_differential.py`, `tools/dlpack_differential.py` | Differential harnesses behind the `neuroc` tests: gradients against finite differences, tensors against NumPy |
 
 ```bash
 # Verbose compiler logging
-RUST_LOG=debug cargo run -p neurc -- check examples/basics/hello.nr
+RUST_LOG=debug cargo run -p neuroc -- check examples/basics/hello.nr
 
 # API docs
 cargo doc --no-deps --workspace --open

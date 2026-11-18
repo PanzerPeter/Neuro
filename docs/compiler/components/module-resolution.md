@@ -9,12 +9,12 @@ Module resolution expands a root `.nr` file into the one item list the rest of t
 
 Resolution loads every module that a path or an `import` reaches, resolves each name against the scope it is written in, enforces what each module exports, and rewrites every reference to the canonical name of the declaration it reaches. A declaration in `geometry.nr` is named `geometry::Point` from then on. One in the root file keeps its bare name. Semantic analysis, HIR lowering and both backends see one program of distinct names and never learn that modules exist.
 
-`neurc` runs it right after parsing the standard library, which it embeds and hands over as `StandardLibrary`: each `std::<name>` module already parsed, the prelude variants every module may write bare, and the traits a `@no_prelude` file keeps. The library's modules join the graph, so the result already holds them, first.
+`neuroc` runs it right after parsing the standard library, which it embeds and hands over as `StandardLibrary`: each `std::<name>` module already parsed, the prelude variants every module may write bare, and the traits a `@no_prelude` file keeps. The library's modules join the graph, so the result already holds them, first.
 
 ## Architecture
 
 - **Dependencies**: `ast-types` (the tree it walks and rewrites), `shared-types`, `thiserror`. It depends on no feature slice.
-- **The parser is injected.** The caller passes in `syntax_parsing::parse`, so this slice never imports a feature slice. `neurc` is the one place the parser, the standard library source and this slice meet. The unit tests use a stub parser. A returned error is already a rendered diagnostic, and `ModuleError::Parse` prints it unchanged.
+- **The parser is injected.** The caller passes in `syntax_parsing::parse`, so this slice never imports a feature slice. `neuroc` is the one place the parser, the standard library source and this slice meet. The unit tests use a stub parser. A returned error is already a rendered diagnostic, and `ModuleError::Parse` prints it unchanged.
 - **Public API**: `resolve_program`, `ParseModule`, `ResolvedProgram`, `ResolvedModule`, `StandardLibrary`, `StdModule`, `PreludeVariant`, `ModuleError`.
 - **Passes**: load the module graph, resolve imports into one scope per module, rewrite every name, then rename the declarations and supply trait defaults across modules. The files are [`loader.rs`](../../../compiler/module-resolution/src/loader.rs) (discovery, module paths and the module graph), [`imports.rs`](../../../compiler/module-resolution/src/imports.rs) (import scopes, re-exports and variant imports), [`walk.rs`](../../../compiler/module-resolution/src/walk.rs) (the one traversal that discovery and rewriting share, which also tracks locals), [`rewriter.rs`](../../../compiler/module-resolution/src/rewriter.rs) (name lookup) and [`defaults.rs`](../../../compiler/module-resolution/src/defaults.rs).
 
@@ -91,7 +91,7 @@ This slice never touches a span. The driver adds each file to the program's sour
 
 ## Diagnostics
 
-`neurc check` prints a `ModuleError` as `Error: Module error: ...` and exits 1. Each message names the file that holds the bad reference. Messages a user hits most often:
+`neuroc check` prints a `ModuleError` as `Error: Module error: ...` and exits 1. Each message names the file that holds the bad reference. Messages a user hits most often:
 
 | Situation | Message |
 |---|---|
@@ -109,7 +109,7 @@ This slice never touches a span. The driver adds each file to the program's sour
 ## Testing
 
 - [`compiler/module-resolution/src/tests.rs`](../../../compiler/module-resolution/src/tests.rs) holds the unit tests. They write small module trees to a temporary directory and use a stub parser.
-- The end-to-end module programs are in `compiler/neurc/tests/suite/`, in `modules.rs`, `module_namespaces.rs`, `imports.rs`, `inline_modules.rs`, `visibility.rs` and `implicit_prelude.rs`.
+- The end-to-end module programs are in `compiler/neuroc/tests/suite/`, in `modules.rs`, `module_namespaces.rs`, `imports.rs`, `inline_modules.rs`, `visibility.rs` and `implicit_prelude.rs`.
 
 ## Source
 

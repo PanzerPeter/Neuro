@@ -301,7 +301,7 @@ fn test_error_max_depth_exceeded() {
     assert!(err.contains("maximum nesting depth"), "{err}");
 }
 
-/// Parse `source` on a thread with the 8 MiB stack `neurc`'s main thread has, so a
+/// Parse `source` on a thread with the 8 MiB stack `neuroc`'s main thread has, so a
 /// nesting form the depth limit misses shows up as a stack overflow (the test binary
 /// aborts) rather than passing on a larger stack or failing on the harness's smaller one.
 fn parse_error_on_main_sized_stack(source: String) -> String {

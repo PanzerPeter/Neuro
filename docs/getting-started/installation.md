@@ -1,24 +1,24 @@
 # Installation Guide
 
-This guide installs the Neuro compiler, `neurc`. On x86-64 Linux, download the prebuilt
+This guide installs the Neuro compiler, `neuroc`. On x86-64 Linux, download the prebuilt
 binary: it needs only a C compiler. On macOS and Windows, or to work on the compiler itself,
 build it from source.
 
 ## Prebuilt Linux binary
 
 The binary runs on x86-64 Linux with glibc 2.28 or newer (RHEL 8, Debian 10, Ubuntu 20.04 and
-later). It has LLVM and MLIR built in, so you install neither. `neurc` calls `cc` (gcc or clang)
+later). It has LLVM and MLIR built in, so you install neither. `neuroc` calls `cc` (gcc or clang)
 to link each program, so a C compiler must be on `PATH`.
 
 ```bash
 base=https://github.com/PanzerPeter/Neuro/releases/latest/download
-curl -fLO "$base/neurc-x86_64-unknown-linux-gnu.tar.gz"
-curl -fLO "$base/neurc-x86_64-unknown-linux-gnu.tar.gz.sha256"
-sha256sum -c neurc-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar -xzf neurc-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO "$base/neuroc-x86_64-unknown-linux-gnu.tar.gz"
+curl -fLO "$base/neuroc-x86_64-unknown-linux-gnu.tar.gz.sha256"
+sha256sum -c neuroc-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf neuroc-x86_64-unknown-linux-gnu.tar.gz
 mkdir -p ~/.local/bin
-cp neurc-x86_64-unknown-linux-gnu/neurc ~/.local/bin/
-neurc --version
+cp neuroc-x86_64-unknown-linux-gnu/neuroc ~/.local/bin/
+neuroc --version
 ```
 
 If the last command is not found, add `~/.local/bin` to `PATH`. Then compile and run a
@@ -31,7 +31,7 @@ func main() -> i32 {
     return 0
 }
 EOF
-neurc run hello.nr
+neuroc run hello.nr
 ```
 
 ```text
@@ -42,12 +42,12 @@ The checksum catches a corrupted download. To also confirm that the archive was 
 repository's release workflow, verify its signed provenance with the GitHub CLI:
 
 ```bash
-gh attestation verify neurc-x86_64-unknown-linux-gnu.tar.gz --repo PanzerPeter/Neuro
+gh attestation verify neuroc-x86_64-unknown-linux-gnu.tar.gz --repo PanzerPeter/Neuro
 ```
 
 The archive also holds the Neuro `LICENSE` and, under `licenses/`, the notices for the LLVM,
 MLIR and Rust code compiled into the binary. To update, run the same commands again: the
-`latest` URL always serves the newest release. To uninstall, delete `~/.local/bin/neurc`.
+`latest` URL always serves the newest release. To uninstall, delete `~/.local/bin/neuroc`.
 
 Programs with `@gpu` functions need only the NVIDIA driver to run. Math functions inside a
 kernel also need the CUDA toolkit when compiling, as
@@ -74,10 +74,10 @@ LLVM 23 and MLIR 23 installed into one prefix before Cargo runs.
 ### Quick check
 
 Once the build for your platform finishes, run the `hello` example through the release binary
-(on Windows, `target\release\neurc.exe`):
+(on Windows, `target\release\neuroc.exe`):
 
 ```bash
-target/release/neurc run examples/basics/hello.nr
+target/release/neuroc run examples/basics/hello.nr
 echo $?                                  # PowerShell: echo $LASTEXITCODE
 ```
 
@@ -131,7 +131,7 @@ cargo build --release
 cargo test --workspace
 
 # 7. Install the compiler (optional)
-cargo install --path compiler/neurc
+cargo install --path compiler/neuroc
 ```
 
 ### Ubuntu / Debian
@@ -291,14 +291,14 @@ cd Neuro
 git pull origin main
 cargo build --release
 cargo test --workspace
-cargo install --path compiler/neurc   # Re-install if using the installed binary
+cargo install --path compiler/neuroc   # Re-install if using the installed binary
 ```
 
 ### Uninstalling
 
 ```bash
 # Remove the installed binary
-cargo uninstall neurc
+cargo uninstall neuroc
 
 # Remove the repository
 rm -rf /path/to/Neuro
@@ -311,7 +311,7 @@ rm -rf /path/to/Neuro
 
 ## See also
 
-- [Quick Start](quick-start.md): the `neurc` workflow
+- [Quick Start](quick-start.md): the `neuroc` workflow
 - [Your First Program](first-program.md): a step-by-step tutorial
 - [Troubleshooting](../guides/troubleshooting.md): "No suitable version of LLVM", linker and `mlir-sys` build errors
 - [CLI Usage](../guides/cli-usage.md): every command and flag
