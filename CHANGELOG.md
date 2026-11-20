@@ -10,6 +10,27 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.57.1] - 2026-11-20
+
+### Fixed
+
+- A sort, `.argsort` or `.topk` over a dynamic axis stayed off the GPU when the CUDA toolkit was
+  missing. Counting its passes uses `math.ctlz`, which was taken for a call into the device math
+  library; it is an LLVM intrinsic on every target. This failed CI, which has no toolkit.
+- A struct field may name a struct, or an instance of a generic struct, declared after it
+  (BUG-161). A struct that holds itself inline, directly or through another struct, an array, a
+  tuple or an enum, is refused with a diagnostic that names it.
+- Moving a field, element or tuple position out of a value whose type implements `Drop` is a
+  compile error. The destructor ran afterwards and read the part its new owner had already freed.
+- A block or `unsafe` block written as a statement released nothing it yielded (BUG-167).
+- A `??` over a `Result<(), E>` or `Option<()>` accepts a fallback that returns nothing, such as a
+  call or a `println` (BUG-162).
+- An array literal in a field like `seen: [f32; CAP]` of an inferred generic struct was typed
+  `[f64; N]`: the checker refused it, and lowering stored `f64` bits into the `f32` slots
+  (BUG-169).
+- A borrowed array in an `&[A]` field of an inferred generic struct (`G { items: &a }`) failed LLVM
+  verification; it is unsized to a slice as with an annotated binding (BUG-160).
+
 ## [5.57.0] - 2026-11-20
 
 ### Added

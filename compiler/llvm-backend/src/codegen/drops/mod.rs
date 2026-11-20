@@ -42,7 +42,10 @@ pub(crate) fn is_fresh_value(expr: &HirExpr) -> bool {
         | HirExprKind::EnumConstruct { .. }
         | HirExprKind::TupleLiteral { .. }
         | HirExprKind::ArrayLiteral { .. }
-        | HirExprKind::Closure { .. } => true,
+        | HirExprKind::Closure { .. }
+        // A block's tail is moved out to its reader.
+        | HirExprKind::Block { .. }
+        | HirExprKind::Unsafe { .. } => true,
         HirExprKind::FieldAccess { object, .. } | HirExprKind::TupleIndex { object, .. } => {
             is_fresh_value(object)
         }

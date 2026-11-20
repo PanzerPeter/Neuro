@@ -99,9 +99,18 @@ impl TypeChecker {
                         .as_ref()
                         .and_then(|f| f.iter().find(|(n, _)| n == &fname.name))
                         .map(|(_, t)| t);
+                    // A sized array with a concrete element (`[f32; CAP]`) still types a
+                    // literal's elements; its length binds the parameter.
                     let expected_ctx = match instance_ty {
                         Some(concrete) => Some(concrete),
-                        None if self.mentions_type_parameter(&expected) => None,
+                        None if self.mentions_type_parameter(&expected) => match &expected {
+                            Type::Array { element, .. }
+                                if !self.mentions_type_parameter(element) =>
+                            {
+                                Some(&expected)
+                            }
+                            _ => None,
+                        },
                         None => Some(&expected),
                     };
                     let actual = self

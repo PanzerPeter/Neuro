@@ -354,7 +354,8 @@ pub(crate) fn device_math(context: &Context, target: &GpuTarget, format: &str) -
 /// The functions of `functions` whose definition in `module` calls into the vendor's device
 /// math library: a math function, or a float `%`, which the conversion turns into its exact
 /// `fmod` (`__nv_fmodf`, `__ocml_fmod_f32`) rather than a division the hardware rounds.
-fn math_functions(module: &Module<'_>, functions: &[(String, String)]) -> Vec<String> {
+/// `math.ctlz` is no call: it lowers to the `llvm.ctlz` intrinsic on every target.
+pub(crate) fn math_functions(module: &Module<'_>, functions: &[(String, String)]) -> Vec<String> {
     let mut calling = Vec::new();
     let mut next = module.body().first_operation();
     while let Some(operation) = next {
@@ -366,7 +367,9 @@ fn math_functions(module: &Module<'_>, functions: &[(String, String)]) -> Vec<St
         if let Some(symbol) = symbol
             && {
                 let text = operation.to_string();
-                text.contains("math.") || text.contains("arith.remf")
+                text.match_indices("math.")
+                    .any(|(at, _)| !text[at..].starts_with("math.ctlz"))
+                    || text.contains("arith.remf")
             }
             && let Some((function, _)) = functions.iter().find(|(_, linked)| *linked == symbol)
         {

@@ -42,7 +42,12 @@ module per declaration kind beside it. `tests/` is split by subject.
   acts on yet is `UnimplementedAttribute`, so neither is a silent no-op. A module `const` takes
   `@allow` alone (`AttributeOnConst` otherwise), and pass 4 drops the warnings its initializer
   raised that the `@allow` names, as it does for a function body.
-- **1. structs** pre-registered into `struct_defs`, with `@derive` intent into `copy_structs` /
+- **1. structs** pre-registered into `struct_defs` in two loops: `predeclare_struct` reserves every
+  name (and a generic struct's template) before `resolve_struct_fields` resolves any field, so a
+  field may name a struct declared after it, and `refresh_early_instances` re-substitutes an
+  instance a field made before its template's fields resolved. `reject_recursive_structs` (pass
+  1e) then reports `RecursiveStruct` for a struct stored inline inside itself, as
+  `reject_recursive_enums` does for an enum. Pass 1 records `@derive` intent into `copy_structs` /
   `clone_structs` / `debug_structs` / `partial_eq_structs` / `hashable_structs`, and every derive
   argument validated (`UnknownDerive`, `DuplicateDerive`). `register_copy_impls` then records each
   hand-written `impl Copy` into `copy_structs` too (a struct only, `InvalidCopyImpl` on an enum
@@ -617,6 +622,9 @@ A place is more than a bare identifier. `place_origin` resolves a field path (`l
 whether reaching it crossed a reference. A place reached
 through a borrow owns nothing to give away and is `CannotMoveOutOfBorrow` instead of a move;
 that covers a dereferenced borrow (`val x = *r`) and `self.field` in a **borrowing** method.
+A part of a value whose type implements `Drop` cannot be moved out either
+(`CannotMoveOutOfDrop`, `destructor_holder`): its destructor reads every field, after the part's
+new owner may have released it.
 `self` is bound as the struct type so field access reads normally, which leaves its ownership out
 of its type; `self_is_owned`, set per method body from the `SelfParam`, carries it instead, and a
 consuming receiver's fields are the callee's to move out. `..base` moves its base when it supplies any non-`Copy` field
@@ -1378,7 +1386,9 @@ arguments first, then the literal with their types as its context.
 ### Fallible types
 `fallible_kind` (`expressions/operators.rs`) is the shared resolver, so `?` and `??` accept exactly
 the same set of types. It resolves a type to an `Option` / `Result` instance through
-`enum_instance_base`: a shadowing non-generic declaration is its own base.
+`enum_instance_base`: a shadowing non-generic declaration is its own base. `void` and the empty
+tuple are compatible both ways (`is_compatible_with`), since a function returning nothing returns
+`()`, so a fallback calling one fits a `Result<(), E>` payload.
 
 - **`??`** is routed to `check_null_coalesce` **before** the shared operand check, because the
   operator is not operand-symmetric: the right side is typed by the left's *payload*, not by the

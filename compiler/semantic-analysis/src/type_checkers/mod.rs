@@ -1160,16 +1160,20 @@ impl TypeChecker {
         }
 
         // Pass 1: register struct definitions so type names resolve in method signatures.
-        // This also records each struct's Copy/Clone derivation intent.
-        for item in items {
-            if let Item::Struct(def) = item {
-                if def.generics.is_empty() {
-                    let _ = self.register_struct(def);
-                } else {
-                    self.register_generic_struct(def);
-                }
-            }
+        // Every name is declared before any field resolves, so a field may name a struct
+        // declared after it. This also records each struct's Copy/Clone derivation intent.
+        let structs: Vec<&ast_types::StructDef> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Struct(def) => Some(def),
+                _ => None,
+            })
+            .filter(|def| self.predeclare_struct(def))
+            .collect();
+        for def in structs {
+            self.resolve_struct_fields(def);
         }
+        self.refresh_early_instances();
 
         // A hand-written `impl Copy` makes its struct `Copy` exactly as the derive does, so
         // it is recorded with the derives, before anything asks.
@@ -1188,10 +1192,11 @@ impl TypeChecker {
         // sees the newtype's real Copy-ness.
         self.resolve_newtype_inners(items);
 
-        // Pass 1e: an enum stored inline inside itself has no size. Runs once struct
+        // Pass 1e: an enum or struct stored inline inside itself has no size. Runs once struct
         // fields, enum payloads and newtype inners are all resolved, since the cycle can
         // pass through any of them.
         self.reject_recursive_enums(items);
+        self.reject_recursive_structs(items);
 
         // Pass 1b: validate `@derive(Copy)`: every field of a Copy struct must itself
         // be Copy. Runs after all structs are registered so a Copy field that is

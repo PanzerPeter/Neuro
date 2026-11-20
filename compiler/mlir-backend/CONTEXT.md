@@ -326,7 +326,9 @@ also lowers scalar math functions (`math.*`, `sign` as selects) for `@kernel` bo
 or ocml (AMD), which `gpu-module-to-binary` links only when it finds the CUDA toolkit
 (`CUDA_ROOT` / `CUDA_HOME` / `CUDA_PATH`, or MLIR's build-time default) or ROCm; with no toolkit the
 PTX keeps `.extern .func __nv_*`, which the driver refuses at load along with every other kernel.
-`lower_with_format` therefore checks each built definition's text for `math.` (`math_functions`)
+`lower_with_format` therefore checks each built definition's text for `math.` (`math_functions`;
+`math.ctlz`, which a dynamic sort counts its passes with, is not a call but the `llvm.ctlz`
+intrinsic on every target, so it does not count)
 and, only then, serializes `MATH_PROBE` (one `math.exp`) with diagnostics swallowed: the library is
 there when that succeeds with no `.extern` and no `__ocml_` left. Without it the linkable module is
 rebuilt without the functions that call math (so `build_linkable_module`'s `admit` is a

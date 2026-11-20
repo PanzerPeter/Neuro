@@ -1071,3 +1071,39 @@ func main() -> i32 {
         130
     );
 }
+
+/// A block or `unsafe` statement yields its tail to nothing, so the owner it yields is
+/// released at the end of the statement, as a bare call's result is.
+#[test]
+fn regression_a_discarded_block_value_is_released() {
+    let source = r#"
+func some() -> Option<string> { Option::Some("x".clone() + "yzw") }
+
+func pair() -> (Vec<i32>, string) {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    (v, "a".clone() + "b")
+}
+
+func main() -> i32 {
+    mut n = 0
+    for i in 0..10 {
+        { some() }
+        unsafe { some() }
+        { pair() }
+        {
+            val o = some()
+            o
+        }
+        mut kept = pair()
+        { kept }
+        n += 1
+    }
+    n
+}
+"#;
+    assert_eq!(
+        CompileTest::new().run_leak_checked("discarded_block.nr", source),
+        10
+    );
+}

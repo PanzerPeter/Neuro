@@ -49,13 +49,22 @@ impl Lowerer {
                 }
             }
         }
+        // Every struct name, and every generic template, before any field resolves, so a
+        // field may name a struct declared after it.
         for item in items {
             if let Item::Struct(def) = item {
                 if def.generics.is_empty() {
-                    self.register_struct(def)?;
+                    self.structs.insert(def.name.name.clone(), Vec::new());
                 } else {
                     self.register_generic_struct(def);
                 }
+            }
+        }
+        for item in items {
+            if let Item::Struct(def) = item
+                && def.generics.is_empty()
+            {
+                self.register_struct(def)?;
             }
         }
         for item in items {

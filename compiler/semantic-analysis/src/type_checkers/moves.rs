@@ -149,9 +149,34 @@ impl TypeChecker {
             return;
         }
 
+        if let Some(holder) = self.destructor_holder(place) {
+            self.record_error(TypeError::CannotMoveOutOfDrop {
+                ty: holder,
+                span: place.span(),
+            });
+            return;
+        }
         self.reject_move_of_borrowee(&root, place.span());
         let path = Self::place_path(place).unwrap_or_default();
         self.symbols.mark_place_moved(&root, &path, place.span());
+    }
+
+    /// The type implementing `Drop` that `place` would move a part out of, if any. Its
+    /// destructor reads every field, after the part's new owner may have released it.
+    fn destructor_holder(&self, place: &Expr) -> Option<Type> {
+        let object = match place {
+            Expr::Paren(inner, _) => return self.destructor_holder(inner),
+            Expr::FieldAccess { object, .. }
+            | Expr::TupleIndex { object, .. }
+            | Expr::Index { object, .. } => object,
+            _ => return None,
+        };
+        if let Some((ty, _)) = self.place_origin(object)
+            && self.type_implements_trait(ty.referent(), "Drop")
+        {
+            return Some(ty.referent().clone());
+        }
+        self.destructor_holder(object)
     }
 
     /// Move the value a block yields: its trailing expression, or a trailing `if` with an

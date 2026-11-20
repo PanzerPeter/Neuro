@@ -228,17 +228,30 @@ impl Lowerer {
                 .map(|(_, t)| t.clone())
                 .or_else(|| {
                     let ft = field_ast_ty.as_ref()?;
-                    let unbound = Default::default();
-                    if crate::items::mentions_any(
-                        ft,
-                        &gnames,
-                        &cnames,
-                        &unbound,
-                        &Default::default(),
-                    ) {
-                        return None;
+                    let mentions = |ty: &ast_types::Type| {
+                        crate::items::mentions_any(
+                            ty,
+                            &gnames,
+                            &cnames,
+                            &Default::default(),
+                            &Default::default(),
+                        )
+                    };
+                    if !mentions(ft) {
+                        return self.resolve_type(ft).ok();
                     }
-                    self.resolve_type(ft).ok()
+                    // A sized array with a concrete element (`[f32; CAP]`) still types a
+                    // literal's elements, at the literal's own length.
+                    match (ft, value.as_ref()) {
+                        (
+                            ast_types::Type::Array { element, .. },
+                            Expr::ArrayLiteral { elements, .. },
+                        ) if !mentions(element) => Some(HirType::Array {
+                            element: Box::new(self.resolve_type(element).ok()?),
+                            size: elements.len(),
+                        }),
+                        _ => None,
+                    }
                 });
             let lowered = self.lower_expr(value, field_expected.as_ref())?;
             if let Some(ft) = &field_ast_ty {
@@ -286,6 +299,22 @@ impl Lowerer {
                 .collect(),
         };
         let mangled = self.instantiate_generic_struct(&name.name, &args)?;
+        // A value lowered before the instance was known takes the unsizing its field
+        // calls for now: `&a` into an `&[A]` field is a slice.
+        let instance = self.structs.get(&mangled).cloned().unwrap_or_default();
+        let lowered_fields: Vec<HirFieldInit> = lowered_fields
+            .into_iter()
+            .map(|field| {
+                let ty = instance
+                    .iter()
+                    .find(|(n, _)| *n == field.name)
+                    .map(|(_, t)| t);
+                HirFieldInit {
+                    value: Box::new(super::coercion::apply_unsizing_coercion(*field.value, ty)),
+                    ..field
+                }
+            })
+            .collect();
         let struct_ty = HirType::Struct(mangled.clone());
         let base = match base {
             Some(b) => Some(Box::new(self.lower_expr(b, Some(&struct_ty))?)),

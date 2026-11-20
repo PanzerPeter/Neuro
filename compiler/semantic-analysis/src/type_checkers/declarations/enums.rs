@@ -95,11 +95,40 @@ impl TypeChecker {
         }
     }
 
-    /// Whether a value of `ty` stores a `target` enum inline. References, collections
+    /// Refuse a struct that stores itself inline, directly or through another struct, an
+    /// enum, an array or a tuple: it has no finite size. Its fields become unknown, so no
+    /// later pass walks the cycle.
+    pub(crate) fn reject_recursive_structs(&mut self, items: &[ast_types::Item]) {
+        for item in items {
+            let ast_types::Item::Struct(def) = item else {
+                continue;
+            };
+            let name = &def.name.name;
+            let reaches_itself = self.struct_defs.get(name).is_some_and(|fields| {
+                fields
+                    .iter()
+                    .any(|(_, ty)| self.holds_inline(ty, name, &mut Vec::new()))
+            });
+            if !reaches_itself {
+                continue;
+            }
+            self.record_error(TypeError::RecursiveStruct {
+                name: name.clone(),
+                span: def.name.span,
+            });
+            if let Some(fields) = self.struct_defs.get_mut(name) {
+                for (_, ty) in fields.iter_mut() {
+                    *ty = Type::Unknown;
+                }
+            }
+        }
+    }
+
+    /// Whether a value of `ty` stores a `target` enum or struct inline. References, collections
     /// and tensors hold their contents behind a pointer, so they end the search.
     fn holds_inline(&self, ty: &Type, target: &str, seen: &mut Vec<String>) -> bool {
         let (name, parts) = match ty {
-            Type::Enum(name) if name == target => return true,
+            Type::Enum(name) | Type::Struct(name) if name == target => return true,
             Type::Enum(name) => (name, self.enum_payload_types(name)),
             Type::Struct(name) => (
                 name,

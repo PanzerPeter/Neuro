@@ -176,3 +176,35 @@ func main() -> i32 {
         "diagnostic should report the payload/fallback mismatch; got: {message}"
     );
 }
+
+/// A `()` payload takes a fallback that returns nothing: a function with no return type,
+/// one declared `-> ()`, a `println` or a block. The `??` is then a statement.
+#[test]
+fn regression_a_unit_payload_takes_a_fallback_returning_nothing() {
+    let source = r#"
+func noop() {}
+func unit() -> () {}
+func fail(code: i32) -> Result<(), i32> {
+    if code > 0 { return Err(code) }
+    Ok(())
+}
+func get() -> Result<(), i32> { Ok(()) }
+
+func main() -> i32 {
+    mut n = 0
+    val r: Result<(), i32> = Ok(())
+    r ?? noop()
+    get() ?? unit()
+    fail(3) ?? println("fallback")
+    val e: Result<(), i32> = Err(4)
+    e ?? { n += 10 }
+    fail(0) ?? { n += 100 }
+    n
+}
+"#;
+    assert_eq!(
+        crate::compile_harness::stdout_of("unit_fallback.nr", source),
+        "fallback\n"
+    );
+    assert_eq!(crate::compile_harness::run("unit_fallback.nr", source), 10);
+}

@@ -1022,3 +1022,51 @@ func main() -> i32 {
     let test = CompileTest::new();
     assert_eq!(test.run_leak_checked("receiver_temporary.nr", source), 15);
 }
+
+/// A destructor reads every field, so no owning field may leave a value whose type implements
+/// `Drop`: one moved out first would be read after its new owner released it. Borrowing or
+/// cloning the field, and moving a `Copy` field, stay fine.
+#[test]
+fn regression_a_field_cannot_be_moved_out_of_a_drop_type() {
+    let holder = r#"
+struct Holder { v: Vec<i32>, n: i32, s: string }
+
+impl Drop for Holder {
+    func drop(&mut self) { println("drop {self.v[0]} {self.s}") }
+}
+
+struct Outer { h: Holder }
+
+func make() -> Holder {
+    mut v: Vec<i32> = Vec::new()
+    v.push(7)
+    Holder { v: v, n: 3, s: "a".clone() + "b" }
+}
+"#;
+    for (name, body) in [
+        ("field.nr", "val h = make()\n    val x = h.v\n    x[0]"),
+        (
+            "string.nr",
+            "val h = make()\n    val s = h.s\n    s.len() as i32",
+        ),
+        ("call.nr", "val h = make()\n    take(h.v)"),
+        (
+            "nested.nr",
+            "val o = Outer { h: make() }\n    val x = o.h.v\n    x[0]",
+        ),
+    ] {
+        let source = format!(
+            "{holder}\nfunc take(v: Vec<i32>) -> i32 {{ v[0] }}\n\nfunc main() -> i32 {{\n    {body}\n}}\n"
+        );
+        let errors = crate::compile_harness::rejected(name, &source);
+        assert!(
+            errors.contains("cannot move a field out of 'Holder', which implements Drop"),
+            "{name}: {errors}"
+        );
+    }
+    let fine = format!(
+        "{holder}\nfunc main() -> i32 {{\n    val h = make()\n    val n = h.n\n    val c = h.s.clone()\n    val o = Outer {{ h: make() }}\n    val whole = o.h\n    n + c.len() as i32 + h.v.len() as i32 + whole.v[0]\n}}\n"
+    );
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("fine.nr", &fine), 13);
+}

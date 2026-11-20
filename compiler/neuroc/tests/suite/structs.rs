@@ -256,3 +256,67 @@ struct Score {
         .expect("struct defined after use should compile and run");
     assert_eq!(exit_code, 42);
 }
+
+/// A struct field names a struct, generic struct or instance declared further down, as an
+/// enum payload or a newtype inner already may.
+#[test]
+fn regression_a_field_names_a_struct_declared_after_it() {
+    let source = r#"
+struct Outer { inner: Pair, boxed: Wrap<Pair>, list: Vec<Leaf> }
+
+struct Wrap<T> { item: T, more: Later<T> }
+
+struct Later<T> { last: T }
+
+struct Pair { y: i32, leaf: Leaf }
+
+struct Leaf { z: i32 }
+
+func main() -> i32 {
+    mut list: Vec<Leaf> = Vec::new()
+    list.push(Leaf { z: 100 })
+    val p = Pair { y: 3, leaf: Leaf { z: 4 } }
+    val q = Pair { y: 10, leaf: Leaf { z: 20 } }
+    val r = Pair { y: 30, leaf: Leaf { z: 40 } }
+    val o = Outer { inner: p, boxed: Wrap { item: q, more: Later { last: r } }, list: list }
+    o.inner.y + o.inner.leaf.z + o.boxed.item.leaf.z + o.boxed.more.last.y + o.list[0].z
+}
+"#;
+    assert_eq!(crate::compile_harness::run("forward_field.nr", source), 157);
+}
+
+/// A struct that holds itself inline, directly or through another struct, has no size and
+/// is refused by name; one that holds itself behind a `Vec` is fine.
+#[test]
+fn regression_a_struct_holding_itself_is_refused() {
+    let direct = crate::compile_harness::rejected(
+        "direct.nr",
+        "struct A { x: i32, a: A }\n\nfunc main() -> i32 { 0 }\n",
+    );
+    assert!(direct.contains("struct 'A' holds itself"), "{direct}");
+    let mutual = crate::compile_harness::rejected(
+        "mutual.nr",
+        "struct A { b: B }\n\nstruct B { t: (i32, [A; 2]) }\n\nfunc main() -> i32 { 0 }\n",
+    );
+    assert!(mutual.contains("struct 'A' holds itself"), "{mutual}");
+    let tree = r#"
+struct Node { value: i32, children: Vec<Node> }
+
+func total(n: &Node) -> i32 {
+    mut sum = n.value
+    for c in n.children.iter() {
+        sum += total(c)
+    }
+    sum
+}
+
+func main() -> i32 {
+    mut kids: Vec<Node> = Vec::new()
+    kids.push(Node { value: 2, children: Vec::new() })
+    kids.push(Node { value: 3, children: Vec::new() })
+    val root = Node { value: 1, children: kids }
+    total(&root)
+}
+"#;
+    assert_eq!(CompileTest::new().run_leak_checked("tree.nr", tree), 6);
+}

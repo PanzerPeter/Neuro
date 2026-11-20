@@ -1457,6 +1457,16 @@ pub enum TypeError {
     )]
     RecursiveEnum { name: String, span: Span },
 
+    #[error(
+        "struct '{name}' holds itself: a field is stored inline, so a struct that contains itself, directly or through another struct, array, tuple or enum, has no finite size; hold it behind a `Vec` instead"
+    )]
+    RecursiveStruct { name: String, span: Span },
+
+    #[error(
+        "cannot move a field out of '{ty}', which implements Drop: its destructor reads every field, so the field can only be borrowed or cloned"
+    )]
+    CannotMoveOutOfDrop { ty: Type, span: Span },
+
     #[error("enum '{enum_name}' has no variant '{variant}'")]
     UnknownEnumVariant {
         enum_name: String,
@@ -1970,6 +1980,8 @@ impl TypeError {
             | Self::CyclicNewtype { span, .. }
             | Self::UnsupportedEnumPayload { span, .. }
             | Self::RecursiveEnum { span, .. }
+            | Self::RecursiveStruct { span, .. }
+            | Self::CannotMoveOutOfDrop { span, .. }
             | Self::ImplForOneInstance { span, .. }
             | Self::GradFormUnsupported { span, .. }
             | Self::GradOrderUnsupported { span, .. }

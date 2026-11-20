@@ -389,3 +389,45 @@ func main() -> i32 {
         .expect("compile/run failed");
     assert_eq!(exit, 0);
 }
+
+/// A sized array field whose element type is concrete types a float literal by it, and the
+/// literal's length still binds the size parameter.
+#[test]
+fn regression_a_sized_array_field_types_its_float_literal() {
+    let source = r#"
+struct History<CAP> { seen: [f32; CAP] }
+
+func total<CAP>(h: &History<CAP>) -> f32 {
+    mut t: f32 = 0.0
+    for x in h.seen {
+        t += x
+    }
+    t
+}
+
+func main() -> i32 {
+    val h = History { seen: [0.5, 1.5, 2.0] }
+    val k: History<3> = History { seen: [1.0, 2.0, 3.0] }
+    (total(&h) * 10.0) as i32 + (total(&k) as i32)
+}
+"#;
+    assert_eq!(crate::compile_harness::run("sized_field.nr", source), 46);
+}
+
+/// A borrowed array stored in an `&[A]` field of an inferred instance is unsized to a slice,
+/// as it is when the binding names the instance.
+#[test]
+fn regression_an_inferred_instance_unsizes_its_slice_field() {
+    let source = r#"
+struct G<A> { items: &[A], n: u64 }
+
+func main() -> i32 {
+    val a = [7, 8]
+    val t = G { items: &a, n: 5 }
+    val b = [1, 2, 3]
+    val u: G<i32> = G { items: &b, n: 1 }
+    t.items[1] + t.n as i32 + t.items.len() as i32 + u.items[2] + u.items.len() as i32
+}
+"#;
+    assert_eq!(crate::compile_harness::run("slice_field.nr", source), 21);
+}

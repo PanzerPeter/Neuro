@@ -876,6 +876,7 @@ mod tests {
             outlined, tensor_of,
         },
         context::new_context,
+        gpu::math_functions,
         guards::Side,
         lower::build_linkable_module,
         lower_for_gpu, lower_for_link,
@@ -1098,5 +1099,33 @@ mod tests {
         assert!(mlir.contains("tensor<2xi32>"), "{mlir}");
         assert_lowered(&program);
         assert_launches_on_gpu(&program);
+    }
+
+    /// A dynamic run counts its passes with `math.ctlz`, an LLVM intrinsic on every device,
+    /// so the body needs no device math library and stays on a GPU without the CUDA toolkit.
+    #[test]
+    fn regression_a_dynamic_sort_needs_no_device_math_library() {
+        let source = tensor_of(HirType::F32, vec![None]);
+        let sorted = HirExpr::new(
+            HirExprKind::TensorSort {
+                receiver: Box::new(operand("a", &source)),
+                kind: HirSortKind::Values,
+                axis: 0,
+                descending: false,
+            },
+            source.clone(),
+            Span::new(0, 1),
+        );
+        let program = outlined(&[("a", source.clone())], sorted, source);
+        let context = new_context();
+        let (module, (functions, _)) = build_linkable_module(
+            &context,
+            &program,
+            (crate::Overflow::Checked, Side::Device),
+            &|_| true,
+        )
+        .expect("the body lowers");
+        assert!(module.as_operation().to_string().contains("math.ctlz"));
+        assert!(math_functions(&module, &functions).is_empty());
     }
 }

@@ -312,7 +312,9 @@ Each produces existing HIR nodes, so no backend learns the construct exists.
   it lowers with the payload type as its expected type, which is what types a bare literal.
   Mirroring the checker, a payload that borrows a `Copy` type beside a non-`Reference` fallback
   lowers the fallback against the referent; when it comes out that type, arm 0's body is a
-  `Deref` of the binding and the `Match` is typed as the referent.
+  `Deref` of the binding and the `Match` is typed as the referent. A `()` payload beside a
+  fallback that returns nothing yields no value: arm 0's body is an empty block and the `Match`
+  is `Void`.
   `binary_result_type`'s `NullCoalesce` arm is unreachable by construction and says so.
   `success_variant`, `not_fallible`, and `fallible_base` are shared with the `?` desugar.
 - **Operator traits** (`operator_traits.rs` holds the table: `Add`, `Sub`, …, `MatMul`,
@@ -499,7 +501,10 @@ Generic structs and impls work the same way, through `generic_structs` / `generi
 annotation and from `lower_generic_struct_literal` after inferring the arguments from field
 values, each lowered against the matching field of the instance the expected type names when it
 names one (mirroring the checker, so the literal's type and layout agree), or else against its
-declared type when that names no parameter, so `count: 3` fills a `u64` field as a `u64`. Each instance registers concrete fields plus impl-method signatures and emits one
+declared type when that names no parameter, so `count: 3` fills a `u64` field as a `u64`. A sized
+array with a concrete element (`seen: [f32; CAP]`) types an array literal at the literal's own
+length. Once the instance exists each field value takes the unsizing its concrete field calls for
+(`apply_unsizing_coercion`), so `&a` into an `&[A]` field is a slice. Each instance registers concrete fields plus impl-method signatures and emits one
 `HirItem::Struct` plus one `HirItem::Impl` per generic impl whose bounds the instance meets
 (`instance_meets_impl_bounds`: a declared trait's impl, or for the five derivable traits the
 checker's builtin rule, `implements_derivable`), with method bodies lowered under the
@@ -913,7 +918,8 @@ compiler bug, not a diagnostic.
   type off the auto-derefed tuple type. Destructuring is parser-desugared.
 - **Enums**: registration is split in two, because a payload may name a struct and a struct field
   may name the enum: `register_items` reserves every enum NAME, registers the structs, then
-  resolves the payloads. All three
+  resolves the payloads. Structs register the same way among themselves: every name and generic
+  template first, then the fields, so a field may name a struct declared after it. All three
   construction forms normalize to one `HirExprKind::EnumConstruct`: a unit `E::V` carries an empty
   payload, a tuple `E::V(..)` the positional args, and a struct `E::V { .. }` **reorders its
   provided fields into declared order** so codegen sees a single positional layout. `tag` is the

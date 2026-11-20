@@ -34,19 +34,42 @@ impl TypeChecker {
             || self.trait_names.contains(name)
     }
 
-    /// Register a struct definition without checking field initializers.
-    /// Called in the pre-registration pass so that structs can be referenced
-    /// by functions and other structs defined later in the file.
-    pub(crate) fn register_struct(&mut self, def: &StructDef) -> Option<()> {
+    /// Declare a struct's name, and a generic one's template, before any field resolves, so
+    /// a field may name a struct declared after it. Whether the name was free.
+    pub(crate) fn predeclare_struct(&mut self, def: &StructDef) -> bool {
         if self.nominal_name_taken(&def.name.name) {
             self.record_error(TypeError::StructAlreadyDefined {
                 name: def.name.name.clone(),
                 span: def.name.span,
             });
-            return None;
+            return false;
         }
+        self.struct_defs.insert(def.name.name.clone(), Vec::new());
+        self.declared_lifetimes
+            .insert(def.name.name.clone(), def.lifetimes.len());
+        self.record_visibility(def);
+        self.record_derive_intent(def);
+        if !def.generics.is_empty() {
+            self.generic_structs
+                .insert(def.name.name.clone(), Rc::new(def.clone()));
+        }
+        true
+    }
 
-        self.enter_generic_scope(&[], &def.lifetimes);
+    /// Resolve the field types of a struct [`Self::predeclare_struct`] declared.
+    ///
+    /// A generic struct is not itself a usable type: each distinct set of type arguments
+    /// is monomorphized into a distinct nominal struct on demand. The template's field
+    /// types (carrying [`Type::Generic`] placeholders) are stored under the base name so
+    /// generic `impl` method bodies resolve `self.field` while being checked abstractly.
+    /// Its fields resolve as its own module, so a prelude struct's field gets the
+    /// prelude's latitude (`check_key_type`).
+    pub(crate) fn resolve_struct_fields(&mut self, def: &StructDef) {
+        let outer = match def.generics.is_empty() {
+            true => self.current_module,
+            false => std::mem::replace(&mut self.current_module, def.module),
+        };
+        self.enter_generic_scope(&def.generics, &def.lifetimes);
         let mut fields: Vec<(String, Type)> = Vec::new();
         for field in &def.fields {
             if let Some(ty) = self.resolve_type_naming(&field.ty, NameSlot::Top) {
@@ -54,13 +77,37 @@ impl TypeChecker {
             }
         }
         self.exit_generic_scope();
-
+        self.current_module = outer;
         self.struct_defs.insert(def.name.name.clone(), fields);
-        self.declared_lifetimes
-            .insert(def.name.name.clone(), def.lifetimes.len());
-        self.record_visibility(def);
-        self.record_derive_intent(def);
-        Some(())
+    }
+
+    /// Substitute the fields of every instance made so far again. A field naming an
+    /// instance of a generic struct declared after it (`w: Wrap<i32>`) instantiates it
+    /// before the template's own fields resolve, with none.
+    pub(crate) fn refresh_early_instances(&mut self) {
+        let instances: Vec<(String, (String, Vec<Type>))> = self
+            .struct_instances
+            .iter()
+            .map(|(name, instance)| (name.clone(), instance.clone()))
+            .collect();
+        for (mangled, (base, args)) in instances {
+            let Some(template) = self.generic_structs.get(&base).cloned() else {
+                continue;
+            };
+            let subst: HashMap<String, Type> = template
+                .generics
+                .iter()
+                .map(|gp| gp.name.name.clone())
+                .zip(args)
+                .collect();
+            let template_fields = self.struct_defs.get(&base).cloned().unwrap_or_default();
+            let span = template.name.span;
+            let fields = template_fields
+                .iter()
+                .map(|(n, t)| (n.clone(), self.substitute_generic(t, &subst, span)))
+                .collect();
+            self.struct_defs.insert(mangled, fields);
+        }
     }
 
     /// Record which module a struct was declared in and which of its fields it keeps
@@ -318,45 +365,6 @@ impl TypeChecker {
                 span,
             });
         }
-    }
-
-    /// Register a generic struct template.
-    ///
-    /// A generic struct is not itself a usable type: each distinct set of type
-    /// arguments is monomorphized into a distinct nominal struct on demand. The
-    /// template's field types (carrying [`Type::Generic`] placeholders) are also
-    /// stored in `struct_defs` under the base name so generic `impl` method bodies
-    /// resolve `self.field` while being checked abstractly, mirroring how a generic
-    /// function body checks once with placeholders.
-    pub(crate) fn register_generic_struct(&mut self, def: &StructDef) {
-        if self.nominal_name_taken(&def.name.name) {
-            self.record_error(TypeError::StructAlreadyDefined {
-                name: def.name.name.clone(),
-                span: def.name.span,
-            });
-            return;
-        }
-
-        // The fields resolve as their own module, so a prelude struct's field gets the
-        // prelude's latitude (`check_key_type`).
-        let outer = std::mem::replace(&mut self.current_module, def.module);
-        self.enter_generic_scope(&def.generics, &def.lifetimes);
-        let mut fields: Vec<(String, Type)> = Vec::new();
-        for field in &def.fields {
-            if let Some(ty) = self.resolve_type_naming(&field.ty, NameSlot::Top) {
-                fields.push((field.name.name.clone(), ty));
-            }
-        }
-        self.exit_generic_scope();
-        self.current_module = outer;
-
-        self.struct_defs.insert(def.name.name.clone(), fields);
-        self.declared_lifetimes
-            .insert(def.name.name.clone(), def.lifetimes.len());
-        self.record_visibility(def);
-        self.record_derive_intent(def);
-        self.generic_structs
-            .insert(def.name.name.clone(), Rc::new(def.clone()));
     }
 
     /// Register a generic `impl` template, e.g. `impl<T> Wrapper<T>`.

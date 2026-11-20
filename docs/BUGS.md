@@ -48,43 +48,17 @@ reports the lost `Vec` buffers. A tensor field (`make().b.sum()`) behaves the sa
 
 **Root cause**: a field read out of a fresh temporary moves the field out and releases the
 rest. When the struct has its own `drop`, that release is skipped so the destructor never
-reads a moved field, and nothing else ever releases the temporary.
+reads a moved field, and nothing else ever releases the temporary. Moving a field out of a named
+`Drop` value is a compile error; a fresh temporary has no binding, so the checker's move rule does
+not reach it, and `take(make().v)` still compiles and leaks.
 
 **Workaround**: bind the value first (`val h = make()`), so its scope runs the destructor.
 
-**Fix sketch**: when the reader only borrows the field (a method receiver, a `&` operand),
-hold the whole temporary to the end of the statement (`hold_to_statement_end`) instead of
-moving the field out, so the destructor and the field drops run there.
-
-## BUG-169: a float literal in a sized array field of an inferred generic struct is an `f64`
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (`check_generic_struct_literal` in
-  `type_checkers/expressions/struct_exprs.rs`)
-- **Severity**: minor. Valid source is refused; nothing miscompiles
-
-**Minimal repro**
-
-```neuro
-struct History<CAP> { seen: [f32; CAP] }
-
-func main() -> i32 {
-    val h = History { seen: [0.0, 0.5] }
-    return 0
-}
-```
-
-Expected: `h` is a `History<2>`. Observed: `type mismatch: expected [f32; 2], found [f64; 2]`.
-
-**Root cause**: a field whose declared type names a parameter gets no expected type unless the
-context names the instance, so the literal falls back to `f64`. `[f32; CAP]` names only a size,
-and its element type is already concrete.
-
-**Workaround**: annotate the binding (`val h: History<2> = ...`) or suffix the literal
-(`0.0f32`).
-
-**Fix sketch**: give such a field the declared type with its length left to inference, so the
-array literal takes its element type from it and still binds `CAP` from its length.
+**Fix sketch**: refuse a by-value read of an owning field of a `Drop` temporary in the checker,
+as for a named value. Then every remaining reader only borrows the field (a method receiver, a
+`&` operand), so codegen can hold the whole temporary to the end of the statement
+(`hold_to_statement_end`) instead of moving the field out, and the destructor and the field
+drops run there.
 
 ## BUG-168: a `match` on a diverging scrutinee reports a template parameter
 
@@ -117,35 +91,6 @@ unknown binding.
 **Fix sketch**: give a diverging scrutinee its own rule: accept the `match` with every arm
 unreachable, or refuse it with one error that names the divergence.
 
-## BUG-167: a block statement whose value nothing reads leaks it
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend` (`is_fresh_value` in `codegen/drops/mod.rs`)
-- **Severity**: minor. A leak, and only for a block written as a statement with a value at its end
-
-**Minimal repro**
-
-```neuro
-func some() -> Option<string> { Option::Some("x".clone() + "yzw") }
-
-func main() -> i32 {
-    { some() }
-    0
-}
-```
-
-Expected: the `Option<string>` the block yields is released at the end of its statement.
-Observed: AddressSanitizer's leak check reports its string.
-
-**Root cause**: the block is typed by its tail, so it yields the value and marks it moved. The
-statement that discards it releases only a value `is_fresh_value` accepts, and that list has no
-`Block` or `Unsafe` (`is_fresh_string` already has them, which is why a bare `string` does not leak).
-
-**Workaround**: drop the braces (a bare `some()` statement releases its result), or bind it.
-
-**Fix sketch**: accept `Block` and `Unsafe` in `is_fresh_value`, since their tail is moved out to
-the reader, with a leak-checked test beside `a_value_ending_a_for_body_over_an_iterator_is_released`.
-
 ## BUG-166: a tensor expression with more than 4095 checks is an internal error
 
 - **Status**: open, confirmed
@@ -156,8 +101,7 @@ the reader, with a leak-checked test beside `a_value_ending_a_for_body_over_an_i
 **Minimal repro**: at `-O 0`, one statement summing 4200 `i32` tensor terms
 (`val r = &a + &a + ...` with `a: Tensor<i32, [2]>`).
 
-Expected: the program compiles. Observed: `internal error: no MLIR body computes the tensor
-operation '__tensor_op_0'`.
+Expected: the program compiles. Observed: `a tensor operation has no MLIR lowering`.
 
 **Root cause**: a check site is numbered in 12 bits, so a body that would need more than 4095 sites
 returns `None`. That used to leave the operation to the inkwell tensor lowering, which 5A deleted, so
@@ -254,106 +198,15 @@ func main() -> i32 {
 ```
 
 Expected: exit code 0. Observed: `unexpected token LeftParen, expected a literal or variant
-pattern` at the inner `(`. The unit type is the zero-element tuple and `()` is its value, so the
-zero-element tuple pattern should match it as `(a, b)` matches a pair.
+pattern` at the inner `(`. `()` is the unit type's one value, so a pattern spelled `()` that
+matches it is the natural reading. The pattern rules have no tuple pattern and no parenthesized
+pattern in a `match`, so the form needs a rule in the specification before it needs code.
 
 **Workaround**: write `Ok(_)`.
 
-**Fix sketch**: accept `()` wherever a tuple pattern is accepted, matching only the unit value,
-and let exhaustiveness count it as covering `()`.
-
-## BUG-162: `??` refuses a fallback that returns nothing when the payload is `()`
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (`??` typing, the unit type)
-- **Severity**: minor. Valid source is refused with a message naming a type the language does not have
-
-**Minimal repro**
-
-```neuro
-func noop() {}
-
-func main() -> i32 {
-    val r: Result<(), i32> = Ok(())
-    r ?? noop()
-    0
-}
-```
-
-Expected: exit code 0. Observed: `type mismatch: expected (), found void`, also for a callee
-declared `-> ()` and for `?? println("...")`. A function with no return type returns `()`, and
-`-> ()` says the same, but the checker keeps two unit types: a written `()` is the empty
-tuple, a call to a function returning nothing is `void`, and `is_compatible_with` never equates
-them. The `??` fallback check is where `Result<(), E>` from `std::fs` meets a call.
-
-**Workaround**: a diverging fallback (`?? panic("...")`), or `if r.is_err() { ... }`.
-
-**Fix sketch**: make the empty tuple and `void` one type in the checker, or compatible in both
-directions, then check that lowering gives a `??` over a `()` payload no value to merge.
-
-## BUG-161: a struct field cannot name a struct declared after it
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` (struct registration, pass 1)
-- **Severity**: major. Valid source is refused, in a program and in a library module alike
-
-**Minimal repro**
-
-```neuro
-struct Outer { inner: Pair }
-
-struct Pair { y: i32 }
-
-func main() -> i32 {
-    val o = Outer { inner: Pair { y: 3 } }
-    o.inner.y
-}
-```
-
-Expected: exit code 3. Observed: `unknown type name 'Pair'`, then `struct 'Outer' has no field
-'inner'`. Pass 1 resolves each struct's field types while it registers the structs, in source
-order, so a field naming a later struct finds nothing. Enum payloads and newtype inners resolve in
-later passes and do not have the problem.
-
-**Workaround**: declare the field's struct first.
-
-The same ordering is the only thing that refuses a struct holding itself: `struct A { x: i32, a: A }`
-and the pair `struct A { b: B }`, `struct B { a: A }` both fail with `unknown type name`, not
-with a diagnostic that names the cycle.
-
-**Fix sketch**: register every struct name before resolving any field type, then resolve the
-fields in a second loop, keeping the duplicate-name check. Add a recursive-struct check beside
-`reject_recursive_enums`, since once the names resolve nothing else refuses an inline cycle, and
-the backend's layout would recurse on one.
-
-## BUG-160: a generic struct literal with a `&[T]` field and no annotation does not compile
-
-- **Status**: open, confirmed
-- **Area**: `hir-lowering` (struct literal field types for an inferred generic instance)
-- **Severity**: major. Valid source stops the compiler at LLVM verification
-
-**Minimal repro**
-
-```neuro
-struct G<A> { items: &[A], n: u64 }
-
-func main() -> i32 {
-    val a = [7, 8]
-    val t = G { items: &a, n: 5 }
-    t.items[1] + t.n as i32
-}
-```
-
-Expected: exit code 13. Observed: `module verification failed: "Invalid InsertValueInst
-operands!"`. A field whose type names a parameter is lowered without it, so `&a` stays a
-pointer instead of being unsized to the `{ ptr, i64 }` view. A generic field that is not a slice
-(`struct G<A> { x: A, n: u64 }`) lowers correctly.
-
-**Workaround**: annotate the binding (`val t: G<i32> = G { ... }`), which compiles and exits 13.
-
-**Fix sketch**: infer the instance's type arguments in lowering as the checker does, matching a
-`&[A]` field against the argument's unsized element type, then lower each field against its
-substituted type.
+**Fix sketch**: state `()` as a pattern that matches the unit value, then parse it as one (no
+literal stands for `()` today, so it needs a pattern form of its own in the AST, the checker and
+both lowerings), and let exhaustiveness count it as covering `()`.
 
 ## BUG-159: a trailing comma on one line is accepted in some lists and refused in others
 

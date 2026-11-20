@@ -1427,6 +1427,8 @@ construction whose statement value is discarded, one a field, tuple element or a
 read from, and one only a derived `==` / `!=`, a map lookup key or a `{x:?}` hole reads. It is
 stored to a slot, registered in a throwaway scope, and that scope's drops are emitted at once. A
 bare tensor is left to its statement and receiver consumers, which release it through its handle.
+A block or `unsafe` block is fresh too, since its tail is moved out to its reader, so a block
+statement's unread value is released at the statement's end.
 A field, tuple element or array element read off a fresh value is fresh itself (`is_fresh_value`),
 so `make().inner.name` and `[a(), b()][i].name` destroy each level around the part the reader
 takes. An element of a `Vec` or a slice is not: the collection only lends it.

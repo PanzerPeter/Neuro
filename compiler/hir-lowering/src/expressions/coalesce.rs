@@ -68,6 +68,21 @@ impl Lowerer {
             ),
             _ => (unwrapped, payload.clone()),
         };
+        // A `()` payload beside a fallback that returns nothing yields no value to merge:
+        // the success arm does nothing, and the `??` is a statement.
+        let unit_payload = matches!(&payload, HirType::Void)
+            || matches!(&payload, HirType::Tuple(elements) if elements.is_empty());
+        let (unwrapped, result_ty) = match unit_payload && fallback.ty == HirType::Void {
+            true => (
+                HirExpr::new(
+                    HirExprKind::Block { stmts: Vec::new() },
+                    HirType::Void,
+                    span,
+                ),
+                HirType::Void,
+            ),
+            false => (unwrapped, result_ty),
+        };
 
         Ok(HirExpr::new(
             HirExprKind::Match {

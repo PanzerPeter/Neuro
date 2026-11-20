@@ -438,6 +438,10 @@ impl Type {
             | (Type::Char, Type::Char)
             | (Type::String, Type::String)
             | (Type::Void, Type::Void) => true,
+            // A function returning nothing returns `()`, the empty tuple.
+            (Type::Void, Type::Tuple(elements)) | (Type::Tuple(elements), Type::Void) => {
+                elements.is_empty()
+            }
 
             // Signatures must match exactly. The mode is the one directional part: a
             // value fits a slot asking for its own call trait or a weaker one (`Fn`
