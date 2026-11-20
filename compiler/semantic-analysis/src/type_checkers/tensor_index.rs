@@ -45,12 +45,32 @@ impl TypeChecker {
             element: Box::new(element.clone()),
             shape: shape.to_vec(),
         };
-        // An index computes a flat offset from the extents to its right, so one `?`
-        // anywhere in the shape leaves every stride unknown.
-        if self.reject_dynamic_extent(shape, "an index", &source, span)
-            || self.reject_splice(shape, "an index", &source, span)
-        {
+        // A splice has no rank to index by. A dynamic axis is indexed at run time: a
+        // position and a constant range are bounds-checked there, and the strides are the
+        // run-time extents of the value.
+        if self.reject_splice(shape, "an index", &source, span) {
             return Type::Unknown;
+        }
+        // A reversed or stepped range would read a dynamic axis in an order or at a
+        // stride that depends on its length, which nothing here can name.
+        for (index, axis) in indices.iter().zip(shape.iter()) {
+            let TensorIndexArg::Range {
+                reversed,
+                step,
+                span: range_span,
+                ..
+            } = index
+            else {
+                continue;
+            };
+            if axis.extent.is_dynamic() && (*reversed || step.is_some()) {
+                self.record_error(TypeError::TensorDynamicExtent {
+                    operation: "a reversed or stepped range".to_string(),
+                    ty: source.clone(),
+                    span: *range_span,
+                });
+                return Type::Unknown;
+            }
         }
         if indices.len() != shape.len() {
             self.record_error(TypeError::TensorIndexRankMismatch {

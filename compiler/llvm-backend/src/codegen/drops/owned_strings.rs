@@ -26,8 +26,14 @@ pub(crate) const STRING_OWNER_BIT: u64 = 1 << 63;
 /// index that reads one element yields no buffer at all. A shape cast and a detach
 /// consume their receiver, so the buffer they hand on has no other owner left.
 pub(crate) fn builds_its_own_buffer(expr: &HirExpr) -> bool {
-    if let HirExprKind::TensorIndex { .. } = expr.kind {
-        return matches!(expr.ty, HirType::Tensor { .. });
+    match expr.kind {
+        HirExprKind::TensorIndex { .. } => return matches!(expr.ty, HirType::Tensor { .. }),
+        // Reading a tensor out of a temporary (`make().b`) moves it out and releases
+        // the rest, so the reader is its last owner.
+        HirExprKind::FieldAccess { .. }
+        | HirExprKind::TupleIndex { .. }
+        | HirExprKind::Index { .. } => return is_fresh_value(expr),
+        _ => {}
     }
     matches!(
         expr.kind,
@@ -37,7 +43,7 @@ pub(crate) fn builds_its_own_buffer(expr: &HirExpr) -> bool {
             | HirExprKind::Call { .. }
             | HirExprKind::TensorLiteral { .. }
             | HirExprKind::TensorFill { .. }
-            | HirExprKind::TensorIdentity
+            | HirExprKind::TensorIdentity { .. }
             | HirExprKind::TensorRandomNormal { .. }
             | HirExprKind::TensorReduce { .. }
             | HirExprKind::TensorEinsum { .. }

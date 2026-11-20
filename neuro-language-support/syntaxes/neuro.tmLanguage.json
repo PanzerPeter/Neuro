@@ -473,6 +473,18 @@
     "types": {
       "patterns": [
         {
+          "comment": "A dynamic tensor extent, `?` or `?B`, as a shape entry: after `[`, `,` or a dimension name's `:`, and before `,` or `]`. Matched before `#operators`, whose `?` is error propagation.",
+          "match": "(?<=[\\[,:]|[\\[,:]\\s)(\\?)([A-Za-z_][A-Za-z0-9_]*)?(?=\\s*[,\\]])",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.dynamic-extent.neuro"
+            },
+            "2": {
+              "name": "entity.name.type.dynamic-extent.neuro"
+            }
+          }
+        },
+        {
           "name": "storage.type.primitive.neuro",
           "match": "\\b(i8|i16|i32|i64|u8|u16|u32|u64|bf16|f16|f32|f64|bool|string|char|void)\\b"
         },

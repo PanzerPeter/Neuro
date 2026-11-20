@@ -129,8 +129,8 @@ pub struct LinkableBodies {
 }
 
 /// Lower every function this path computes exactly as the LLVM backend would into
-/// linkable LLVM IR: element-wise arithmetic and matrix products over numeric tensors of
-/// static shape, straight-line, with owned or `&` operands. Integer arithmetic carries the
+/// linkable LLVM IR: the tensor operations over numeric tensors of any shape, dynamic axes
+/// included, straight-line, with owned or `&` operands. Integer arithmetic carries the
 /// LLVM backend's checks, its overflow ones only where `overflow` says they panic. A
 /// bare `@gpu` function is never one of them: it is [`lower_for_gpu`](crate::lower_for_gpu)'s.
 ///
@@ -323,6 +323,7 @@ pub(crate) mod tests {
     fn program_with_one_function() -> HirProgram {
         HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "add".to_string(),
                 params: vec![
                     HirParam {
@@ -380,6 +381,110 @@ pub(crate) mod tests {
         }
     }
 
+    /// A tensor of `element` over `shape`, `None` for a dynamic axis.
+    pub(crate) fn tensor_of(element: HirType, shape: Vec<Option<usize>>) -> HirType {
+        HirType::Tensor {
+            element: Box::new(element),
+            shape,
+            names: AxisNames::default(),
+        }
+    }
+
+    /// A variable read of `ty`, as an operand of an outlined body.
+    pub(crate) fn operand(name: &str, ty: &HirType) -> HirExpr {
+        HirExpr::new(
+            HirExprKind::Variable(name.to_string()),
+            ty.clone(),
+            Span::new(0, 0),
+        )
+    }
+
+    /// `func f(params) -> result { return body }`, outlined as a `FollowsOperands` body.
+    pub(crate) fn outlined(
+        params: &[(&str, HirType)],
+        body: HirExpr,
+        result: HirType,
+    ) -> HirProgram {
+        HirProgram {
+            items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
+                name: "f".to_string(),
+                params: params
+                    .iter()
+                    .map(|(name, ty)| HirParam {
+                        name: name.to_string(),
+                        ty: ty.clone(),
+                        span: Span::new(0, 0),
+                    })
+                    .collect(),
+                return_type: result,
+                body: vec![HirStmt::Return {
+                    value: Some(body),
+                    span: Span::new(0, 0),
+                }],
+                target: neuro_hir::HirTarget::FollowsOperands,
+                span: Span::new(0, 0),
+            })],
+        }
+    }
+
+    /// Lower `program` through MLIR to LLVM IR, and check the body is defined there with
+    /// nothing above the `llvm` dialect left. Returns the IR for further checks.
+    pub(crate) fn assert_lowered(program: &HirProgram) -> String {
+        let ir = translate_to_llvm_ir(program).expect("the body should bufferize and translate");
+        assert!(
+            ir.contains("define") && ir.contains("@f"),
+            "expected a defined function:\n{ir}"
+        );
+        assert!(
+            !ir.contains("linalg.") && !ir.contains("memref") && !ir.contains("tensor."),
+            "expected nothing above the llvm dialect to survive:\n{ir}"
+        );
+        ir
+    }
+
+    /// The MLIR text of `program`'s debugging view, where the operation's structure is read.
+    pub(crate) fn mlir_of(program: &HirProgram) -> String {
+        crate::lower::lower_program(program).expect("the body should lower to MLIR")
+    }
+
+    /// Lower `program`'s body for an NVIDIA device, and check the device path declines it: no
+    /// device body, and no error, so the host body is what runs.
+    pub(crate) fn assert_host_only_on_gpu(program: &HirProgram) {
+        let target = crate::GpuTarget::Nvidia {
+            chip: "sm_80".to_string(),
+        };
+        let bodies = crate::lower_for_gpu(program, &target, crate::Overflow::Checked)
+            .expect("a body with no device form is no error");
+        assert!(
+            bodies.functions.is_empty(),
+            "a dynamic result stays on the host:\n{}",
+            bodies.llvm_ir
+        );
+    }
+
+    /// Lower `program`'s body for an NVIDIA device, and check the device path keeps it with
+    /// kernels that launch. Returns the launch count.
+    pub(crate) fn assert_launches_on_gpu(program: &HirProgram) -> usize {
+        let target = crate::GpuTarget::Nvidia {
+            chip: "sm_80".to_string(),
+        };
+        let bodies = crate::lower_for_gpu(program, &target, crate::Overflow::Checked)
+            .expect("the device path lowers a dynamic body");
+        assert_eq!(
+            bodies.functions.len(),
+            1,
+            "the device keeps the body:\n{}",
+            bodies.llvm_ir
+        );
+        let launches = bodies
+            .llvm_ir
+            .matches("call void @mgpuLaunchKernel")
+            .count();
+        assert!(launches > 0, "{}", bodies.llvm_ir);
+        launches
+    }
+
     /// `func f(a: Tensor<f32, L>, b: Tensor<f32, R>) -> Tensor<f32, Out> { return a <op> b }`
     pub(crate) fn program_with_tensor_operator(
         op: BinaryOp,
@@ -402,6 +507,7 @@ pub(crate) mod tests {
 
         HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "f".to_string(),
                 params: vec![param("a", &left), param("b", &right)],
                 return_type: result.clone(),

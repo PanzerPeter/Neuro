@@ -142,6 +142,18 @@ impl Lowerer {
                     ident.span,
                 ))
             }
+            // A dynamic extent name read as a value is its hidden local, unless a local of
+            // the same name shadows it.
+            Expr::Identifier(ident)
+                if self.lookup_local(&ident.name).is_none()
+                    && self.extent_in_scope(&ident.name) =>
+            {
+                Ok(HirExpr::new(
+                    HirExprKind::Variable(crate::extents::local_name(&ident.name)),
+                    HirType::U64,
+                    ident.span,
+                ))
+            }
             Expr::Identifier(ident) => match self.lookup(&ident.name) {
                 Some(ty) => Ok(self.binding_value(&ident.name, ty, ident.span)),
                 None => match self.functions.get(&ident.name) {
@@ -791,7 +803,6 @@ impl Lowerer {
         expected: Option<&HirType>,
     ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
         let mut out = Vec::with_capacity(stmts.len());
-        let mut ty = HirType::Void;
         let last = stmts.len().saturating_sub(1);
         for (i, stmt) in stmts.iter().enumerate() {
             // A trailing `.backward()` is a statement, not the block's value.
@@ -799,33 +810,39 @@ impl Lowerer {
                 // An `if` written in statement position parses to `Stmt::If`, never
                 // `Stmt::Expr(Expr::If)`, so a trailing `if/else` has to be recognized
                 // here to carry the block's value.
-                let tail = match stmt {
-                    ast_types::Stmt::Expr(expr) => Some(self.lower_expr(expr, expected)?),
-                    ast_types::Stmt::If {
-                        condition,
-                        then_block,
-                        else_if_blocks,
-                        else_block,
-                        span,
-                    } if else_block.is_some() => Some(self.lower_if_expr(
-                        condition,
-                        then_block,
-                        else_if_blocks,
-                        else_block,
-                        expected,
-                        *span,
-                    )?),
-                    _ => None,
-                };
-                if let Some(tail) = tail {
-                    ty = tail.ty.clone();
-                    out.push(HirStmt::Expr(tail));
+                let mut tail_ty = None;
+                self.in_extent_statement(&mut out, |lo, out| {
+                    let tail = match stmt {
+                        ast_types::Stmt::Expr(expr) => Some(lo.lower_expr(expr, expected)?),
+                        ast_types::Stmt::If {
+                            condition,
+                            then_block,
+                            else_if_blocks,
+                            else_block,
+                            span,
+                        } if else_block.is_some() => Some(lo.lower_if_expr(
+                            condition,
+                            then_block,
+                            else_if_blocks,
+                            else_block,
+                            expected,
+                            *span,
+                        )?),
+                        _ => None,
+                    };
+                    if let Some(tail) = tail {
+                        tail_ty = Some(tail.ty.clone());
+                        out.push(HirStmt::Expr(tail));
+                    }
+                    Ok(())
+                })?;
+                if let Some(ty) = tail_ty {
                     return Ok((out, ty));
                 }
             }
             self.lower_stmt_into(stmt, &mut out)?;
         }
-        Ok((out, ty))
+        Ok((out, HirType::Void))
     }
 
     /// The `(parameter types, return type)` of an associated function `Type::member`.

@@ -10,7 +10,7 @@ use crate::type_checkers::numeric_bounds::is_numeric_family;
 use crate::type_checkers::operator_traits::{
     OperatorForm, is_operator_trait, is_provided_method, operator_trait_spec,
 };
-use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
+use crate::type_checkers::resolution::{NameSlot, SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::val_else::stmts_diverge;
 use crate::type_checkers::{MethodGenerics, TypeChecker};
 use crate::types::{FunctionMode, Type};
@@ -97,12 +97,19 @@ impl TypeChecker {
             // Build the full parameter type list: implicit `self` first for instance methods.
             self.check_method_generic_names(method);
             let saved_scope = self.enter_method_generics(&method.generics, &method.lifetimes);
+            // A trait impl's method answers to the trait's declaration, which names no dynamic
+            // extent, so the names are refused in it as they are in the declaration.
+            let (param_slot, return_slot) = if def.trait_name.is_some() {
+                (NameSlot::Refused, NameSlot::Refused)
+            } else {
+                (NameSlot::Top, NameSlot::Return)
+            };
             let mut param_types: Vec<Type> = Vec::new();
             if method.self_param.is_some() {
                 param_types.push(self_ty.clone());
             }
             for param in &method.params {
-                if let Some(ty) = self.resolve_type(&param.ty) {
+                if let Some(ty) = self.resolve_type_naming(&param.ty, param_slot) {
                     param_types.push(ty);
                 } else {
                     param_types.push(Type::Unknown);
@@ -113,7 +120,11 @@ impl TypeChecker {
                 // A return type that failed to resolve was reported; `Unknown` keeps the
                 // body's `return`s and each call site from reporting it again as a `void`
                 // it never wrote, as for a free function.
-                self.resolve_type(ret_ty).unwrap_or(Type::Unknown)
+                let resolved = self
+                    .resolve_type_naming(ret_ty, return_slot)
+                    .unwrap_or(Type::Unknown);
+                self.refuse_unbound_return_names(&param_types, &resolved, ret_ty.span());
+                resolved
             } else {
                 Type::Void
             };
@@ -645,6 +656,12 @@ impl TypeChecker {
             } else {
                 &param_types[..]
             };
+            // The dynamic names the signature writes are in scope for the whole body.
+            for param_ty in non_self_params {
+                for name in self.dynamic_names_of(param_ty, method.name.span) {
+                    self.introduce_dynamic_name(&name, None, method.name.span);
+                }
+            }
 
             // `self` (`&self` or `&mut self`) and reference parameters outlive the
             // call, so a returned reference may borrow them (the receiver lifetime
@@ -667,6 +684,7 @@ impl TypeChecker {
                 if matches!(param_ty, Type::Unknown) {
                     continue;
                 }
+                self.refuse_value_named_dynamic(&param.name.name, param.name.span);
                 if let Err(dup) =
                     self.symbols
                         .define(param.name.name.clone(), param_ty.clone(), false)

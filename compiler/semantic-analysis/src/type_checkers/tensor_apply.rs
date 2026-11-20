@@ -17,7 +17,7 @@ use super::TypeChecker;
 use super::closures::{closure_context, closure_param_unannotated};
 use super::statements::function_value_position;
 use crate::errors::TypeError;
-use crate::types::{ArrayLen, TensorAxis, Type};
+use crate::types::{TensorAxis, Type};
 use ast_types::Expr;
 use shared_types::Span;
 
@@ -50,17 +50,8 @@ impl TypeChecker {
         args: &[Expr],
         call_span: Span,
     ) -> Type {
-        // The result has the receiver's shape, so an extent parameter or a splice types it
-        // as written and each instance walks its own length. A `?` axis has no length
-        // until run time, which the dynamic-extent rules own.
-        if shape.iter().any(|axis| axis.extent == ArrayLen::Dynamic) {
-            self.record_error(TypeError::TensorShapeCastSymbolicExtent {
-                method: method.to_string(),
-                name: ArrayLen::Dynamic.to_string(),
-                span: call_span,
-            });
-            return Type::Unknown;
-        }
+        // The result has the receiver's shape, so an extent parameter, a splice or a dynamic
+        // axis types it as written and each instance or run walks its own length.
         let expected = arity(method);
         if args.len() != expected {
             self.record_error(TypeError::ArgumentCountMismatch {
@@ -213,11 +204,12 @@ impl TypeChecker {
             }
             return None;
         };
+        // A dynamic axis zips only with the same name on the other side, as an operator's does.
         let agrees = other_shape.len() == shape.len()
             && other_shape
                 .iter()
                 .zip(shape.iter())
-                .all(|(found, expected)| found.extent == expected.extent);
+                .all(|(found, expected)| found.extent.aligns_with(&expected.extent));
         if !agrees {
             self.record_error(TypeError::TensorZipShapeMismatch {
                 receiver: Type::Tensor {

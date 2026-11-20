@@ -36,38 +36,37 @@ caches.
   named `__neuro_gpu_<function>` so a host body and a device body link side by side, but each symbol
   launches its `linalg` ops as GPU kernels for `GpuTarget::Nvidia { chip }` (`nvvm`, PTX) or
   `GpuTarget::Amd { chip }` (`rocdl`, a code object). A `@gpu` body that would not reach
-  `lower_for_link`, or that has a rank-0 tensor, is `GpuBodiesNotLowered` with every such
-  function's name and span: running it on the host is what `@gpu` forbids. Every buffer a symbol
-  is handed must be device memory, and it allocates a buffer between two kernels through
-  `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, which the caller defines. It also
-  admits every `FollowsOperands` function (a tensor operation lowering outlined out of host code)
-  the same way, but leniently: one it cannot lower keeps its host body alone and is no error. A
-  body over a half-precision or `bool` tensor is kept off the GPU (`exact_on_gpu`): neither has
-  a device kernel checked against it. A float `%` counts as a math call (`math_functions`): the
-  vendor conversion turns `arith.remf` into the device library's exact `fmod`, so it needs that
-  library exactly as `exp` does. A `@gpu` body with one is refused as before. One
-  whose body is a compound assignment or a `.map` / `.zip` / `.reduce` becomes a per-thread
-  launcher instead (`kernel/body/traversal.rs`), as leniently. It
-  lowers every `@kernel` function (`HirTarget::Kernel`) to a symbol of the same shape that
-  returns nothing and launches the body once per thread. A `<<` checks its amount against the
-  operand's width on the debug tier (`GuardKind::ShiftOverflow`, the host's `shift overflow`) and
-  masks it from `-O1` up, and so does `.shr(n)`; `.wrapping_*`, `.saturating_*`, a signed
-  integer's `.abs()` and `.is_nan()` are the LLVM backend's arithmetic (`scalar_method`). A local `const` is a scalar local, and a scalar module constant read by
-  name lowers to its value (`module_constant`). A `for` walks `.rev()` and `.step(n)` as the host
-  does: an ascending induction mirrored onto the binding, the exit tested on the distance left,
-  and a stride that is not positive failing on every tier (`GuardKind::RangeStep`, the host's
-  `range step must be positive`). A `loop` with a value and a `match` on an integer, `bool` or
-  `char` store their value through a slot; a `char` is an `i32` local (`value_type`), never a
-  parameter. A body construct the kernel lowering
-  lacks is `KernelBodiesNotLowered`, a `KernelRefusal` (function, construct span, what it is) per
+  `lower_for_link`, or that has a rank-0 tensor, or returns a tensor with a run-time extent, is
+  `GpuBodiesNotLowered` with every such function's name and span: running it on the host is what
+  `@gpu` forbids. Every buffer a symbol is handed must be device memory, and it allocates a buffer
+  between two kernels through `_mlir_memref_to_llvm_alloc` / `_mlir_memref_to_llvm_free`, which
+  the caller defines. It also admits every `FollowsOperands` function (a tensor operation lowering
+  outlined out of host code) the same way, but leniently: one it cannot lower keeps its host body
+  alone and is no error. A body over a half-precision or `bool` tensor is kept off the GPU
+  (`exact_on_gpu`): neither has a device kernel checked against it. A float `%` counts as a math
+  call (`math_functions`): the vendor conversion turns `arith.remf` into the device library's
+  exact `fmod`, so it needs that library exactly as `exp` does. A `@gpu` body with one is refused
+  as before. One whose body is a compound assignment or a `.map` / `.zip` / `.reduce` becomes a
+  per-thread launcher instead (`kernel/body/traversal.rs`), as leniently. It lowers every
+  `@kernel` function (`HirTarget::Kernel`) to a symbol of the same shape that returns nothing and
+  launches the body once per thread. A `<<` checks its amount against the operand's width on the
+  debug tier (`GuardKind::ShiftOverflow`, the host's `shift overflow`) and masks it from `-O1` up,
+  and so does `.shr(n)`; `.wrapping_*`, `.saturating_*`, a signed integer's `.abs()` and
+  `.is_nan()` are the LLVM backend's arithmetic (`scalar_method`). A local `const` is a scalar
+  local, and a scalar module constant read by name lowers to its value (`module_constant`). A
+  `for` walks `.rev()` and `.step(n)` as the host does: an ascending induction mirrored onto the
+  binding, the exit tested on the distance left, and a stride that is not positive failing on
+  every tier (`GuardKind::RangeStep`, the host's `range step must be positive`). A `loop` with a
+  value and a `match` on an integer, `bool` or `char` store their value through a slot; a `char`
+  is an `i32` local (`value_type`), never a parameter. A body construct the kernel lowering lacks
+  is `KernelBodiesNotLowered`, a `KernelRefusal` (function, construct span, what it is) per
   function. A body calling a math function needs the vendor's device math library; without it
   (probed once, see Notes) a `FollowsOperands` one keeps its host body, a `@gpu` one is
   `GpuBodiesNotLowered` and a `@kernel` one a `KernelRefusal` at the call. `neuroc` calls it for a
-  program with a `@gpu`, `@kernel` or `FollowsOperands` function.
-`build_smoke_module` is `pub(crate)` and compiled only under `test`. It builds
-`func.func @neuro_smoke(index, index) -> index` with a single `arith.addi` body, and `bridge`'s
-tests carry that module across to LLVM IR, because it is the one module with a real body rather
-than only declarations.
+  program with a `@gpu`, `@kernel` or `FollowsOperands` function. `build_smoke_module` is
+  `pub(crate)` and compiled only under `test`. It builds `func.func @neuro_smoke(index, index) ->
+  index` with a single `arith.addi` body, and `bridge`'s tests carry that module across to LLVM
+  IR, because it is the one module with a real body rather than only declarations.
 
 ## Shared Kernel
 - `neuro-hir`: the typed HIR contract `lower_program` consumes.
@@ -149,6 +148,15 @@ the GPU mapping writes; `gpu-to-llvm` turns each launch into calls to MLIR's GPU
 (`mgpuModuleLoad[JIT]`, `mgpuLaunchKernel`, `mgpuStream*`), which the IR declares and nothing in
 this crate defines.
 
+**Dynamic results stay on the host.** A body whose returned tensor has a run-time extent
+(`dynamic_result`) is not device code, on either path. Bufferization sizes such a result at run
+time, so it cannot be hoisted into the caller's out-parameter: it is copied there, and the copy is
+a host `llvm.memcpy` over device memory. Such a body keeps its host form alone, the fallback a
+body with no device form takes, so a device operand of it panics at run time. A body with dynamic
+inputs and a static result runs on the device, with its dynamic axes read at run time; the
+device path verified bit-exact on an RTX 5070 for a float sum and mean of dynamic length, a
+dynamic contraction, and a top-k. Its per-thread launchers (`kernel/mod.rs`) decline the same way.
+
 **Tiling, per function.** Tile sizes are read by loop axis from the outermost, so one list fits one
 rank; `tiling` picks a function's from its widest tensor and functions that differ lower as
 separate modules. Ranks 1 to 3 take `mapping-policy=innermost-first` (absent from LLVM 20), which puts
@@ -209,7 +217,12 @@ rule `build_linkable_module` takes (the CPU path admits every outlined and `GpuO
 `Gpu` one that passes this test), and `refused_bodies` turns what is left out into the error.
 
 **Reductions.** `tensor_reduce::build_reduce` lowers `.sum()` / `.mean()` / `.max()` / `.min()`,
-for the host and a GPU alike. A half-precision source is widened to `f32` first
+for the host and a GPU alike. A dynamic run's length is multiplied out at run time (`run_length`),
+and a mean divides by it (`count_of`). A float run of dynamic length always folds in lanes, whatever
+its length, with `min(length, REDUCE_LANES)` lanes (`build_lanes`): every lane starts inside the
+run, so a short run's lanes are its elements in the sequential fold's order, and the bits equal the
+fold a short static run takes. The partials are no bigger than the run needs. An integer run stays
+sequential at any length. A half-precision source is widened to `f32` first
 (`cast_elements`), folded there and the result rounded back once, so a long sum does not stall
 where a 16-bit total stops growing. A rank-0 result (a rank-1 axis reduction) has no parallel
 axis and so stays off a GPU. The index space is the result's axes
@@ -253,12 +266,19 @@ comparator gives the same order, so the algorithm is never observable. The eleme
 as they are (exact, nothing to widen).
 
 - *Merge sort, host and GPU.* Bottom-up, one all-parallel `linalg.generic` per doubling of the
-  block width (`ceil(log2(extent))` of them, none for a run of one). Each point finds the run
+  block width (`ceil(log2(extent))` of them, none for a run of one; a dynamic run runs them as a
+  loop, below). Each point finds the run
   position it holds by a merge-path binary search over the pair of blocks it merges, a fixed-count
   `scf.for` inside the body, reading the previous order and the source with `tensor.extract`.
   A right element goes first only if it strictly precedes (`precedes`, the LLVM backend's
   comparator with NaN last, which the `.max()` / `.min()` fold also uses), which keeps it stable.
   O(n log² n) comparisons a run.
+- *Dynamic runs.* A run whose length is dynamic has no static pass count. Its passes are an
+  `scf.for` over `ceil(log2(n))` (the bit length of `n - 1`, via `math.ctlz`), run two at a time
+  between two buffers that the loop names statically: pass `2p` reads the first and writes the
+  second, pass `2p + 1` is an `scf.if` back, and an odd count copies the answer into the first.
+  No value is carried through the loop: bufferization copies a swapped loop-carried buffer on each
+  iteration, and on a device those copies run on the host. The starting order is the identity.
 - *LSD radix, host integers only.* A run at least `RADIX_BUCKETS` (256) long on the host
   (`Lowering::side`) sorts one byte a pass in `scf.for` loops over tensor values (count, prefix,
   place), two order tensors written in turn. The key flips the sign bit when signed and every bit
@@ -281,7 +301,10 @@ to right and added to the accumulator, the LLVM backend's order exactly; a full 
 arrives boxed in `[1]` and gets one leading parallel dimension of extent 1, while one typed as a
 rank-0 tensor, a `...` over no axes, needs no box). A slice position is a
 literal inside its axis, or, only for an outlined target, an integer parameter the call site has
-checked, since a GPU body cannot stop the program.
+checked, since a GPU body cannot stop the program. A `Whole` axis survives at the source's run-time
+extent, and a constant range on a dynamic axis keeps its static extent (its end is checked by the
+call site). A literal position on a dynamic axis is refused here: nothing can check it, and an
+outlined body never carries one (the call site passes every position as a checked parameter).
 
 **Per-thread launchers for outlined bodies.** A `FollowsOperands` function whose body is a compound
 assignment (through `*__operand1`) or a traversal is written as MLIR text like a `@kernel`
@@ -375,12 +398,19 @@ that is what makes the operation element-wise rather than a gather. Any other mi
 extent neither equal nor 1, an operand outranking the result, or a different element type) is
 a shape error the frontend owns, so it answers `Ok(None)` rather than being lowered wrongly.
 
-**A `?` extent sizes the destination from an operand.** `tensor.empty` needs one `index`
-operand per dynamic axis, and those come from `tensor.dim` on an operand that walks that axis
-itself. A *stretched* operand cannot supply one: it is size 1 there and says nothing about the
-result. For the same reason a `?` operand extent is never stretched (nothing here can prove it
-is 1 at run time, and guessing wrong would silently read the wrong element) so a result axis
-no operand walks leaves the function a declaration.
+**A dynamic extent is read off an operand at run time.** Every body takes its extents through
+`result_extents` (`tensor_arithmetic.rs`): a static axis is its constant, and a `?` axis is the
+`tensor.dim` (`memref.dim` for a `&mut` target) of the first operand that walks that axis, at
+that operand's own position for it. `dynamic_sizes` gives the `index` operands `tensor.empty`
+takes, one per dynamic axis in order. A *stretched* operand cannot supply one: it is size 1
+there and says nothing about the result. For the same reason a `?` operand extent is never
+stretched (nothing here can prove it is 1 at run time, and guessing wrong would silently read
+the wrong element). A result axis no operand walks leaves the function a declaration, which
+the frontend's shape rules rule out for every operation it accepts.
+
+`Extent` is a constant or such an `index` value. Loops and checks that need a run-time extent
+(a row-major position for a division's diagnostic, a reduction's run length, a sort's pass
+count) read it from `Extent::index`, and a body captures the outer value freely.
 
 It answers `Ok(None)`, meaning "leave this function a declaration", for anything else. Scalar
 code stays the LLVM backend's: an outlined body reads its scalars, literals included, as
@@ -397,30 +427,34 @@ index 0 and does not read one it lacks (`contraction_axes`). The fill is
 not optional: a reduction READS its destination at every point, and `tensor.empty` is undefined
 memory. Named `linalg.matmul` and `linalg.fill` are still not reachable (melior's ODS module
 generates from `LinalgOps.td` only) so all three go through the one `generic_op` builder, which
-takes its operand split, maps, iterators and body region as arguments. Every extent must be
-static here: `tensor.dim` can recover a dynamic result axis but not the contracted one, which
-appears in no operand of the destination, so a `?` anywhere answers `Ok(None)`.
+takes its operand split, maps, iterators and body region as arguments. A dynamic batch or row
+or column axis is sized from the operand that walks it, as elsewhere. The contracted axis needs
+no size: it appears in both operands, so `linalg` takes its trip count from them, and a dynamic
+one lowers the same way a static one does. The shapes themselves (`contraction_axes`) are the
+frontend's rule: a `?` axis matches only the same `?` axis on the other side.
 
 **Contractions are scheduled (`schedule.rs`).** `build_matmul` and `build_einsum` tag their
 contracting generic with tile sizes (`neuro.tiles`, `neuro.peel`, `neuro.vectorize`) when its body
-carries no integer check and no `einsum` operand repeats a letter. A half-precision contraction is
-built over its operands widened to `f32` (`cast_elements`), accumulates in `f32` and narrows each
-result element once at the end, so it is tagged as the `f32` contraction it is. `lower_for_link` and
-`lower_for_gpu` call `schedule::apply` on the module they lower, before bufferization: it reads the
-distinct tags back with a walk, writes one transform-dialect script and runs it through
-`mlirTransformApplyNamedSequence` (melior wraps no interpreter). On the host the result axes tile
-into a register block of 4 rows by 64 bytes of columns (`tile_using_for`), each contracted letter
-gets a loop of step 1 outside the block, an axis the block does not divide is peeled, every block
-vectorizes, and `hoist_loop_invariant_subsets` lifts the accumulator into the contracted loops'
-iteration arguments, so it stays in registers. On a GPU the block is up to 4 x 4 per thread, sized
-to divide its axes (`tile_using_forall`, never peeled), and a contraction one block would cover
-whole is left untagged: a one-iteration `scf.forall` folds into its body and would run in the host
-launcher. Each element still adds its products one at a time in contracted order from the fill's
-zero, a separate multiply and add each rounded, so every result keeps the naive nest's bits on both
-sides. No tensor-core MMA and no vendor BLAS: both split the contracted extent or fuse the multiply
-into the add. The producer of an operand is never fused in (`structured.fuse` would recompute a
-chained product per block), and the fill stays a loop of its own. `build_linkable_module` returns
-the unscheduled module, which is what the construction tests read.
+carries no integer check, no `einsum` operand repeats a letter, and every extent it tiles is
+static (a dynamic one keeps the naive nest: the blocks divide static extents). A half-precision
+contraction is built over its operands widened to `f32` (`cast_elements`), accumulates in `f32`
+and narrows each result element once at the end, so it is tagged as the `f32` contraction it is.
+`lower_for_link` and `lower_for_gpu` call `schedule::apply` on the module they lower, before
+bufferization: it reads the distinct tags back with a walk, writes one transform-dialect script
+and runs it through `mlirTransformApplyNamedSequence` (melior wraps no interpreter). On the host
+the result axes tile into a register block of 4 rows by 64 bytes of columns (`tile_using_for`),
+each contracted letter gets a loop of step 1 outside the block, an axis the block does not divide
+is peeled, every block vectorizes, and `hoist_loop_invariant_subsets` lifts the accumulator into
+the contracted loops' iteration arguments, so it stays in registers. On a GPU the block is up to 4
+x 4 per thread, sized to divide its axes (`tile_using_forall`, never peeled), and a contraction
+one block would cover whole is left untagged: a one-iteration `scf.forall` folds into its body and
+would run in the host launcher. Each element still adds its products one at a time in contracted
+order from the fill's zero, a separate multiply and add each rounded, so every result keeps the
+naive nest's bits on both sides. No tensor-core MMA and no vendor BLAS: both split the contracted
+extent or fuse the multiply into the add. The producer of an operand is never fused in
+(`structured.fuse` would recompute a chained product per block), and the fill stays a loop of its
+own. `build_linkable_module` returns the unscheduled module, which is what the construction tests
+read.
 
 **The bufferized function has MLIR's tensor ABI, not Neuro's.** A tensor parameter crosses as an
 exploded row-major `memref` descriptor (allocated pointer, aligned pointer, offset, then one size
@@ -431,11 +465,11 @@ the linked symbol, passing each buffer out of its handle and a result buffer it 
 That keeps every allocation a Neuro tensor owns on the LLVM backend's side.
 
 **What `lower_for_link` links.** `build_linkable_module` takes a free function only when
-`linkable_signature` holds (every parameter a number, a `bool`, a static tensor of one, owned or
-behind `&` / `&mut`, or a function value over them; a static tensor result, a tuple of them, or
-nothing, see `linkable_result`) and `build_body` lowers it. An integer body carries its checks,
-so it is as interchangeable as a float one. Static only, because the frontend gives a `?` axis no
-arithmetic. The module declares nothing: a declaration would name a Neuro-ABI function at an MLIR
+`linkable_signature` holds (every parameter a number, a `bool`, a tensor of one, owned or behind
+`&` / `&mut`, or a function value over them; a tensor result, a tuple of them, or nothing, see
+`linkable_result`) and `build_body` lowers it. An integer body carries its checks, so it is as
+interchangeable as a float one. A `?` axis links like a static one: the caller passes its
+run-time extent in the descriptor and the body reads it from there. The module declares nothing: a declaration would name a Neuro-ABI function at an MLIR
 signature, and the linked IR is read for its definitions alone. The `__neuro_mlir_` prefix (and
 `__neuro_gpu_` for a device body) keeps each symbol off the Neuro-ABI name the LLVM backend
 defines.

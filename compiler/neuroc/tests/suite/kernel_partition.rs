@@ -119,15 +119,13 @@ fn flat_reads_a_tensor_by_its_row_major_position() {
         !run.status.success() && stderr.contains("panic: tensor index out of bounds"),
         "position 24 of 24 elements is past the end: {stderr}"
     );
-    let error = test
-        .check(
+    // Over a dynamic axis the strides come from the run-time extents.
+    assert_eq!(
+        test.compile_and_run(
             "dynamic.nr",
-            "func f(t: &Tensor<f32, [?, 3]>) -> f32 {\n    t.flat(1)\n}\nfunc main() -> i32 { return 0 }\n",
-        )
-        .expect_err("a `?` extent has no strides to read by");
-    assert!(
-        error.contains("`.flat`") && error.contains("dynamic.nr:2:5"),
-        "{error}"
+            "func f(t: &Tensor<i32, [?, 4]>) -> i32 {\n    t.flat(5)\n}\nfunc main() -> i32 {\n    mut u = Tensor::<i32, [?, 4]>::zeros(dims: [2])\n    u[1, 1] = 7\n    return f(&u)\n}\n",
+        ),
+        Ok(7)
     );
 }
 

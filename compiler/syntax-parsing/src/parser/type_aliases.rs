@@ -63,8 +63,48 @@ impl Parser {
         self.skip_newlines();
 
         let target = self.parse_type()?;
+        // An alias is expanded into every use, so a name it wrote would be bound at each
+        // of them as though it were written there: the declaration is where it is refused.
+        if let Some(dynamic) = named_dynamic_in(&target) {
+            return Err(ParseError::DynamicNameInAlias {
+                alias: name.name.clone(),
+                name: dynamic.name.clone(),
+                span: dynamic.span,
+            });
+        }
 
         Ok(TypeAliasDecl { name, target })
+    }
+}
+
+/// The first named dynamic extent `?B` a written type holds, anywhere inside it.
+fn named_dynamic_in(ty: &Type) -> Option<&Identifier> {
+    fn in_shape(shape: &[ast_types::TensorDim]) -> Option<&Identifier> {
+        shape.iter().find_map(|dim| match &dim.extent {
+            ast_types::TensorExtent::NamedDynamic(name) => Some(name),
+            _ => None,
+        })
+    }
+    match ty {
+        Type::Tensor {
+            element_type,
+            shape,
+            ..
+        } => in_shape(shape).or_else(|| named_dynamic_in(element_type)),
+        Type::Reference { inner, .. }
+        | Type::Array { element: inner, .. }
+        | Type::Slice { element: inner, .. } => named_dynamic_in(inner),
+        Type::Tuple { elements, .. } => elements.iter().find_map(named_dynamic_in),
+        Type::Generic { args, .. } => args.iter().find_map(|arg| match arg {
+            GenericArg::Type(inner) => named_dynamic_in(inner),
+            GenericArg::Shape { dims, .. } => in_shape(dims),
+            GenericArg::Const { .. } => None,
+        }),
+        Type::Function { params, ret, .. } => params
+            .iter()
+            .find_map(named_dynamic_in)
+            .or_else(|| named_dynamic_in(ret)),
+        Type::Named(_) | Type::ImplTrait { .. } | Type::DynTrait { .. } => None,
     }
 }
 
@@ -818,6 +858,32 @@ mod tests {
         let items = parse(src).expect("parses");
         let ty = first_var_type(&items).expect("has a var decl");
         assert_eq!(named(&ty), "i32");
+    }
+
+    #[test]
+    fn alias_naming_a_dynamic_extent_is_refused_at_its_declaration() {
+        let err = parse("type Weights = Tensor<f32, [?B, 4]>\nfunc main() -> i32 { return 0 }")
+            .expect_err("a named extent in an alias is refused");
+        assert!(
+            matches!(
+                &err,
+                ParseError::DynamicNameInAlias { alias, name, .. }
+                    if alias == "Weights" && name == "B"
+            ),
+            "got {err:?}"
+        );
+        let err = parse("type Batch = Vec<Tensor<f32, [?B]>>\nfunc main() -> i32 { return 0 }")
+            .expect_err("a name nested in an alias is refused too");
+        assert!(
+            matches!(err, ParseError::DynamicNameInAlias { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn alias_of_an_anonymous_extent_is_accepted() {
+        let src = "type Batch = Tensor<f32, [?, 4]>\nfunc main() -> i32 { return 0 }";
+        assert!(parse(src).is_ok());
     }
 
     #[test]

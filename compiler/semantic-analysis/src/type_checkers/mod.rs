@@ -482,6 +482,7 @@ mod const_eval;
 pub(crate) mod container_iterators;
 mod declarations;
 mod derivable;
+mod dynamic_names;
 mod exhaustiveness;
 mod expressions;
 mod gpu;

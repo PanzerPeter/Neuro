@@ -188,7 +188,7 @@ impl TypeChecker {
                     return None;
                 };
                 self.reject_private_field(&struct_name, &field.name, field.span);
-                Some(field_ty)
+                Some(self.anonymize_dynamic(&field_ty, *field_span))
             }
 
             Place::TupleIndex {

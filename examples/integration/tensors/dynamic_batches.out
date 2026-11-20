@@ -1,0 +1,11 @@
+batch of 2:
+  B = 2, best mean = 3.5, first two rows sum to 11.0
+  top two scores 4.5 and 2.5 at rows 1 and 0
+batch of 3:
+  B = 3, best mean = 4.5, first two rows sum to 11.0
+  top two scores 6.5 and 4.5 at rows 2 and 1
+batch of 4:
+  B = 4, best mean = 5.5, first two rows sum to 11.0
+  top two scores 8.5 and 6.5 at rows 3 and 2
+total of the top scores = 33.0
+third label times ten = 20

@@ -24,10 +24,11 @@ use inkwell::IntPredicate;
 use inkwell::module::Linkage;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
-use neuro_hir::HirExpr;
+use neuro_hir::{HirExpr, HirExtent};
 
 use crate::codegen::context::CodegenContext;
 use crate::codegen::dlpack::TensorHome;
+use crate::codegen::extents::ExtentOperand;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::Type;
 
@@ -42,7 +43,8 @@ const DEVICE_HOST_VARIANT: &str = "CPU";
 const DEVICE_UNAVAILABLE: &str = "a tensor transfer to a GPU is not supported on Windows yet";
 
 impl<'ctx> CodegenContext<'ctx> {
-    /// The element type and buffer length of a tensor type.
+    /// The element type and buffer length of a static tensor type. Only a literal reaches
+    /// this: tensor literals are static by construction.
     pub(super) fn tensor_layout(&self, ty: &Type) -> CodegenResult<(Type, usize)> {
         let Type::Tensor { element, shape } = ty else {
             return Err(CodegenError::InternalError(
@@ -53,8 +55,29 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(((**element).clone(), extents.iter().product()))
     }
 
+    /// The element type of a tensor type.
+    pub(super) fn tensor_element(&self, ty: &Type) -> CodegenResult<Type> {
+        let Type::Tensor { element, .. } = ty else {
+            return Err(CodegenError::InternalError(
+                "tensor node does not carry a tensor type".to_string(),
+            ));
+        };
+        Ok((**element).clone())
+    }
+
+    /// Each `dims` expression of a construction, evaluated to its run-time extent in order.
+    pub(super) fn codegen_extent_values(
+        &mut self,
+        dims: &[HirExpr],
+    ) -> CodegenResult<Vec<IntValue<'ctx>>> {
+        dims.iter()
+            .map(|dim| Ok(self.codegen_expr(dim)?.into_int_value()))
+            .collect()
+    }
+
     /// Allocate a tensor's DLPack handle and its element buffer, returning both: the
-    /// handle *is* the tensor value, and the buffer is where elements are written.
+    /// handle *is* the tensor value, and the buffer is where elements are written. `dims` and
+    /// `bytes` are as for [`alloc_dlpack_tensor`](CodegenContext::alloc_dlpack_tensor).
     ///
     /// Every construction node routes through here, so there is exactly one place the
     /// allocator is chosen, the hook 2D's arena replaces.
@@ -62,8 +85,10 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         tensor_ty: &Type,
         name: &str,
+        dims: &[IntValue<'ctx>],
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<(PointerValue<'ctx>, PointerValue<'ctx>)> {
-        let handle = self.alloc_dlpack_tensor(tensor_ty, name)?;
+        let handle = self.alloc_dlpack_tensor(tensor_ty, name, dims, bytes)?;
         let data = self.load_dlpack_data(handle)?;
         Ok((handle, data))
     }
@@ -86,8 +111,9 @@ impl<'ctx> CodegenContext<'ctx> {
         global.set_constant(true);
         global.set_initializer(&constant);
 
-        let (handle, data) = self.alloc_tensor(tensor_ty, name)?;
-        let size = self.dlpack_copy_length(tensor_ty)?;
+        // A literal is static, so its run is a constant and its offset is never reported.
+        let size = self.element_run(tensor_ty, &[], 0)?.bytes;
+        let (handle, data) = self.alloc_tensor(tensor_ty, name, &[], size)?;
         self.build_memcpy_call(data, global.as_pointer_value(), size)?;
         Ok(handle.into())
     }
@@ -149,7 +175,8 @@ impl<'ctx> CodegenContext<'ctx> {
             return self.emit_const_tensor_buffer(tensor_ty, constant, "tensor.literal");
         }
 
-        let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.literal")?;
+        let size = self.element_run(tensor_ty, &[], 0)?.bytes;
+        let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.literal", &[], size)?;
         let buffer_ty = self.type_mapper.tensor_buffer_type(tensor_ty)?;
         let i64_type = self.context.i64_type();
         for (index, value) in values.into_iter().enumerate() {
@@ -160,35 +187,47 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(handle.into())
     }
 
-    /// Lower `zeros()` / `ones()`: one constant repeated across the buffer.
+    /// Lower `zeros()` / `ones()`: one constant repeated across the buffer. `dims` holds the
+    /// run-time extent of each dynamic axis, and is empty for a static tensor.
     pub(crate) fn codegen_tensor_fill(
         &mut self,
         value: &HirExpr,
+        dims: &[HirExpr],
         tensor_ty: &Type,
+        offset: usize,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let (element_ty, _) = self.tensor_layout(tensor_ty)?;
+        let element_ty = self.tensor_element(tensor_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let value = self.codegen_expr(value)?;
         let value = self.coerce_if_needed(value, elem_llvm, &element_ty)?;
-        self.write_tensor_by_loop(tensor_ty, "tensor.fill", |_, _| Ok(value))
+        let dims = self.codegen_extent_values(dims)?;
+        self.write_tensor_by_loop(tensor_ty, "tensor.fill", &dims, offset, |_, _| Ok(value))
     }
 
     /// Lower `identity()`: ones on the diagonal of a square rank-2 buffer, zeros
-    /// elsewhere. Squareness was established before lowering.
+    /// elsewhere. Squareness was established before lowering, so both extents are the same
+    /// value at run time too.
     pub(crate) fn codegen_tensor_identity(
         &mut self,
+        dims: &[HirExpr],
         tensor_ty: &Type,
+        offset: usize,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let Type::Tensor { element, shape } = tensor_ty else {
             return Err(CodegenError::InternalError(
                 "identity node does not carry a tensor type".to_string(),
             ));
         };
-        let [_, cols] = crate::types::static_extents(shape)?[..] else {
+        if shape.len() != 2 {
             return Err(CodegenError::InternalError(
                 "identity is a rank-2 construction".to_string(),
             ));
-        };
+        }
+        let dims = self.codegen_extent_values(dims)?;
+        let extents = self.axis_extents(shape, &dims)?;
+        // Squareness was established before lowering, so a zero-sized matrix has no slot
+        // to write and the loop never divides by its column count.
+        let cols = self.at_least_one(extents[1])?;
         let elem_llvm = self.get_any_llvm_type(element)?;
         let (zero, one): (BasicValueEnum<'ctx>, BasicValueEnum<'ctx>) = match elem_llvm {
             BasicTypeEnum::IntType(int_ty) => (
@@ -205,10 +244,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 ));
             }
         };
-        // Squareness was established before lowering, so a zero-sized matrix has no slot
-        // to write and the loop never divides by its column count.
-        let cols = self.context.i64_type().const_int(cols.max(1) as u64, false);
-        self.write_tensor_by_loop(tensor_ty, "tensor.identity", |ctx, i| {
+        self.write_tensor_by_loop(tensor_ty, "tensor.identity", &dims, offset, |ctx, i| {
             let row = ctx
                 .builder
                 .build_int_unsigned_div(i, cols, "tensor.identity.row")?;
@@ -229,17 +265,21 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Allocate a tensor of `tensor_ty` and write `value_at(i)` into each buffer slot `i`
     /// in a counted loop. The buffer is written through its pointer rather than built by
-    /// `insertvalue` or a constant, because the element count comes from the type and an
-    /// instruction or a constant per element does not scale.
+    /// `insertvalue` or a constant, because the element count does not scale with an
+    /// instruction or a constant per element. `dims` are the run-time extents of its dynamic
+    /// axes, and `offset` locates the size trap a dynamic count can hit.
     fn write_tensor_by_loop(
         &mut self,
         tensor_ty: &Type,
         name: &str,
+        dims: &[IntValue<'ctx>],
+        offset: usize,
         mut value_at: impl FnMut(&mut Self, IntValue<'ctx>) -> CodegenResult<BasicValueEnum<'ctx>>,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let (_, count) = self.tensor_layout(tensor_ty)?;
+        let run = self.element_run(tensor_ty, dims, offset)?;
+        let count = run.count;
         let buffer_ty = self.type_mapper.tensor_buffer_type(tensor_ty)?;
-        let (handle, data) = self.alloc_tensor(tensor_ty, name)?;
+        let (handle, data) = self.alloc_tensor(tensor_ty, name, dims, run.bytes)?;
         let i64_type = self.context.i64_type();
         let index = self.entry_alloca(i64_type, &format!("{name}.i"))?;
         self.builder.build_store(index, i64_type.const_zero())?;
@@ -263,12 +303,9 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_load(i64_type, index, &format!("{name}.idx"))?
             .into_int_value();
-        let more = self.builder.build_int_compare(
-            IntPredicate::ULT,
-            i,
-            i64_type.const_int(count as u64, false),
-            &format!("{name}.more"),
-        )?;
+        let more =
+            self.builder
+                .build_int_compare(IntPredicate::ULT, i, count, &format!("{name}.more"))?;
         self.builder.build_conditional_branch(more, body, done)?;
 
         self.builder.position_at_end(body);
@@ -293,9 +330,11 @@ impl<'ctx> CodegenContext<'ctx> {
         &mut self,
         mean: &HirExpr,
         std: &HirExpr,
+        dims: &[HirExpr],
         tensor_ty: &Type,
+        offset: usize,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
-        let (element_ty, _) = self.tensor_layout(tensor_ty)?;
+        let element_ty = self.tensor_element(tensor_ty)?;
         let elem_llvm = self.get_any_llvm_type(&element_ty)?;
         let BasicTypeEnum::FloatType(elem_float) = elem_llvm else {
             return Err(CodegenError::InternalError(
@@ -304,8 +343,9 @@ impl<'ctx> CodegenContext<'ctx> {
         };
         let mean = self.codegen_expr(mean)?.into_float_value();
         let std = self.codegen_expr(std)?.into_float_value();
+        let dims = self.codegen_extent_values(dims)?;
         let normal_fn = self.get_or_define_rng_normal()?;
-        self.write_tensor_by_loop(tensor_ty, "tensor.rand", |ctx, _| {
+        self.write_tensor_by_loop(tensor_ty, "tensor.rand", &dims, offset, |ctx, _| {
             let draw = ctx
                 .builder
                 .build_call(normal_fn, &[], "tensor.rand.draw")?
@@ -362,19 +402,30 @@ impl<'ctx> CodegenContext<'ctx> {
         } else {
             ptr
         };
+        // A clone takes the source's extents and byte length, so its own dynamic axes come from
+        // the source handle, which the copy never outgrows.
+        let Type::Tensor { shape, .. } = tensor_ty else {
+            return Err(CodegenError::InternalError(
+                "a tensor clone receiver is not a tensor".to_string(),
+            ));
+        };
         let cloned = self.split_on_home(
             source,
             |this| {
                 let source_data = this.load_dlpack_data(source)?;
-                let (handle, data) = this.alloc_tensor(tensor_ty, "tensor.clone")?;
-                let size = this.dlpack_copy_length(tensor_ty)?;
+                let dims = this.handle_dynamic_extents(source, shape)?;
+                let size = this.dlpack_copy_length(source, tensor_ty)?;
+                let (handle, data) = this.alloc_tensor(tensor_ty, "tensor.clone", &dims, size)?;
                 this.build_memcpy_call(data, source_data, size)?;
                 Ok(Some(handle.into()))
             },
             |this, index| {
                 let source_data = this.load_dlpack_data(source)?;
-                let data = this.device_clone(source_data, tensor_ty, index)?;
-                let handle = this.device_tensor_over(data, tensor_ty, "tensor.clone", index)?;
+                let dims = this.handle_dynamic_extents(source, shape)?;
+                let size = this.dlpack_copy_length(source, tensor_ty)?;
+                let data = this.device_clone(source_data, size, index)?;
+                let handle =
+                    this.device_tensor_over(data, tensor_ty, "tensor.clone", index, &dims, size)?;
                 Ok(Some(handle.into()))
             },
         )?;
@@ -385,18 +436,40 @@ impl<'ctx> CodegenContext<'ctx> {
     /// receiver's own handle comes back with its rank, extents, and strides rewritten. The
     /// elements are already where the result wants them, so nothing is copied and the
     /// DLPack `data` pointer does not move. A permuting cast is computed in MLIR.
+    ///
+    /// `extents` gives the run-time extent of each dynamic axis of the result, evaluated against
+    /// the receiver (operand 0) before its shape is rewritten.
     pub(crate) fn codegen_tensor_redescribe(
         &mut self,
         receiver: &HirExpr,
         result_ty: &Type,
+        extents: &[HirExtent],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let receiver_ty = Type::from_hir(&receiver.ty);
         let BasicValueEnum::PointerValue(source) = self.codegen_expr(receiver)? else {
             return Err(CodegenError::InternalError(
                 "a tensor receiver does not lower to a pointer".to_string(),
             ));
         };
         self.mark_moved_for_drop(receiver)?;
-        self.build_dlpack_redescribe(source, result_ty)?;
+        let Type::Tensor {
+            shape: receiver_shape,
+            ..
+        } = receiver_ty.referent()
+        else {
+            return Err(CodegenError::InternalError(
+                "a tensor receiver does not carry a tensor type".to_string(),
+            ));
+        };
+        let operands = [ExtentOperand::Tensor {
+            handle: source,
+            shape: receiver_shape.clone(),
+        }];
+        let dims = extents
+            .iter()
+            .map(|extent| self.eval_extent(extent, &operands))
+            .collect::<CodegenResult<Vec<_>>>()?;
+        self.build_dlpack_redescribe(source, &receiver_ty, result_ty, &dims)?;
         // The derivatives belonged to the consumed receiver and are shaped like it, so the
         // result starts without them.
         self.release_derivatives(source)?;
@@ -484,7 +557,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.builder.position_at_end(upload);
         let host_data = self.load_dlpack_data(handle)?;
-        let device_data = self.device_upload(host_data, tensor_ty, index)?;
+        let size = self.dlpack_copy_length(handle, tensor_ty)?;
+        let device_data = self.device_upload(host_data, size, index)?;
         let release_host = self.aligned_release_fn()?;
         self.builder
             .build_call(release_host, &[host_data.into()], "")?;
@@ -494,7 +568,8 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(resident);
         let device_data = self.load_dlpack_data(handle)?;
         let from = self.dlpack_device_index(handle)?;
-        let moved = self.device_move(device_data, tensor_ty, from, index)?;
+        let size = self.dlpack_copy_length(handle, tensor_ty)?;
+        let moved = self.device_move(device_data, size, from, index)?;
         self.set_dlpack_home(handle, moved, TensorHome::Gpu(index))?;
         self.builder.build_unconditional_branch(done)?;
 
@@ -505,8 +580,9 @@ impl<'ctx> CodegenContext<'ctx> {
         self.builder.position_at_end(download);
         let device_data = self.load_dlpack_data(handle)?;
         let from = self.dlpack_device_index(handle)?;
-        let host_data = self.alloc_host_buffer(tensor_ty)?;
-        self.device_download(host_data, device_data, from, tensor_ty)?;
+        let size = self.dlpack_copy_length(handle, tensor_ty)?;
+        let host_data = self.alloc_host_buffer(size)?;
+        self.device_download(host_data, device_data, from, size)?;
         let release_device = self.device_tensor_free_fn()?;
         self.builder
             .build_call(release_device, &[device_data.into(), from.into()], "")?;

@@ -148,6 +148,7 @@ impl TypeChecker {
         // The arm's scope is fresh, so a failed define is a name the pattern binds twice.
         // A binding is a part of the scrutinee, so it holds what the scrutinee borrows.
         for (name, ty, span) in &bindings {
+            self.refuse_value_named_dynamic(name, *span);
             if let Err(duplicate) = self.symbols.define(name.clone(), ty.clone(), false) {
                 self.record_error(TypeError::VariableAlreadyDefined {
                     name: duplicate,

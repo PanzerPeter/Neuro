@@ -10,7 +10,9 @@ use crate::type_checkers::backward::{
 };
 use crate::type_checkers::tensor_apply::is_apply_method;
 use crate::type_checkers::tensor_reduce::is_reduce_method;
-use crate::type_checkers::tensor_shape::{FLATTEN_METHOD, RESHAPE_METHOD, is_shape_method};
+use crate::type_checkers::tensor_shape::{
+    AS_SHAPE_METHOD, FLATTEN_METHOD, RESHAPE_METHOD, is_shape_method,
+};
 use crate::type_checkers::tensor_sort::is_sort_method;
 use crate::type_checkers::tensors::DEVICE_TYPE_NAME;
 use crate::types::{CollectionKind, Type};
@@ -287,13 +289,7 @@ impl TypeChecker {
             // diagnostic already points at. Auto-derefs `&Tensor<T, S>`: copying through
             // a borrow is how a shared weight is duplicated without moving it out of
             // whatever owns it.
-            (Type::Tensor { shape, .. }, CLONE_METHOD) => {
-                // A deep copy allocates a second buffer, whose size is the product of
-                // the extents.
-                let (shape, referent) = (shape.clone(), recv.referent().clone());
-                if self.reject_dynamic_extent(&shape, "`.clone()`", &referent, call_span) {
-                    return Some(referent);
-                }
+            (Type::Tensor { .. }, CLONE_METHOD) => {
                 if !args.is_empty() {
                     self.record_error(TypeError::ArgumentCountMismatch {
                         expected: 0,
@@ -329,15 +325,14 @@ impl TypeChecker {
             // buffer moves into the differently shaped result rather than being copied.
             // Their arguments are read as syntax, never as values, because a `.permute`
             // axis may be a dimension name that no value scope declares.
+            (_, AS_SHAPE_METHOD) if matches!(recv.referent(), Type::Tensor { .. }) => {
+                Some(self.check_as_shape(object, recv, type_args, args, call_span))
+            }
             (Type::Tensor { element, shape }, m) if is_shape_method(m) => {
                 if matches!(recv, Type::Reference { .. }) {
                     return None;
                 }
                 let (element, shape) = (element.clone(), shape.clone());
-                let referent = recv.referent().clone();
-                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
-                    return Some(Type::Unknown);
-                }
                 Some(self.check_tensor_shape_method(&element, &shape, object, m, args, call_span))
             }
             // The four reductions READ the receiver: they produce a scalar or allocate a
@@ -346,10 +341,6 @@ impl TypeChecker {
             // move: `w.mean()` must not consume a weight.
             (Type::Tensor { element, shape }, m) if is_reduce_method(m) => {
                 let (element, shape) = (element.clone(), shape.clone());
-                let referent = recv.referent().clone();
-                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
-                    return Some(Type::Unknown);
-                }
                 Some(self.check_tensor_reduce(&element, &shape, m, args, call_span))
             }
             // Elementwise math reads the receiver for the same reason a reduction does: the
@@ -358,11 +349,8 @@ impl TypeChecker {
             (Type::Tensor { element, shape }, m)
                 if is_math_method(m) && self.is_floating(element) =>
             {
-                let (element, shape) = (element.clone(), shape.clone());
+                let element = element.clone();
                 let referent = recv.referent().clone();
-                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
-                    return Some(Type::Unknown);
-                }
                 self.check_math_args(&element, m, args, call_span);
                 Some(referent)
             }
@@ -377,10 +365,6 @@ impl TypeChecker {
             // is recorded. Unlike a reduction's axis, every argument here is a value.
             (Type::Tensor { element, shape }, m) if is_apply_method(m) => {
                 let (element, shape) = (element.clone(), shape.clone());
-                let referent = recv.referent().clone();
-                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
-                    return Some(Type::Unknown);
-                }
                 Some(self.check_tensor_apply(&element, &shape, m, args, call_span))
             }
             // The order-based selections read the receiver for the same reason the
@@ -389,21 +373,11 @@ impl TypeChecker {
             // recorded. `scores.topk(k: 5)` must not consume `scores`.
             (Type::Tensor { element, shape }, m) if is_sort_method(m) => {
                 let (element, shape) = (element.clone(), shape.clone());
-                let referent = recv.referent().clone();
-                if self.reject_dynamic_extent(&shape, &format!("`.{m}`"), &referent, call_span) {
-                    return Some(Type::Unknown);
-                }
                 Some(self.check_tensor_sort(&element, &shape, m, args, call_span))
             }
-            (Type::Tensor { shape, .. }, TENSOR_TO_METHOD)
-                if !matches!(recv, Type::Reference { .. }) =>
-            {
+            (Type::Tensor { .. }, TENSOR_TO_METHOD) if !matches!(recv, Type::Reference { .. }) => {
                 // A transfer allocates the destination buffer, so it needs the size the
                 // same way `.clone()` does.
-                let shape = shape.clone();
-                if self.reject_dynamic_extent(&shape, "`.to`", recv, call_span) {
-                    return Some(recv.clone());
-                }
                 self.check_call_args(args, &[Type::Enum(DEVICE_TYPE_NAME.to_string())], call_span);
                 self.record_move(object);
                 Some(recv.clone())
@@ -424,10 +398,9 @@ impl TypeChecker {
             // `.flat(i)` reads the element at row-major position `i` whatever the rank, and
             // borrows like an index. The position is turned into one per axis by the
             // extents, so they have to be known.
-            (Type::Tensor { element, shape }, FLAT_METHOD) => {
-                let (element, shape) = ((**element).clone(), shape.clone());
+            (Type::Tensor { element, .. }, FLAT_METHOD) => {
+                let element = (**element).clone();
                 self.check_call_args(args, &[Type::U64], call_span);
-                self.reject_dynamic_extent(&shape, "`.flat`", recv, call_span);
                 Some(element)
             }
             // `.detach()` CONSUMES the receiver as a shape cast does: its buffer is handed

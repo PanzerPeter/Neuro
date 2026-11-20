@@ -581,7 +581,17 @@ impl Parser {
             expected: "a tensor dimension".to_string(),
         })?;
         match token.kind {
-            TokenKind::Question => Ok(TensorExtent::Dynamic(token.span)),
+            TokenKind::Question => match self.peek_kind() {
+                Some(TokenKind::Identifier(text)) => {
+                    let name = text.clone();
+                    let span = self
+                        .advance()
+                        .map(|t| token.span.merge(t.span))
+                        .unwrap_or(token.span);
+                    Ok(TensorExtent::NamedDynamic(Identifier { name, span }))
+                }
+                _ => Ok(TensorExtent::Dynamic(token.span)),
+            },
             TokenKind::DotDot => {
                 let name = self.consume(
                     TokenKind::Identifier(String::new()),
@@ -602,7 +612,7 @@ impl Parser {
             found => Err(ParseError::UnexpectedToken {
                 found,
                 expected: "a tensor dimension: a non-negative integer, an extent parameter, \
-                           an expression over them, `..S`, or `?`"
+                           an expression over them, `..S`, `?` or `?B`"
                     .to_string(),
                 span: token.span,
             }),
@@ -996,6 +1006,26 @@ mod tests {
         assert!(matches!(shape[0].extent, TensorExtent::Dynamic(_)));
         assert!(shape[0].name.is_none());
         assert_eq!(shape[1].extent, TensorExtent::Literal(784));
+    }
+
+    /// `?B` is one token pair: a named dynamic extent, distinct from `?` followed by an
+    /// axis, and it re-kinds nothing into a generic parameter.
+    #[test]
+    fn a_dynamic_extent_may_be_named() {
+        let items = parse("func f(x: Tensor<f32, [batch: ?B, 784]>, y: Tensor<i32, [?B]>) { }")
+            .expect("parses");
+        let Some(Item::Function(func)) = items.first() else {
+            panic!("expected a function item");
+        };
+        let Type::Tensor { shape, .. } = &func.params[0].ty else {
+            panic!("expected a tensor parameter type");
+        };
+        assert!(matches!(&shape[0].extent, TensorExtent::NamedDynamic(id) if id.name == "B"));
+        assert_eq!(
+            shape[0].name.as_ref().map(|n| n.name.as_str()),
+            Some("batch")
+        );
+        assert!(func.generics.is_empty());
     }
 
     /// A `?` axis documents itself like any other: the name and the extent are

@@ -76,7 +76,10 @@ no types.
   argument and `type Output = T` binding / const-parameter type / bound `<Assoc = T>` binding);
   an alias as a value constructor or path name is out of scope. A generic parameter shadows an
   alias of the same name inside the item that declares it. An
-  unknown target hits the existing `UnknownTypeName` check downstream.
+  unknown target hits the existing `UnknownTypeName` check downstream. A target that writes a
+  named dynamic extent `?B` anywhere in it is `DynamicNameInAlias` at the declaration: expansion
+  would bind that name at every use, where the type checker refuses names outside the positions
+  the language lists. Anonymous `?` aliases are accepted.
 - **Trait default methods**: `inject_trait_defaults` copies each trait's defaults into the
   `impl Trait for Type` blocks that omit them, never replacing a method the implementor wrote.
   It runs *before* `expand_type_aliases`, so injected bodies are alias-expanded too. Downstream

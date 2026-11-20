@@ -47,11 +47,12 @@ impl Lowerer {
                 "`.{method}` reached lowering on a non-tensor receiver"
             )));
         };
-        let shape = crate::static_extents(&shape)?;
         let op = reduce_op(method)?;
 
         let Some(entry) = args.first() else {
-            if shape.iter().product::<usize>() == 0 {
+            // Only a static empty axis is refused here; a dynamic one is checked where its
+            // count is first known.
+            if shape.contains(&Some(0)) {
                 return Err(empty_run(method, span));
             }
             return Ok(HirExpr::new(
@@ -65,8 +66,8 @@ impl Lowerer {
             ));
         };
 
-        let axis = resolve_axis(&shape, &names, entry, method)?;
-        if shape[axis] == 0 {
+        let axis = resolve_axis(shape.len(), &names, entry, method)?;
+        if shape[axis] == Some(0) {
             return Err(empty_run(method, span));
         }
         let mut result_shape = shape;
@@ -81,7 +82,7 @@ impl Lowerer {
             },
             HirType::Tensor {
                 element,
-                shape: neuro_hir::static_shape(&result_shape),
+                shape: result_shape,
                 names: AxisNames(result_names),
             },
             span,
@@ -114,7 +115,7 @@ fn reduce_op(method: &str) -> Result<HirReduceOp, LoweringError> {
 /// The receiver axis an `axis:` argument names: a dimension name, a non-negative index,
 /// or a negative index counting from the end.
 fn resolve_axis(
-    shape: &[usize],
+    rank: usize,
     names: &AxisNames,
     entry: &Expr,
     method: &str,
@@ -133,7 +134,7 @@ fn resolve_axis(
             "`.{method}` reached lowering with a non-constant axis"
         ))
     })?;
-    let rank = i128::try_from(shape.len()).map_err(|_| {
+    let rank = i128::try_from(rank).map_err(|_| {
         malformed(format!(
             "`.{method}` reached lowering on an unrepresentable rank"
         ))
@@ -141,7 +142,7 @@ fn resolve_axis(
     let resolved = if value < 0 { value + rank } else { value };
     usize::try_from(resolved)
         .ok()
-        .filter(|axis| *axis < shape.len())
+        .filter(|axis| i128::try_from(*axis).is_ok_and(|axis| axis < rank))
         .ok_or_else(|| {
             malformed(format!(
                 "`.{method}` reached lowering with axis {value} out of range"

@@ -3,15 +3,16 @@
 // A tensor's elements sit in one flat, row-major run behind its DLPack handle's `data`
 // pointer, so an index is arithmetic on that run: the position given to axis `k`
 // contributes `position * stride[k]`, where `stride[k]` is the product of the extents
-// below it. Every stride is a compile-time constant, because every extent is part of
-// the type. Reading one element is therefore one `getelementptr` and one `load`.
+// below it. A static tensor's strides and extents are constants. A dynamic tensor's are
+// read from the handle at run time (`extents::handle_axes`), and each position is bounds
+// checked against its axis's run-time extent. Reading one element is one `getelementptr`
+// and one `load` either way.
 
 use inkwell::IntPredicate;
 use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue, PointerValue};
 use neuro_hir::{HirExpr, HirTensorAxis};
 
-use super::row_major_strides;
 use crate::codegen::alias::MemoryClass;
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
@@ -36,10 +37,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor index node does not carry a tensor receiver".to_string(),
             ));
         };
-        let shape = crate::types::static_extents(&shape)?;
         let handle = self.tensor_receiver_handle(object, &source_ty)?;
-        let strides = row_major_strides(&shape);
-        let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
+        let (extents, strides) = self.handle_axes(handle, &shape)?;
+        let base = self.tensor_index_base(axes, &extents, &strides, offset)?;
         let elem_llvm = self.get_any_llvm_type(result_ty)?;
         let value = self.read_tensor_element(handle, elem_llvm, base)?;
         // The element is independent of the receiver's buffer once read, so a receiver no
@@ -131,18 +131,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor receiver does not lower to a pointer".to_string(),
             ));
         };
-        let handle = if matches!(source_ty, Type::Reference { .. }) {
-            let handle = self.builder.build_load(
-                self.context.ptr_type(inkwell::AddressSpace::default()),
-                ptr,
-                "tensor.index.recv",
-            )?;
-            self.tag_load(handle, MemoryClass::TensorHandle)?
-                .into_pointer_value()
-        } else {
-            ptr
-        };
-        Ok(handle)
+        self.tensor_value_handle(ptr, source_ty)
     }
 
     /// Lower `place[i, j] = value`, a store into one element of a tensor's buffer.
@@ -164,41 +153,40 @@ impl<'ctx> CodegenContext<'ctx> {
                 "a tensor index assignment does not carry a tensor receiver".to_string(),
             ));
         };
-        let shape = crate::types::static_extents(&shape)?;
         let elem_llvm = self.get_any_llvm_type(&element)?;
         // The value first (the language evaluates it before the place): it may reassign the tensor, releasing the buffer a
         // data pointer read before it would still address.
         let val = self.codegen_expr(value)?;
         let val = self.coerce_if_needed(val, elem_llvm, &element)?;
         let handle = self.tensor_receiver_handle(object, &source_ty)?;
-        let strides = row_major_strides(&shape);
-        let base = self.tensor_index_base(axes, &shape, &strides, offset)?;
+        let (extents, strides) = self.handle_axes(handle, &shape)?;
+        let base = self.tensor_index_base(axes, &extents, &strides, offset)?;
         self.write_tensor_element(handle, elem_llvm, base, val)?;
         self.mark_moved_for_drop(value)?;
         Ok(())
     }
 
-    /// The flat element offset every position's contribution adds up to.
+    /// The flat element offset every position's contribution adds up to. `extents` and
+    /// `strides` are one `i64` per axis, constants for a static tensor.
     fn tensor_index_base(
         &mut self,
         axes: &[HirTensorAxis],
-        shape: &[usize],
-        strides: &[usize],
+        extents: &[IntValue<'ctx>],
+        strides: &[IntValue<'ctx>],
         offset: usize,
     ) -> CodegenResult<IntValue<'ctx>> {
         let i64_type = self.context.i64_type();
         let mut base = i64_type.const_zero();
         for (axis, index) in axes.iter().enumerate() {
-            let stride = i64_type.const_int(strides[axis] as u64, false);
             let HirTensorAxis::Position(expr) = index else {
                 return Err(super::computed_in_mlir("a tensor slice"));
             };
             let position = self.codegen_expr(expr)?.into_int_value();
             let position = self.widen_index_to_i64(position, &Type::from_hir(&expr.ty))?;
-            self.guard_tensor_position(position, shape[axis], offset)?;
-            let contribution = self
-                .builder
-                .build_int_mul(position, stride, "tensor.index.axis")?;
+            self.guard_tensor_position(position, extents[axis], offset)?;
+            let contribution =
+                self.builder
+                    .build_int_mul(position, strides[axis], "tensor.index.axis")?;
             base = self
                 .builder
                 .build_int_add(base, contribution, "tensor.index.base")?;
@@ -212,10 +200,9 @@ impl<'ctx> CodegenContext<'ctx> {
     fn guard_tensor_position(
         &mut self,
         position: IntValue<'ctx>,
-        extent: usize,
+        extent: IntValue<'ctx>,
         offset: usize,
     ) -> CodegenResult<()> {
-        let extent = self.context.i64_type().const_int(extent as u64, false);
         let ok = self.builder.build_int_compare(
             IntPredicate::ULT,
             position,

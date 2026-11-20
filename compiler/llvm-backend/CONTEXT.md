@@ -139,8 +139,10 @@ declared like any other, so every call site and every function value is unchange
 differs. `codegen_external_body` (`codegen/external_bodies.rs`) emits it as a call to the symbol
 in MLIR's calling convention: each tensor as an exploded row-major `memref` descriptor (its `data`
 pointer as both the allocated and the aligned pointer, offset 0, then its extents and element
-strides as constants), each scalar as itself, and a result descriptor over a tensor this backend
-allocates through `alloc_dlpack_tensor`, so the value handed back is an ordinary handle. A tuple
+strides, constants for a static tensor and the handle's own run-time values for a dynamic one), each
+scalar as itself, and a result descriptor over a tensor this backend allocates through
+`alloc_dlpack_tensor`, sized for its dynamic axes from `HirFunction::result_extents` (see DLPack
+Representation), so the value handed back is an ordinary handle. A tuple
 of tensors (`.topk`'s values and indices) is one result descriptor per tensor, in order, and the
 handles are packed into the tuple returned. A
 `&Tensor` parameter is loaded through to its handle and only read; a by-value one was moved in
@@ -162,8 +164,9 @@ the other backend never shares an `LLVMContext` with this one), links it, and ma
 LLVM's `default<O2>`, whatever `-O` the program is built at: it is the program's tensor
 arithmetic, optimized the way a library it calls would be, and nothing in it licenses
 reassociating floats, so the bits are unchanged. The caller promises every named function has
-scalar, tensor, `&Tensor`, `&mut Tensor` or function-value parameters and a statically shaped
-tensor result, a tuple of them, or none; the descriptor needs a compile-time extent per axis.
+scalar, tensor, `&Tensor`, `&mut Tensor` or function-value parameters and a tensor result, a tuple
+of them, or none; every descriptor carries its extents at run time, and a result's dynamic axes are
+the ones `result_extents` gives.
 
 `codegen_external_body` is a shell around `emit_external_call`, which emits the call where the
 builder stands over argument values and returns the result. A call to an outlined function with a
@@ -716,10 +719,12 @@ value is a **DLPack handle** (a pointer to the `DLManagedTensorVersioned` that
 `dlpack_managed_tensor_type` lays out), and its `data` field addresses the element buffer, whose
 own layout `tensor_buffer_type` gives as a flat, row-major `[d0*d1*... x T]` array. The rank-0
 tensor's buffer is `[1 x T]` (the empty product), not a zero-length array. Because the value is
-just the handle, a tensor with a dynamic `?` axis maps, moves and releases like any other;
-`types::static_extents` guards the sites that do need a number (the buffer layout, its byte
-size, an index's strides) and reports `UnsupportedType` rather than sizing an allocation from a
-guess. A handle's buffer is host memory (`kDLCPU`) unless `.to(Device::GPU(n))` or a `@gpu` call
+just the handle, a tensor with a dynamic `?` axis maps, moves and releases like any other. Its
+extents are not in the type: a site that needs one reads it from the handle or evaluates it from a
+run-time argument (`codegen/extents.rs`, see DLPack Representation). The buffer layout of a dynamic
+tensor is the zero-length array, since its count is not a constant. `types::static_extents` is left
+only at sites whose tensor is static by construction (a literal, the status word of a checked
+body); a `?` reaching it reports `UnsupportedType`, which is a compiler bug. A handle's buffer is host memory (`kDLCPU`) unless `.to(Device::GPU(n))` or a `@gpu` call
 with a device operand made it device memory (`kDLCUDA`, or `kDLROCM` for an AMD build;
 `TensorHome::Gpu`), and every host read of
 an existing tensor goes through `load_host_data`, whose guard aborts with a located diagnostic
@@ -736,18 +741,26 @@ It is also what makes a large tensor compilable: an aggregate copy is a whole-bu
 pair that only `-O1`'s SROA turns into a `memcpy`, and SelectionDAG crashed legalizing one above
 ~50k elements at `-O0`. There is no size cap any more, at any optimization level.
 
-`codegen/dlpack.rs` owns the handle: it allocates both blocks, fills every field, emits the
-per-tensor-type `shape` and `strides` constants, and defines the one shared `deleter`. See the
-DLPack Representation section below.
+`codegen/dlpack.rs` owns the handle: it allocates both blocks, fills every field, points `shape`
+and `strides` at the per-tensor-type constants (or, for a dynamic tensor, at a per-value shape
+block), and defines the one shared `deleter`. See the DLPack Representation section below.
 
 `expressions/tensors.rs` owns the construction nodes. `alloc_tensor` is the single place the
 allocator is chosen (the hook 2D's arena replaces), and every construction node routes through it,
-taking back both the handle it returns and the `data` pointer it writes elements through.
+taking back both the handle it returns and the `data` pointer it writes elements through. It takes
+the run-time extents of the tensor's dynamic axes and the element run's byte length, both computed
+by `element_run` (see DLPack Representation).
 A literal whose elements are all constants emits the buffer once as a private `.rodata` global and
 `memcpy`s it in; a literal mentioning a runtime value is written slot by slot. `zeros()`, `ones()`,
 `identity()` and `random_normal` share `write_tensor_by_loop`, a counted loop writing straight into
-the heap buffer: their element count comes from the type alone, and a constant per element made
-the compiler's memory and the binary grow with the shape (BUG-147).
+the heap buffer: their element count is the type's, or for a dynamic tensor the product of the
+`dims:` run-time extents (`element_run`, which traps on overflow). A constant per element made the
+compiler's memory and the binary grow with the shape (BUG-147).
+
+`codegen/extents.rs` owns the run-time extents of a dynamic tensor: `TensorExtent` (an axis of a
+borrowed tensor, a constant for a static axis), `element_run` (the element count and byte length of
+a construction or a result, trapping on overflow), and `eval_extent`, the one evaluator for a
+`HirExtent`, shared by the external-body wrapper's results and a shape cast's new extents.
 
 `expressions/tensor_rng.rs` holds the xorshift64 generator `random_normal` draws from, and the
 float intrinsics its Box-Muller transform calls. Nothing else in the backend draws a random
@@ -760,10 +773,11 @@ whose body `mlir-backend` computes. Their HIR arms here answer `computed_in_mlir
 error. What stays is what has no loop: building a handle, reading or writing one element,
 re-describing a handle, cloning, moving between devices, and the grad slots.
 
-`expressions/tensor_index.rs` owns the element read `t[i, j]` and the element write. Every stride
-is a compile-time constant, so the index is arithmetic on the flat row-major run behind `data`:
-each position contributes `position * stride[k]`, guarded by `guard_tensor_position` in every
-build as an array index is (`overflow_checks` gates integer overflow only, because wrapping gives
+`expressions/tensor_index.rs` owns the element read `t[i, j]` and the element write. The index is
+arithmetic on the flat row-major run behind `data`: each position contributes `position * stride[k]`,
+where a static tensor's strides and extents are constants and a dynamic tensor's are read from its
+handle (`handle_axes`). The position is guarded against its axis's extent by `guard_tensor_position`
+in every build as an array index is (`overflow_checks` gates integer overflow only, because wrapping gives
 an overflow a defined result and an index past the storage has none). One `getelementptr` and one
 `load`; with no axes (`.item()` on a rank-0 tensor) the offset is zero. A receiver no binding owns
 is freed afterwards through `release_receiver_temporary`.
@@ -773,13 +787,16 @@ result, a call's return, a tensor constructor, a reduction, a slice) that otherw
 release it. The predicate (`builds_its_own_buffer`) is a whitelist of shapes that provably
 allocate their own buffer, not "anything that is not a place": an `if`, a `match` or a block
 yields whatever its branch yields, which may be a buffer a binding still owns. A shape cast and a
-`.detach()` are on it, since they consume their receiver. An element read uses it, and so does an
+`.detach()` are on it, since they consume their receiver, and so is a tensor read out of a fresh
+temporary (`make().b`), which the read moved out of it. An element read uses it, and so does an
 expression statement whose value is a tensor: nothing reads that value, so `&a + &a;` would leak.
 
 `tensors.rs`'s `codegen_tensor_redescribe` lowers the order-keeping casts, `.reshape(...)` and
 `.flatten(...)`: the receiver is consumed (`mark_moved_for_drop`) and its own handle returned
-after `build_dlpack_redescribe` rewrites its `ndim`, `shape` and `strides` to the result type's
-globals. The elements are already in the result's order, so a reshape of any size costs three
+after `build_dlpack_redescribe` rewrites its `ndim`, `shape` and `strides`. Its run-time extents
+(the cast's `dims`) are evaluated against the receiver first, through the same `eval_extent` the
+external wrapper uses. A static result points back at the type's globals and a dynamic one at a
+fresh shape block; a dynamic receiver's old block is freed once nothing reads it. The elements are already in the result's order, so a reshape of any size costs three
 stores, allocates nothing, and does not move `data`.
 
 `expressions/elementwise_math.rs` lowers `HirExprKind::Math` on a scalar: each function is its
@@ -799,7 +816,8 @@ A tensor value *is* the exchange structure DLPack 1.1 defines, so the pointer a 
 program passes around is the pointer a foreign consumer takes: there is no wrap step at an FFI
 boundary. `type_mapping.rs` holds the layout (`dlpack_managed_tensor_type`), the dtype table
 (`dlpack_dtype`, covering every integer, float, `bf16`, and `bool` element), and the buffer sizing
-(`tensor_buffer_bytes`); `codegen/dlpack.rs` holds the emission.
+(`tensor_buffer_bytes` for a static tensor); `codegen/dlpack.rs` holds the emission and
+`codegen/extents.rs` the run-time sizes (below).
 
 Fields are filled at construction: `version` `{1, 1}`, `manager_ctx` the control block below,
 `deleter` the shared
@@ -807,26 +825,49 @@ Fields are filled at construction: `version` `{1, 1}`, `manager_ctx` the control
 buffer through `__neuro_device_free`), `flags` 0 (the buffer is writable), `device` `{kDLCPU, 0}`
 or `{kDLCUDA, 0}` (`{kDLROCM, 0}` for an AMD build), `ndim` the
 rank, `dtype` from the table with `lanes` 1, `byte_offset` 0, and `shape` / `strides` pointing at
-private constants named `__neuro_dlpack_shape_<mangle>` / `__neuro_dlpack_strides_<mangle>` and
-shared by every value of that tensor type. Strides count **elements, not bytes**. Rank 0 has no
-axis, so both pointers are null: DLPack's own spelling for a scalar. The globals are pointer
-fields, so dynamic shapes can later supply a per-value vector without changing the layout.
+the extents and element strides. For a static tensor those are private constants named
+`__neuro_dlpack_shape_<mangle>` / `__neuro_dlpack_strides_<mangle>`, shared by every value of that
+tensor type. A dynamic tensor's point into its own shape block (below). Strides count **elements,
+not bytes**. Rank 0 has no axis, so both pointers are null: DLPack's own spelling for a scalar.
+
+**Dynamic shapes.** A tensor type with any `?` axis gets a per-value shape block, one `malloc` of
+`2 * rank` `i64`s: the extents of every axis, then the row-major strides (`write_shape_block`).
+`shape` points at its start and `strides` at its second half, and the control block's `shape`
+field owns it. The dynamic axes' extents are the run-time values the construction or the call
+supplied, and a static axis of a dynamic tensor is still the constant. A static handle that is
+widened to a dynamic type keeps its constant arrays, and every reader goes through the DLPack
+fields (`handle_axes`, `handle_extent`), never the type, so both kinds are read the same way. The
+block comes from `alloc_fn`, so a `pool` body takes it from its arena like any other buffer, and
+the deleter releases it through `release_fn`, which tells the two allocators apart by the pointer.
+
+**Run-time sizes.** A dynamic buffer's element count and byte length are computed when it is
+allocated (`element_run`): the product of the extents, and that product times the element width,
+each multiplication under the `llvm.umul.with.overflow` trap that panics `tensor size overflows`
+at the construct's offset. The byte length must also leave room for the alignment padding, so the
+rounding to `DLPACK_DATA_ALIGN` cannot wrap (`alloc_host_buffer` pads at run time for a dynamic
+length and folds to the same constant for a static one). A copy of an existing handle takes its
+byte length from the control block's `data_bytes`, which records the unpadded length at allocation
+(`dlpack_copy_length`), so `.clone()`, `.to(device)`, the byte read and write, and the staging
+copies never recompute a size. A clone's own dynamic axes come from the source's extents. The one
+refusal left is a read from bytes (`__tensor_from_bytes`) of a dynamic type: nothing binds its `?`
+axes, since the file that would is not read yet (LIM-046), so the backend reports it as
+unsupported.
 
 `manager_ctx` carries the compiler's own per-tensor control block
 (`dlpack_control_block_type`), which trails the exchange structure inside the SAME `malloc`
 (`dlpack_tensor_storage_type`): a struct's first field sits at offset 0, so the allocation's
 address is already the `DLManagedTensorVersioned*` a foreign consumer takes, and `deleter`'s one
 `free(self)` releases both. Reserving the field therefore costs a store, not an allocation. Its
-fields are `data_bytes`, the unpadded element-buffer length, and the two derivative slots
-(`DerivativeSlot`): `grad`, and `hessian`, which only a `@grad(order: 2)` `.backward()` fills.
-Each is null, or a handle the slot OWNS. The block is reached at its fixed offset in the storage
-block (`dlpack_derivative_slot`), never by loading `manager_ctx`, because a handle built by a
-foreign producer carries that producer's context in the field. The deleter reads both slots and
-releases each filled one through the derivative's own deleter before the buffer
-(`release_derivatives`), which is
-sound because `__neuro_dlpack_deleter` only ever runs on a handle whose `deleter` field names it,
-and only this compiler writes that name; `a_tensor_is_released_through_its_own_deleter` pins the
-order and that `manager_ctx` is never read.
+fields are `data_bytes`, the unpadded element-buffer length, the two derivative slots
+(`DerivativeSlot`): `grad`, and `hessian`, which only a `@grad(order: 2)` `.backward()` fills, and
+last the `shape` block a dynamic tensor owns, null for a static one. Each derivative slot is null,
+or a handle the slot OWNS. The block is reached at its fixed offset in the storage block
+(`dlpack_derivative_slot`), never by loading `manager_ctx`, because a handle built by a foreign
+producer carries that producer's context in the field. The deleter reads both slots and releases
+each filled one through the derivative's own deleter before the buffer (`release_derivatives`),
+which is sound because `__neuro_dlpack_deleter` only ever runs on a handle whose `deleter` field
+names it, and only this compiler writes that name; `a_tensor_is_released_through_its_own_deleter`
+pins the order and that `manager_ctx` is never read.
 
 **The derivative slots' operations** (`codegen/expressions/tensor_grad.rs`), dispatched ahead of
 the builtin table because most are unit: `.grad()` / `.hessian()` check their slot and panic on
@@ -847,9 +888,8 @@ Two allocations for the tensor, not one: the structure and its control block com
 the elements from the over-aligned allocator at 64 bytes, because DLPack requires a 64-byte-aligned `data` and `malloc`
 guarantees only `max_align_t`. Fusing them would need the structure's size rounded up to 64 as an
 IR constant expression, and LLVM has been withdrawing constant-expression arithmetic; the
-element buffer's size is computable in Rust (`tensor_buffer_bytes`), the structure's is not. The
-allocation size is rounded up to the alignment, but only the unpadded element run is ever copied
-(`dlpack_copy_length`).
+element buffer's size is computable in Rust for a static tensor and at run time for a dynamic one,
+which is why the structure is never sized from the type. The allocation size is rounded up to the alignment, but only the unpadded element run is ever copied.
 
 **The over-aligned allocator is spelled per-platform** (`ALIGNED_ALLOC_FN` / `ALIGNED_FREE_FN` in
 `codegen/context.rs`, the single place both names are chosen). C11's `aligned_alloc(alignment,
@@ -863,49 +903,20 @@ corrupts the heap rather than leaking. Codegen targets the host
 
 Release goes through the handle's own `deleter` field (`build_dlpack_release`), never through a
 direct free, so the release a scope exit performs is provably the one a foreign owner performs.
-`__neuro_dlpack_deleter` releases the gradient and the Hessian, then `data`, then the structure, in that order: reading `data` out
-of a block it had already freed would be a use-after-free.
+`__neuro_dlpack_deleter` releases the gradient and the Hessian, then `data`, then the shape block,
+then the structure, in that order: reading `data` or the shape block out of a block it had already
+freed would be a use-after-free. A static tensor's shape block is null, which the release ignores.
 
-`codegen_reference` returns the borrowed place's storage pointer: mutability is compile-time
-only. An operand `held_place_ptr` finds no storage for is a temporary the checker let
-through as a call argument; it is stored into an entry-block slot (`borrow.temp`) and the slot's
-address is lent, which outlives the borrow because the borrow ends with the statement. What it
-owns is released there (see Drop ABI). A scalar element of a borrowed slice is no temporary:
-`held_place_ptr` projects only into aggregate elements, so `slice_element_borrow` lends the
-element's own slot, since a copy would dangle once `&xs[i]` is returned. `codegen_deref` loads the referent; `codegen_deref_assignment` stores at the pointer, and
-is what `HirPlace::Deref` lowers to.
-**Auto-deref is value-driven**: a borrowed receiver lowers to a `PointerValue`, so
-`string_receiver_struct`, `StructClone`, `codegen_method_call`, and `get_struct_ptr_and_type` load
-through the pointer when they see one; an owned receiver is already a value. There is no context
-state for ref-ness: it is read from `variable_types` (a `&Struct` alloca holds a `ptr`) and from
-the lowered value kind. `held_place_ptr` keeps the same rule for a `Deref` that yields a
-thin borrow (`*rr` with `rr: &&P`, which HIR auto-deref emits for a nested receiver): one load
-reaches the place, exactly as for a borrow-typed binding. `codegen_field_access` loads the
-struct through a non-binding object that evaluates to a pointer.
-
-Unit-returning calls are valid in statement position: `codegen_call` / `codegen_method_call`
-return an `Option` (`None` = void), and the shared `codegen_call_dispatch` is wrapped with a
-void-error in value position.
-
-- **`char`** lowers to LLVM `i32`. Casts use `is_int_like` / `is_unsigned_like` so char↔integer
-  (and char→char) reuse the int-to-int path (char zero-extends, code points being non-negative),
-  and comparisons hit the signed-int branch, correct since valid code points are < 2²¹.
-- **Float-to-integer** casts lower to `llvm.fptosi.sat` / `llvm.fptoui.sat`, not the plain
-  `fptosi` / `fptoui`. The plain instructions are defined only when the truncated value fits the
-  target and yield `poison` otherwise, which made an out-of-range cast's result depend on the
-  optimization level rather than on the source. The saturating form is total: in-range values
-  still truncate toward zero, out-of-range values clamp to the target's bound, and NaN maps to
-  zero. `FoldedConst::cast_to` computes the same function in Rust, so a folded cast and a
-  run-time one agree. The intrinsic call lives in `saturating_float_to_int`, which
-  `.to_checked` reuses for its payload.
-- **`f16` / `bf16`** lower to LLVM `half` / `bfloat`. Backend `is_float()` **includes** the halves,
-  so `as`-casts route through the float instructions. A half operator in `codegen_binary`
-  `fpext`s both operands to `f32`, runs `codegen_scalar_binary` there, and `fptrunc`s an
-  arithmetic answer back: one rounding per operation, which is the correctly rounded half result
-  (`f32` has more than `2p + 2` significand bits for either format) and leaves no excess
-  precision to the next one. A comparison returns the widened compare, which is exact. The float→float cast
-  and `coerce_if_needed` pick `fpext` / `fptrunc` by **bit width**, not a fixed F32/F64 pair; an
-  f16↔bf16 cast (equal width, different format) routes through f32.
+**Wrapper extents.** `codegen_external_body` describes a dynamic operand with the extents and
+strides its handle carries (`handle_axes`), so the memref a body computes over is the run-time
+shape. A result with `?` axes is allocated from `HirFunction::result_extents`: one `HirExtent` per
+dynamic axis of the result, a tuple's parts in order, each evaluated by `eval_extent` against the
+call's operands. The operands are the parameters: a tensor is `Axis { operand, axis }` (read from
+its handle, a `&Tensor` loaded to it first), an integer is `Scalar(operand)` (widened by its
+signedness), and `Constant`, `Add`, `Sub`, `Mul` and `Div` (floored, unsigned) combine them. The
+same evaluator sizes a shape cast's result (operand 0 is its receiver). The device staging
+(`stage_result`, `stage_operand`, `stage_output`) takes the same run-time dims and byte length, so
+a device buffer and a host one are sized alike.
 
 ## if / else-if / else Lowering
 `codegen_if` lowers an `if / else if+ / else?` chain as a binary tree: each call creates
@@ -971,19 +982,18 @@ the next. An arm's drop flags are only armed past the tests, so a failed guard l
 to the arm that runs.
 
 `codegen_pattern_test`, `SavedBinding`, `bind_arm`, and `restore_bindings` are `pub(crate)` so
-`val_else.rs` can share them. `val_else` passes `ArmOwnership::Enclosing`: its binding belongs to
-the enclosing block, which registers it, rather than to the pattern.
+`val_else.rs` can share them.
 
 ## val-else Lowering
 `codegen/val_else.rs`. The scrutinee is stored once into an alloca, `codegen_pattern_test` picks
 the branch, and the else block runs in its own drop scope with its binding saved and restored. The
 success block's bindings are materialized by `bind_arm` and deliberately **not** restored: they
-belong to the enclosing block, which is the whole difference from a match arm. For the same reason
-their ownership is `ArmOwnership::Enclosing` over a place: the payload stays with the place, which
-releases it. A temporary scrutinee
-has no owner left, so its payload is registered as a `match` arm's is (`ArmOwnership::Arm`), in the
-enclosing scope on a hit and in the else scope on a miss; a miss with no else binding destroys the
-whole value there. The else block is
+belong to the enclosing block, which is the whole difference from a match arm. Their ownership
+follows a `match` (`taken_ownership`): the statement moves a place scrutinee, so on the path that
+binds something the place gives up what it holds (`mark_held_moved_for_drop`) and the binding
+takes it, and a temporary has no other owner to begin with. The binding registers in the enclosing
+scope on a hit and in the else scope on a miss; a temporary missed with no else binding is
+destroyed there whole. The else block is
 terminated with `unreachable` if it still falls through; the frontend has already rejected that
 case, so this only keeps the emitted function verifier-clean.
 

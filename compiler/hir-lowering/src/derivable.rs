@@ -398,6 +398,7 @@ impl Lowerer {
             },
         ];
         self.mono_items.push(HirItem::Function(HirFunction {
+            result_extents: Vec::new(),
             name: helper,
             params: vec![HirParam {
                 name: SELF_PARAM.to_string(),

@@ -555,6 +555,78 @@ pub enum TypeError {
     },
 
     #[error(
+        "`?{name}` is not allowed here: a dynamic name may be written at the top of a parameter's or a field's tensor type, in a `val` or `mut` annotation, in a return type, or in a constructor's or `.as_shape`'s shape; write `?` where this position binds no name"
+    )]
+    DynamicNameNotAllowed { name: String, span: Span },
+
+    #[error(
+        "the return type names `?{name}`, but no parameter does; the returned extent must come from an argument, so write `?{name}` on a parameter's tensor too"
+    )]
+    DynamicNameUnbound { name: String, span: Span },
+
+    #[error(
+        "`{name}` is a dynamic extent `?{name}` in this scope and cannot also name a variable, parameter or constant; the extent is read as `{name}` where it is a value"
+    )]
+    DynamicNameConflict { name: String, span: Span },
+
+    #[error(
+        "`{op}` joins axis `{left_axis}` of {left} with axis `{right_axis}` of {right}, and a dynamic axis joins only the same name `?B` on the other side; write both axes as `?B`, or narrow one operand to a shape it can join with `.as_shape::<[...]>()`"
+    )]
+    TensorDynamicAxisMismatch {
+        op: String,
+        left: Type,
+        right: Type,
+        left_axis: String,
+        right_axis: String,
+        span: Span,
+    },
+
+    #[error(
+        "`Tensor::{ctor}` needs `dims:` with {expected} extent(s), one per open axis (a `?` or an unbound `?B` of its shape, a name written twice taking one entry), but {found} given"
+    )]
+    TensorDimsCount {
+        ctor: String,
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error(
+        "`Tensor::{ctor}` takes `dims:` only for an open axis, and this shape has none; drop `dims:` or write a `?` or an unbound `?B` in the shape"
+    )]
+    TensorDimsWithoutOpenAxis { ctor: String, span: Span },
+
+    #[error(
+        "`Tensor::{ctor}` takes its shape from the expected type {expected} here, which names the bound extent `?{name}`; a constructor reads a bound name only from a shape written on the call, so write it there: `{turbofish}::{ctor}()`"
+    )]
+    TensorCtorBoundNameInferred {
+        ctor: String,
+        name: String,
+        expected: Type,
+        turbofish: String,
+        span: Span,
+    },
+
+    #[error(
+        "`.as_shape` consumes its receiver, and a borrowed {ty} cannot be given up; narrow an owned tensor, or `.clone()` the borrow first"
+    )]
+    TensorAsShapeBorrowed { ty: Type, span: Span },
+
+    #[error(
+        "`.as_shape` names {found} axes for a tensor of rank {expected}; the written shape must have the receiver's rank"
+    )]
+    TensorAsShapeRank {
+        expected: usize,
+        found: usize,
+        span: Span,
+    },
+
+    #[error(
+        "`.as_shape` takes literal, extent-parameter, `?` and `?B` axes, not a shape splice or an extent expression"
+    )]
+    TensorAsShapeEntry { span: Span },
+
+    #[error(
         "`.{method}` needs every extent of the receiver to be known here, but '{name}' is a shape parameter; a shape-generic tensor's extents are not numbers until it is instantiated"
     )]
     TensorShapeCastSymbolicExtent {
@@ -620,6 +692,9 @@ pub enum TypeError {
         "`.topk(k: {k})` selects more elements than the sorted axis holds, which is {extent}; ask for between 1 and {extent}"
     )]
     TensorTopKOutOfRange { k: usize, extent: usize, span: Span },
+
+    #[error("`.topk(k: 0)` selects no elements; ask for at least one")]
+    TensorTopKZero { span: Span },
 
     #[error(
         "`einsum` reads its subscripts at compile time, so they have to be a string literal, e.g. `einsum(\"ij,jk->ik\", a, b)`; a value computed at run time cannot decide the result's shape"
@@ -704,15 +779,6 @@ pub enum TypeError {
         position: usize,
         first: String,
         found: String,
-        span: Span,
-    },
-
-    #[error(
-        "`einsum` needs every lettered extent of operand {position} before run time, but '{name}' is a dynamic axis; contract tensors whose lettered axes are static"
-    )]
-    EinsumSymbolicExtent {
-        position: usize,
-        name: String,
         span: Span,
     },
 
@@ -1758,6 +1824,16 @@ impl TypeError {
             | Self::TensorFlattenNotAdjacent { span, .. }
             | Self::TensorFlattenNoAxes { span, .. }
             | Self::TensorDynamicExtent { span, .. }
+            | Self::DynamicNameNotAllowed { span, .. }
+            | Self::DynamicNameUnbound { span, .. }
+            | Self::DynamicNameConflict { span, .. }
+            | Self::TensorDynamicAxisMismatch { span, .. }
+            | Self::TensorDimsCount { span, .. }
+            | Self::TensorDimsWithoutOpenAxis { span, .. }
+            | Self::TensorCtorBoundNameInferred { span, .. }
+            | Self::TensorAsShapeBorrowed { span, .. }
+            | Self::TensorAsShapeRank { span, .. }
+            | Self::TensorAsShapeEntry { span, .. }
             | Self::TensorShapeCastSymbolicExtent { span, .. }
             | Self::TensorReduceElementType { span, .. }
             | Self::TensorReduceMeanNotFloat { span, .. }
@@ -1768,6 +1844,7 @@ impl TypeError {
             | Self::TensorSortEmpty { span, .. }
             | Self::TensorSortArgNotConstant { span, .. }
             | Self::TensorTopKOutOfRange { span, .. }
+            | Self::TensorTopKZero { span, .. }
             | Self::TensorApplyNotCallable { span, .. }
             | Self::TensorApplyArity { span, .. }
             | Self::TensorApplyParamType { span, .. }
@@ -1785,7 +1862,6 @@ impl TypeError {
             | Self::EinsumExtentConflict { span, .. }
             | Self::EinsumOutputLetterUnbound { span, .. }
             | Self::EinsumOutputLetterRepeated { span, .. }
-            | Self::EinsumSymbolicExtent { span, .. }
             | Self::EinsumEllipsisMismatch { span, .. }
             | Self::TensorConstructorNotApplicable { span, .. }
             | Self::TraitNotObjectSafe { span, .. }

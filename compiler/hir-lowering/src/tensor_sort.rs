@@ -50,7 +50,6 @@ impl Lowerer {
                 "`.{method}` reached lowering on a non-tensor receiver"
             )));
         };
-        let shape = crate::static_extents(&shape)?;
         if shape.is_empty() {
             return Err(malformed(format!(
                 "`.{method}` reached lowering on a rank-0 tensor"
@@ -60,7 +59,7 @@ impl Lowerer {
         if method == TOPK_METHOD {
             return self.lower_topk(receiver, *element, &shape, &names, args, span);
         }
-        let axis = resolve_axis(&shape, &names, args.first(), method)?;
+        let axis = resolve_axis(shape.len(), &names, args.first(), method)?;
         let descending = match args.get(1) {
             Some(entry) => const_boolean(entry).ok_or_else(|| {
                 malformed(format!(
@@ -83,7 +82,7 @@ impl Lowerer {
             },
             HirType::Tensor {
                 element,
-                shape: neuro_hir::static_shape(&shape),
+                shape,
                 names,
             },
             span,
@@ -95,7 +94,7 @@ impl Lowerer {
         &mut self,
         receiver: HirExpr,
         element: HirType,
-        shape: &[usize],
+        shape: &[Option<usize>],
         names: &AxisNames,
         args: &[Expr],
         span: Span,
@@ -105,15 +104,16 @@ impl Lowerer {
             .and_then(const_integer)
             .and_then(|value| usize::try_from(value).ok())
             .ok_or_else(|| malformed("`.topk` reached lowering with a non-constant `k:`".into()))?;
-        let axis = resolve_axis(shape, names, args.get(1), TOPK_METHOD)?;
+        let axis = resolve_axis(shape.len(), names, args.get(1), TOPK_METHOD)?;
 
+        // The selected axis holds `k` elements whatever its extent was; the others keep theirs.
         let mut selected = shape.to_vec();
-        selected[axis] = k;
+        selected[axis] = Some(k);
         let mut selected_names = names.0.clone();
         selected_names[axis] = None;
         let tensor = |element: HirType| HirType::Tensor {
             element: Box::new(element),
-            shape: neuro_hir::static_shape(&selected),
+            shape: selected.clone(),
             names: AxisNames(selected_names.clone()),
         };
         Ok(HirExpr::new(
@@ -134,13 +134,13 @@ impl Lowerer {
 /// The receiver axis an `axis:` argument names: a dimension name, a non-negative index,
 /// or a negative index counting from the end. The last axis when the call names none.
 fn resolve_axis(
-    shape: &[usize],
+    rank: usize,
     names: &AxisNames,
     entry: Option<&Expr>,
     method: &str,
 ) -> Result<usize, LoweringError> {
     let Some(entry) = entry else {
-        return Ok(shape.len() - 1);
+        return Ok(rank - 1);
     };
     if let Expr::Identifier(ident) = entry {
         return names.position_of(&ident.name).ok_or_else(|| {
@@ -156,7 +156,7 @@ fn resolve_axis(
             "`.{method}` reached lowering with a non-constant axis"
         ))
     })?;
-    let rank = i128::try_from(shape.len()).map_err(|_| {
+    let rank = i128::try_from(rank).map_err(|_| {
         malformed(format!(
             "`.{method}` reached lowering on an unrepresentable rank"
         ))
@@ -164,7 +164,7 @@ fn resolve_axis(
     let resolved = if value < 0 { value + rank } else { value };
     usize::try_from(resolved)
         .ok()
-        .filter(|axis| *axis < shape.len())
+        .filter(|axis| i128::try_from(*axis).is_ok_and(|axis| axis < rank))
         .ok_or_else(|| {
             malformed(format!(
                 "`.{method}` reached lowering with axis {value} out of range"

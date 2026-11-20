@@ -615,9 +615,7 @@ fn parameter_problem(written: &ast_types::Type, ty: &Type) -> Option<&'static st
                 Type::Tensor { element, .. } if !element.is_numeric() => {
                     Some("is a tensor of a non-numeric element")
                 }
-                Type::Tensor { shape, .. }
-                    if shape.iter().any(|axis| axis.extent == ArrayLen::Dynamic) =>
-                {
+                Type::Tensor { shape, .. } if shape.iter().any(|axis| axis.extent.is_dynamic()) => {
                     Some("has a `?` extent; a kernel's tensors have static shapes")
                 }
                 Type::Tensor { .. } => None,

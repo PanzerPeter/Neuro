@@ -236,7 +236,7 @@ impl Lowerer {
 
     /// A written shape's extents and dimension names under the active substitution: an
     /// extent parameter becomes its value and a `..S` splice the axes `S` is bound to.
-    fn resolve_shape(
+    pub(crate) fn resolve_shape(
         &self,
         shape: &[ast_types::TensorDim],
     ) -> Result<ResolvedShape, LoweringError> {

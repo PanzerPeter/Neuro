@@ -737,10 +737,14 @@ impl<'f> Linearizer<'f> {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(self.push(&expr.ty, expr.span, Op::Literal(elements)))
             }
-            HirExprKind::TensorFill { value } if matches!(value.kind, HirExprKind::Literal(_)) => {
+            // A constructor whose dynamic axes read run-time values is not a constant: its
+            // replay would read locals the derivative does not have.
+            HirExprKind::TensorFill { value, dims }
+                if dims.is_empty() && matches!(value.kind, HirExprKind::Literal(_)) =>
+            {
                 Ok(self.push(&expr.ty, expr.span, Op::Constant(expr.clone())))
             }
-            HirExprKind::TensorIdentity => {
+            HirExprKind::TensorIdentity { dims } if dims.is_empty() => {
                 Ok(self.push(&expr.ty, expr.span, Op::Constant(expr.clone())))
             }
             HirExprKind::TensorIndex { object, axes } if is_scalar(&expr.ty) => {
@@ -770,6 +774,7 @@ impl<'f> Linearizer<'f> {
             HirExprKind::TensorShapeCast {
                 receiver,
                 permutation,
+                ..
             } if is_float_valued(&expr.ty)
                 && tensor_parts(&expr.ty).is_some()
                 && tensor_parts(&receiver.ty).is_some() =>
@@ -813,6 +818,9 @@ impl<'f> Linearizer<'f> {
                 if inputs.iter().any(|letters| repeats(letters)) {
                     return Err(self.refuse("an `einsum` operand that repeats a letter", expr.span));
                 }
+                let Some(extents) = extents.iter().copied().collect::<Option<Vec<usize>>>() else {
+                    return Err(self.refuse("an `einsum` over a dynamic extent", expr.span));
+                };
                 let mut leaves = Vec::with_capacity(operands.len());
                 for operand in operands {
                     leaves.push(self.leaf(operand)?);
@@ -821,7 +829,7 @@ impl<'f> Linearizer<'f> {
                     operands: leaves,
                     inputs: inputs.clone(),
                     output: output.clone(),
-                    extents: extents.clone(),
+                    extents,
                 };
                 Ok(self.push(&expr.ty, expr.span, op))
             }

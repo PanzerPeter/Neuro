@@ -461,10 +461,12 @@ impl Lowerer {
         for param in &params {
             self.define(param.name.clone(), param.ty.clone());
         }
-        let body = self.lower_function_body(&func.body, &return_type, target)?;
+        let mut body = self.bind_parameter_extents(&func.params, func.span)?;
+        body.extend(self.lower_function_body(&func.body, &return_type, target)?);
         self.pop_scope();
 
         Ok(HirFunction {
+            result_extents: Vec::new(),
             name: func.name.name.clone(),
             params,
             return_type,
@@ -529,7 +531,8 @@ impl Lowerer {
         for param in &params {
             self.define(param.name.clone(), param.ty.clone());
         }
-        let body = self.lower_body(&method.body, &return_type)?;
+        let mut body = self.bind_parameter_extents(&method.params, method.span)?;
+        body.extend(self.lower_body(&method.body, &return_type)?);
         self.pop_scope();
 
         Ok(HirMethod {
@@ -572,7 +575,10 @@ impl Lowerer {
             if is_tail && !matches!(return_type, HirType::Void) {
                 match stmt {
                     ast_types::Stmt::Expr(expr) => {
-                        out.push(HirStmt::Expr(self.lower_expr(expr, Some(return_type))?));
+                        self.in_extent_statement(&mut out, |lo, out| {
+                            out.push(HirStmt::Expr(lo.lower_expr(expr, Some(return_type))?));
+                            Ok(())
+                        })?;
                         continue;
                     }
                     // A statement-position `if` parses to `Stmt::If`, so a trailing
@@ -586,15 +592,18 @@ impl Lowerer {
                         else_block,
                         span,
                     } if else_block.is_some() => {
-                        let tail = self.lower_if_expr(
-                            condition,
-                            then_block,
-                            else_if_blocks,
-                            else_block,
-                            Some(return_type),
-                            *span,
-                        )?;
-                        out.push(HirStmt::Expr(tail));
+                        self.in_extent_statement(&mut out, |lo, out| {
+                            let tail = lo.lower_if_expr(
+                                condition,
+                                then_block,
+                                else_if_blocks,
+                                else_block,
+                                Some(return_type),
+                                *span,
+                            )?;
+                            out.push(HirStmt::Expr(tail));
+                            Ok(())
+                        })?;
                         continue;
                     }
                     _ => {}

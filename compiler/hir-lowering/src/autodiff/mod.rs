@@ -493,6 +493,7 @@ pub(crate) fn derive_method_reverses(
             // spells it, with `self` left a free variable of the body, which the replay
             // re-reads exactly as the primal did.
             let primal = HirFunction {
+                result_extents: Vec::new(),
                 name: format!("{type_name}.{method_name}"),
                 params: method.params.clone(),
                 return_type: method.return_type.clone(),
@@ -775,6 +776,7 @@ fn derive_reverse(
             span,
         }),
         HirItem::Function(HirFunction {
+            result_extents: Vec::new(),
             name: reverse_name(key),
             params,
             return_type: result_ty,
@@ -853,6 +855,7 @@ fn hessian_vector_product(
     });
     // Named as the primal, so a construct the second sweep refuses is reported against it.
     let projection = HirFunction {
+        result_extents: Vec::new(),
         name: primal.name.clone(),
         params,
         return_type: loss_ty,
@@ -876,6 +879,7 @@ fn hessian_vector_product(
         span,
     });
     Ok(HirFunction {
+        result_extents: Vec::new(),
         name: format!("{REVERSE_PREFIX}{key}{HVP_INFIX}{}", gradient.field),
         params: projection.params,
         return_type: gradient.ty.clone(),

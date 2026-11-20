@@ -160,6 +160,10 @@ fn follows_operands(
     (guard, overflow): (GuardStyle, Overflow),
     math: &dyn Fn() -> bool,
 ) -> Option<(String, Vec<Guard>)> {
+    // A dynamic result is copied out of the device buffer on the host, as in `runs_on_gpu`.
+    if crate::gpu::dynamic_result(function) {
+        return None;
+    }
     let mut params = parameters(function).ok()?;
     let Launch {
         blocks,

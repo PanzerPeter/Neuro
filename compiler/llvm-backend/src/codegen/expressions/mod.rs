@@ -65,6 +65,7 @@ impl<'ctx> CodegenContext<'ctx> {
     /// span-keyed side table.
     pub(crate) fn codegen_expr(&mut self, expr: &HirExpr) -> CodegenResult<BasicValueEnum<'ctx>> {
         match &expr.kind {
+            HirExprKind::TensorExtent { tensor, axis } => self.codegen_tensor_extent(tensor, *axis),
             HirExprKind::Cast { value } => {
                 let target_ty = Type::from_hir(&expr.ty);
                 self.codegen_cast(value, &target_ty)
@@ -215,17 +216,17 @@ impl<'ctx> CodegenContext<'ctx> {
                 let tensor_ty = Type::from_hir(&expr.ty);
                 self.codegen_tensor_literal(elements, &tensor_ty)
             }
-            HirExprKind::TensorFill { value } => {
+            HirExprKind::TensorFill { value, dims } => {
                 let tensor_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_fill(value, &tensor_ty)
+                self.codegen_tensor_fill(value, dims, &tensor_ty, expr.span.start)
             }
-            HirExprKind::TensorIdentity => {
+            HirExprKind::TensorIdentity { dims } => {
                 let tensor_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_identity(&tensor_ty)
+                self.codegen_tensor_identity(dims, &tensor_ty, expr.span.start)
             }
-            HirExprKind::TensorRandomNormal { mean, std } => {
+            HirExprKind::TensorRandomNormal { mean, std, dims } => {
                 let tensor_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_random_normal(mean, std, &tensor_ty)
+                self.codegen_tensor_random_normal(mean, std, dims, &tensor_ty, expr.span.start)
             }
             // An element read `t[i, j]`; a slice is computed in MLIR.
             HirExprKind::TensorIndex { object, axes } => {
@@ -255,12 +256,13 @@ impl<'ctx> CodegenContext<'ctx> {
             HirExprKind::TensorShapeCast {
                 receiver,
                 permutation,
+                dims,
             } => {
                 if permutation.is_some() {
                     return Err(computed_in_mlir("a permuting shape cast"));
                 }
                 let result_ty = Type::from_hir(&expr.ty);
-                self.codegen_tensor_redescribe(receiver, &result_ty)
+                self.codegen_tensor_redescribe(receiver, &result_ty, dims)
             }
             HirExprKind::TensorDetach { receiver } => self.codegen_tensor_detach(receiver),
 

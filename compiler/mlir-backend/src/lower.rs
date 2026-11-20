@@ -212,13 +212,12 @@ pub(crate) fn admits_any(program: &HirProgram, admit: &dyn Fn(&HirFunction) -> b
 }
 
 /// Whether this path computes a function exactly as the LLVM backend would, so the
-/// two are interchangeable: a static tensor result ([`linkable_result`]), and parameters
-/// that are numeric scalars or static tensors of them, owned or behind `&`.
+/// two are interchangeable: a tensor result ([`linkable_result`]), and parameters that are
+/// numeric scalars or tensors of them, owned or behind `&`.
 ///
 /// An integer element is the LLVM backend's as much as a float one: its checks travel with
-/// the body ([`Guard`]) and its caller raises the same panic. Static extents only, because
-/// the frontend gives a `?` axis no arithmetic, so a dynamic signature never has a body worth
-/// linking.
+/// the body ([`Guard`]) and its caller raises the same panic. A `?` axis is read at run time
+/// from the descriptor its caller passes, so a dynamic tensor links like a static one.
 fn linkable_signature(function: &HirFunction) -> bool {
     linkable_result(&function.return_type)
         && function
@@ -229,9 +228,7 @@ fn linkable_signature(function: &HirFunction) -> bool {
 
 fn linkable_type(ty: &HirType) -> bool {
     match ty {
-        HirType::Tensor { element, shape, .. } => {
-            scalar(element).is_some() && shape.iter().all(Option::is_some)
-        }
+        HirType::Tensor { element, .. } => scalar(element).is_some(),
         // The target a compound assignment writes in place.
         HirType::Reference {
             inner,
@@ -254,8 +251,8 @@ fn scalar(ty: &HirType) -> Option<Element> {
     }
 }
 
-/// A static tensor of numbers, or a tuple of them (`.topk`'s values and indices), or
-/// nothing at all for a compound assignment, which writes its target in place.
+/// A tensor of numbers, or a tuple of them (`.topk`'s values and indices), or nothing at all
+/// for a compound assignment, which writes its target in place.
 fn linkable_result(ty: &HirType) -> bool {
     match ty {
         HirType::Tuple(parts) => !parts.is_empty() && parts.iter().all(linkable_result),
@@ -387,7 +384,7 @@ fn signature<'c>(
 ///
 /// Read from the C API rather than written out as `i64::MIN` so the value tracks
 /// the toolchain instead of this file.
-fn dynamic_extent() -> u64 {
+pub(crate) fn dynamic_extent() -> u64 {
     // SAFETY: a pure accessor over a compile-time constant. It takes no arguments,
     // reads no context, and cannot fail.
     (unsafe { mlir_sys::mlirShapedTypeGetDynamicSize() }) as u64
@@ -487,6 +484,7 @@ mod tests {
         // func add(a: i32, b: i32) -> i32
         let program = HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "add".to_string(),
                 params: vec![param("a", HirType::I32), param("b", HirType::I32)],
                 return_type: HirType::I32,
@@ -571,6 +569,7 @@ mod tests {
     fn maps_scalar_types_to_mlir_equivalents() {
         let program = HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "scalars".to_string(),
                 params: vec![
                     param("a", HirType::Bool),
@@ -597,6 +596,7 @@ mod tests {
         // because a new `HirType` variant must be routed here, not fall to a wildcard.
         let program = HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "aggregates".to_string(),
                 params: vec![
                     param("a", HirType::String),

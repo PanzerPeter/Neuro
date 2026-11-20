@@ -38,6 +38,7 @@ mod container_iterators;
 mod derivable;
 mod elementwise_math;
 mod expressions;
+mod extents;
 mod items;
 mod iteration;
 mod iterator_adapters;
@@ -408,6 +409,21 @@ struct Lowerer {
     /// Monotonic counter naming the bindings an operator-trait call introduces for a
     /// borrowed operand that is not a place (`__operand_N`).
     operand_counter: usize,
+    /// Monotonic counter naming the temporaries the dynamic-extent desugars introduce, so
+    /// nested constructors and narrowings never shadow each other.
+    extent_counter: usize,
+    /// The dynamic extent names in scope, innermost last, each with the depth of the scope
+    /// its hidden local lives in. A name leaves scope when that scope closes.
+    extent_names: Vec<extents::ExtentName>,
+    /// The declarations and checks the statement being lowered needs around it.
+    extent_statement: extents::StatementExtents,
+    /// The depth of the scope the statement being lowered sits in: where a name it first
+    /// binds lives.
+    extent_depth: usize,
+    /// The signatures that name a dynamic extent, by lowered function or method name.
+    extent_sigs: HashMap<String, extents::ExtentSignature>,
+    /// The dynamic extents each non-generic struct's fields name, by struct name.
+    struct_extents: HashMap<String, Vec<extents::FieldExtent>>,
     /// Monotonic counter naming the iterator and position bindings each `for`-loop
     /// protocol desugar introduces (`__iter_N` / `__iter_pos_N`), so nested loops over
     /// two iterators never shadow each other.
@@ -591,6 +607,12 @@ impl Lowerer {
             coalesce_counter: 0,
             try_counter: 0,
             operand_counter: 0,
+            extent_counter: 0,
+            extent_names: Vec::new(),
+            extent_statement: extents::StatementExtents::default(),
+            extent_depth: 0,
+            extent_sigs: HashMap::new(),
+            struct_extents: HashMap::new(),
             protocol_counter: 0,
             flat_counter: 0,
             grad_params: HashMap::new(),
@@ -607,6 +629,7 @@ impl Lowerer {
         self.scopes.pop();
         let depth = self.scopes.len();
         self.grid_aliases.retain(|(at, _, _)| *at <= depth);
+        self.extent_names.retain(|entry| entry.depth <= depth);
     }
 
     /// Define a binding in the innermost scope. A missing scope is a lowering bug
@@ -914,7 +937,7 @@ fn resolve_tensor_dim(
 ) -> Result<Option<usize>, LoweringError> {
     match &dim.extent {
         ast_types::TensorExtent::Literal(extent) => Ok(Some(*extent)),
-        ast_types::TensorExtent::Dynamic(_) => Ok(None),
+        ast_types::TensorExtent::Dynamic(_) | ast_types::TensorExtent::NamedDynamic(_) => Ok(None),
         ast_types::TensorExtent::Param(id) => const_subst
             .get(&id.name)
             .map(|v| Some(*v as usize))
@@ -945,9 +968,10 @@ fn resolve_tensor_dim(
 
 /// The extents of a shape every one of whose axes is static.
 ///
-/// Semantic analysis rejects a `?` axis at every operation that consumes an
-/// extent, so one arriving here is a compiler bug rather than a program error, reported
-/// as a value, since a lowering pass has no business panicking.
+/// Only the sites that need every extent as a value call this: tensor literals and the
+/// constructors that take their elements, which the checker keeps static. A `?` axis
+/// reaching one is a compiler bug rather than a program error, reported as a value, since a
+/// lowering pass has no business panicking.
 fn static_extents(shape: &[Option<usize>]) -> Result<Vec<usize>, LoweringError> {
     shape
         .iter()

@@ -175,17 +175,33 @@ pub enum HirExprKind {
     /// A tensor whose every element is `value`: `zeros()` and `ones()`. Distinct from
     /// [`HirExprKind::TensorLiteral`] so a large fill stays one node and one loop
     /// instead of one HIR node per element.
+    ///
+    /// `dims` holds one `u64` expression per dynamic (`None`) axis of the expression's
+    /// type, in axis order: the run-time extents the buffer is sized from. It is empty
+    /// for a static shape. The same holds for the other two constructors.
     TensorFill {
         value: Box<HirExpr>,
+        dims: Vec<HirExpr>,
     },
     /// The rank-2 identity matrix `Tensor::<T, [N, N]>::identity()`. Squareness was
-    /// checked before lowering, so the extents in the expression's type are equal.
-    TensorIdentity,
+    /// checked before lowering, so the extents in the expression's type are equal, and
+    /// a dynamic square's two `dims` entries carry the same value.
+    TensorIdentity {
+        dims: Vec<HirExpr>,
+    },
     /// A tensor filled with draws from `Normal(mean, std)`. The element type is `f32`
     /// or `f64`, and both operands carry it.
     TensorRandomNormal {
         mean: Box<HirExpr>,
         std: Box<HirExpr>,
+        dims: Vec<HirExpr>,
+    },
+    /// The run-time extent of one axis of a tensor, as a `u64`. `tensor` is a borrow
+    /// (`&Tensor` or `&mut Tensor`), so reading the extent consumes nothing. On a static
+    /// axis the value is the type's own extent.
+    TensorExtent {
+        tensor: Box<HirExpr>,
+        axis: usize,
     },
     Index {
         object: Box<HirExpr>,
@@ -216,9 +232,13 @@ pub enum HirExprKind {
     /// `permutation[d]` is the receiver axis that result axis `d` came from. `None` is
     /// the order-preserving case (`.reshape`, `.flatten`), which is pure metadata: the
     /// same buffer, re-described.
+    ///
+    /// `dims` gives the run-time extent of each dynamic (`None`) axis of the result, in
+    /// axis order, with operand 0 being the receiver. It is empty for a static result.
     TensorShapeCast {
         receiver: Box<HirExpr>,
         permutation: Option<Vec<usize>>,
+        dims: Vec<HirExtent>,
     },
     /// `.detach()`: the receiver's buffer, handed on with empty derivative slots. It
     /// CONSUMES the receiver like an order-preserving shape cast, since two tensors owning
@@ -260,7 +280,8 @@ pub enum HirExprKind {
     /// An Einstein-notation contraction `einsum("bij,bjk->bik", a, b)`.
     ///
     /// The subscript string is gone by this point: each letter has been interned to an
-    /// index into `extents`, which holds the one extent that letter is bound to. So
+    /// index into `extents`, which holds the one extent that letter is bound to (`None`
+    /// for a letter bound to a dynamic axis, whose extent is read from an operand). So
     /// `inputs[n][d]` is the letter of operand `n`'s axis `d`, and `output[k]` the letter
     /// of result axis `k`. A backend needs no knowledge of the notation, only the three
     /// index tables.
@@ -277,7 +298,7 @@ pub enum HirExprKind {
         operands: Vec<HirExpr>,
         inputs: Vec<Vec<usize>>,
         output: Vec<usize>,
-        extents: Vec<usize>,
+        extents: Vec<Option<usize>>,
     },
     /// A functional traversal of a tensor's elements: `.map(f)`, `.zip(other, f)`,
     /// `.reduce(init, f)`.
@@ -500,6 +521,34 @@ pub enum HirTensorAxis {
         reversed: bool,
         step: usize,
     },
+    /// Every element of a dynamic axis, in order: the axis survives at its run-time
+    /// extent. A whole static axis is the `Range` covering it instead.
+    Whole,
+}
+
+/// A run-time extent computed from an operation's operands: one dynamic axis of a
+/// result, which a backend must size before the operation runs.
+///
+/// Operands are numbered as the parameters of the function the operation was outlined
+/// into, or, for a [`HirExprKind::TensorShapeCast`] left in place, operand 0 is its
+/// receiver.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HirExtent {
+    /// The run-time extent of axis `axis` of the tensor operand `operand`, owned or
+    /// borrowed.
+    Axis {
+        operand: usize,
+        axis: usize,
+    },
+    /// The value of the integer operand `operand`, read as a `u64`.
+    Scalar(usize),
+    Constant(u64),
+    Add(Box<HirExtent>, Box<HirExtent>),
+    Sub(Box<HirExtent>, Box<HirExtent>),
+    Mul(Box<HirExtent>, Box<HirExtent>),
+    /// Floored quotient. The divisor is never zero: lowering checked it, or it is a
+    /// nonzero constant.
+    Div(Box<HirExtent>, Box<HirExtent>),
 }
 
 /// Which position a [`HirExprKind::GridPosition`] reads: the thread's across the whole

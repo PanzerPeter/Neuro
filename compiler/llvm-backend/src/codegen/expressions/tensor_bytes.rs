@@ -10,7 +10,7 @@ use neuro_hir::HirExpr;
 
 use crate::codegen::context::CodegenContext;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::Type;
+use crate::types::{Type, is_dynamic};
 
 /// `__tensor_from_bytes(bytes: &[u8]) -> Tensor<T, S>`, typed by its result.
 const FROM_BYTES: &str = "__tensor_from_bytes";
@@ -54,8 +54,18 @@ impl<'ctx> CodegenContext<'ctx> {
             .builder
             .build_extract_value(slice, 0, "tensor.bytes.src")?
             .into_pointer_value();
-        let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.read")?;
-        let size = self.dlpack_copy_length(tensor_ty)?;
+        // A read has no run-time extents to size a `?` axis from: the file the bytes come from
+        // is what would bind them, and that source does not exist yet.
+        if matches!(tensor_ty, Type::Tensor { shape, .. } if is_dynamic(shape)) {
+            return Err(CodegenError::UnsupportedType(format!(
+                "a tensor read from bytes cannot bind the `?` axes of `{}`",
+                tensor_ty.mangle()
+            )));
+        }
+        // The read builds a static tensor: its bytes are the type's own, so no run-time extent
+        // is needed to size it.
+        let size = self.element_run(tensor_ty, &[], 0)?.bytes;
+        let (handle, data) = self.alloc_tensor(tensor_ty, "tensor.read", &[], size)?;
         self.build_memcpy_call(data, source, size)?;
         Ok(handle.into())
     }
@@ -73,7 +83,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_load(ptr_type, address, "tensor.bytes.handle")?
             .into_pointer_value();
         let tensor_ty = Type::from_hir(&tensor.ty).referent().clone();
-        let size = self.dlpack_copy_length(&tensor_ty)?;
+        let size = self.dlpack_copy_length(handle, &tensor_ty)?;
         // `malloc`, because a `Vec` grows with `realloc` and releases with `free`.
         let malloc = self.get_or_declare_malloc();
         let buffer = self
@@ -92,7 +102,7 @@ impl<'ctx> CodegenContext<'ctx> {
             },
             |this, index| {
                 let data = this.load_dlpack_data(handle)?;
-                this.device_download(buffer, data, index, &tensor_ty)?;
+                this.device_download(buffer, data, index, size)?;
                 Ok(None)
             },
         )?;

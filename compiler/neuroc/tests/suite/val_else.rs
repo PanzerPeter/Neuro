@@ -373,3 +373,44 @@ func main() -> i32 {
         .expect_err("a scrutinee that is not the annotated type is refused");
     assert!(refused.contains("type mismatch"), "{refused}");
 }
+
+/// `val` moves a named scrutinee, so a binding that takes its payload owns it. The place
+/// kept the payload instead, and a binding moved on afterwards (into a `val`, or out of
+/// the `else` block) was released twice.
+#[test]
+fn regression_a_payload_taken_from_a_named_scrutinee_is_released_once() {
+    let source = r#"
+func consume(v: Vec<i32>) -> i32 { v[0] }
+
+func get(ok: bool) -> Result<i32, Vec<i32>> {
+    mut v: Vec<i32> = Vec::new()
+    v.push(7)
+    if ok { return Ok(1) }
+    Err(v)
+}
+
+func pick(ok: bool) -> i32 {
+    val r = get(ok)
+    val Ok(x) = r else |e| { return consume(e) }
+    x
+}
+
+func main() -> i32 {
+    mut t = 0
+    for i in 0..20 {
+        mut v: Vec<i32> = Vec::new()
+        v.push(i)
+        val o: Option<Vec<i32>> = Some(v)
+        val Some(z) = o else { return 1 }
+        val s = z
+        t += s[0] + pick(i % 2 == 0)
+    }
+    return t - 200
+}
+"#;
+    // 0 + 1 + ... + 19 is 190; ten `Ok` rounds add 1 and ten `Err` rounds add 7.
+    assert_eq!(
+        CompileTest::new().run_leak_checked("val_else_moves.nr", source),
+        70
+    );
+}

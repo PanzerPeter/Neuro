@@ -5,6 +5,57 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-170: reading a field of a temporary with a `Drop` impl skips its destructor
+
+- **Status**: open, confirmed
+- **Area**: `llvm-backend` (`drop_temporary_except` in `codegen/drops/mod.rs`)
+- **Severity**: moderate. Valid source compiles and runs, but the destructor never runs
+  and every field the reader did not take leaks
+
+**Minimal repro**
+
+```neuro
+struct Holder {
+    v: Vec<i32>,
+    w: Vec<i32>,
+}
+
+impl Drop for Holder {
+    func drop(&mut self) {
+        println("drop")
+    }
+}
+
+func make() -> Holder {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    mut w: Vec<i32> = Vec::new()
+    w.push(2)
+    Holder { v: v, w: w }
+}
+
+func main() -> i32 {
+    mut total: u64 = 0
+    for i in 0..3 {
+        total += make().v.len()
+    }
+    return total as i32
+}
+```
+
+Expected: `drop` is printed three times. Observed: nothing is printed, and LeakSanitizer
+reports the lost `Vec` buffers. A tensor field (`make().b.sum()`) behaves the same way.
+
+**Root cause**: a field read out of a fresh temporary moves the field out and releases the
+rest. When the struct has its own `drop`, that release is skipped so the destructor never
+reads a moved field, and nothing else ever releases the temporary.
+
+**Workaround**: bind the value first (`val h = make()`), so its scope runs the destructor.
+
+**Fix sketch**: when the reader only borrows the field (a method receiver, a `&` operand),
+hold the whole temporary to the end of the statement (`hold_to_statement_end`) instead of
+moving the field out, so the destructor and the field drops run there.
+
 ## BUG-169: a float literal in a sized array field of an inferred generic struct is an `f64`
 
 - **Status**: open, confirmed

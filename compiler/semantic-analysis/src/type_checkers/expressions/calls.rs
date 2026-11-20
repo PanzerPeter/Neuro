@@ -13,12 +13,14 @@ use crate::type_checkers::declarations::traits::{
     collect_self_assoc, declares_generics, signature_types,
 };
 use crate::type_checkers::derivable::{COMPARABLE_TRAIT, PARTIAL_EQ_TRAIT};
+use crate::type_checkers::dynamic_names::{DynamicBindings, bind_dynamic_names};
 use crate::type_checkers::operator_traits::comparison_method;
 use crate::type_checkers::range_values::missing_method;
 use crate::type_checkers::resolution::{SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::statements::{
     borrow_target_of, function_value_position, temporary_borrow_position,
 };
+use crate::type_checkers::tensor_shape::AS_SHAPE_METHOD;
 use crate::type_checkers::tensors::TENSOR_TYPE_NAME;
 use crate::type_checkers::{BoundInfo, GenericFnSig};
 use crate::types::{CollectionKind, FunctionMode, Type};
@@ -128,9 +130,8 @@ impl TypeChecker {
         };
 
         let args = self.borrow_kernel_inputs(func_name, args);
-        self.check_call_args(&args, &param_types, span);
-
-        Some(return_type)
+        let found = self.check_call_args(&args, &param_types, span);
+        Some(self.dynamic_call_result(&param_types, &found, &return_type, span))
     }
 
     /// Resolve a method call on a bounded type parameter to a trait method signature.
@@ -253,20 +254,23 @@ impl TypeChecker {
         args: &[ast_types::Expr],
         visible_params: &[Type],
         span: Span,
-    ) {
-        self.check_receiver_call_args(None, args, visible_params, span);
+    ) -> Vec<Type> {
+        self.check_receiver_call_args(None, args, visible_params, span)
     }
 
     /// [`check_call_args`](TypeChecker::check_call_args) for a method, whose receiver
     /// is reborrowed for the call alongside the arguments; `receiver` pairs it with
     /// whether the method takes it `&mut`.
+    ///
+    /// Answers the type each argument was found at (`Unknown` where it failed), which the
+    /// caller reads a result's dynamic names from ([`Self::dynamic_call_result`]).
     pub(super) fn check_receiver_call_args(
         &mut self,
         receiver: Option<(&ast_types::Expr, bool)>,
         args: &[ast_types::Expr],
         visible_params: &[Type],
         span: Span,
-    ) {
+    ) -> Vec<Type> {
         if args.len() != visible_params.len() {
             self.record_error(TypeError::ArgumentCountMismatch {
                 expected: visible_params.len(),
@@ -275,6 +279,7 @@ impl TypeChecker {
             });
         }
         let mut lent = Vec::new();
+        let mut found_types = Vec::with_capacity(args.len());
         for (arg, expected_ty) in args.iter().zip(visible_params.iter()) {
             // A function-typed parameter only calls what it is given, and the callee
             // returns before the caller's scope ends, so a scope-bound closure may go in.
@@ -282,21 +287,47 @@ impl TypeChecker {
                 self.function_value_slot = function_value_position(arg);
             }
             self.temporary_borrow_slot = temporary_borrow_position(arg);
-            let checked = self.check_expr(arg, Some(expected_ty));
+            // The parameter's dynamic names are the callee's, so the argument is typed against
+            // them anonymized: a constructor argument must not bind a caller-visible name.
+            let accepted = self.anonymize_dynamic(expected_ty, arg.span());
+            let checked = self.check_expr(arg, Some(&accepted));
             self.function_value_slot = None;
             self.temporary_borrow_slot = None;
+            let mut found = Type::Unknown;
             if let Some(arg_ty) = checked {
                 let arg_ty = shared_reborrow(arg_ty, expected_ty);
-                if !self.assignable(&arg_ty, expected_ty) {
-                    self.record_type_mismatch(expected_ty, arg_ty, arg.span());
+                // A dynamic axis of the parameter takes any extent at the call: the name it
+                // writes is bound from the argument, and checked at run time when it is bound.
+                if !self.assignable(&arg_ty, &accepted) {
+                    self.record_type_mismatch(expected_ty, arg_ty.clone(), arg.span());
                 }
+                found = arg_ty;
             }
+            found_types.push(found);
             self.pass_argument(arg, expected_ty, &mut lent);
         }
         let lends = self.lend_arguments(lent);
         self.end_lends(lends);
         self.check_reborrow_exclusivity(receiver, args, visible_params);
         self.hold_argument_stores(receiver, args, visible_params, span);
+        found_types
+    }
+
+    /// The result of a call to a callee whose parameters may name dynamic extents: each
+    /// name takes the extent its first argument gives it, and a name no argument gives
+    /// becomes an anonymous `?` (see `dynamic_names`).
+    pub(crate) fn dynamic_call_result(
+        &mut self,
+        params: &[Type],
+        found: &[Type],
+        ret: &Type,
+        span: Span,
+    ) -> Type {
+        let mut bound = DynamicBindings::new();
+        for (param, arg) in params.iter().zip(found) {
+            bind_dynamic_names(param, arg, &mut bound);
+        }
+        self.substitute_dynamic(ret, &bound, span)
     }
 
     /// Refuse every borrow of a temporary among `args`: the call may store it into a
@@ -668,6 +699,7 @@ impl TypeChecker {
             );
         let mut lent = Vec::new();
         let mut recheck = Vec::new();
+        let mut dynamic_bound = DynamicBindings::new();
         for (arg, param) in order {
             // A scalar or `&string` parameter, written as one or through a type parameter
             // the turbofish or an earlier argument has bound, types its argument as a
@@ -708,6 +740,7 @@ impl TypeChecker {
             self.function_value_slot = None;
             self.temporary_borrow_slot = None;
             let arg_ty = shared_reborrow(checked.unwrap_or(Type::Unknown), param);
+            bind_dynamic_names(param, &arg_ty, &mut dynamic_bound);
             let unified =
                 matches!(arg_ty, Type::Unknown) || self.unify_generic(param, &arg_ty, &mut subst);
             if unified && declarations::writes_extent_expr(param) {
@@ -773,7 +806,8 @@ impl TypeChecker {
         // Value predicates (`where N > 0`) are checked against the concrete const values.
         self.check_where_predicates(&sig.where_predicates, &subst);
 
-        self.substitute_generic(&sig.ret, &subst, span)
+        let ret = self.substitute_generic(&sig.ret, &subst, span);
+        self.substitute_dynamic(&ret, &dynamic_bound, span)
     }
 
     /// `ty` with every type parameter `subst` binds replaced, and every position that
@@ -1052,7 +1086,8 @@ impl TypeChecker {
                 let receiver = obj_ty.referent();
                 let reads_turbofish = (field.name == TO_CHECKED_METHOD
                     && (receiver.is_float() || receiver.is_half_float()))
-                    || (field.name == PARSE_METHOD && matches!(receiver, Type::String));
+                    || (field.name == PARSE_METHOD && matches!(receiver, Type::String))
+                    || (field.name == AS_SHAPE_METHOD && matches!(receiver, Type::Tensor { .. }));
                 if !type_args.is_empty()
                     && !reads_turbofish
                     && !matches!(receiver, Type::Generic(_))
@@ -1311,14 +1346,13 @@ impl TypeChecker {
                         *span,
                     ));
                 }
-                self.check_receiver_call_args(
+                let found = self.check_receiver_call_args(
                     Some((object, exclusive_receiver)),
                     args,
                     visible_params,
                     *span,
                 );
-
-                Some(return_type)
+                Some(self.dynamic_call_result(visible_params, &found, &return_type, *span))
             }
 
             // Associated function call: `TypeName::func(args)`, or a
@@ -1449,9 +1483,8 @@ impl TypeChecker {
                     );
                 }
 
-                self.check_call_args(args, &param_types, *span);
-
-                Some(return_type)
+                let found = self.check_call_args(args, &param_types, *span);
+                Some(self.dynamic_call_result(&param_types, &found, &return_type, *span))
             }
 
             _ if unannotated_closure(func) => Some(self.check_closure_call(func, args, *span)),
@@ -1463,13 +1496,13 @@ impl TypeChecker {
                 // Any expression of function type is callable, a closure literal called in
                 // place included: the value is the same one a binding would hold.
                 if let Type::Function { params, ret, mode } = expr_ty {
-                    self.check_call_args(args, &params, *span);
+                    let found = self.check_call_args(args, &params, *span);
                     let lend = match mode {
                         FunctionMode::Once => None,
                         _ => self.lend_function_value(func, mode == FunctionMode::Mut),
                     };
                     self.end_lends(lend.into_iter().collect());
-                    return Some(*ret);
+                    return Some(self.dynamic_call_result(&params, &found, &ret, *span));
                 }
                 self.record_error(TypeError::NotCallable {
                     ty: expr_ty,

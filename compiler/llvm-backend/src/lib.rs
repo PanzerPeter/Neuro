@@ -55,7 +55,8 @@ impl OptimizationLevelSetting {
 /// (allocated pointer, aligned pointer, offset, one size and one stride per axis) and
 /// every scalar as itself, and writes its tensor result into one more descriptor
 /// appended after them. Only a function whose parameters are scalars, tensors or
-/// `&Tensor`s and whose result is a statically shaped tensor may be named.
+/// `&Tensor`s and whose result is a tensor, a tuple of tensors or nothing may be named. A
+/// result's dynamic axes are sized from the function's `result_extents`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExternalBodies {
     /// A textual LLVM module defining every symbol in `functions`.

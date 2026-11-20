@@ -18,8 +18,9 @@ use crate::{
     lower::map_type,
     schedule,
     tensor_arithmetic::{
-        Generic, OperandAxes, build_expression, cast_elements, empty_tensor, fill_block,
-        generic_op, half_precision, indexing_maps, iterator_types, tensor_parts, with_element,
+        Generic, OperandAxes, build_expression, cast_elements, dynamic_sizes, empty_tensor,
+        fill_block, generic_op, half_precision, indexing_maps, iterator_types, result_extents,
+        tensor_parts, with_element,
     },
     tensor_reduce::{append, apply, yield_value},
 };
@@ -128,6 +129,11 @@ pub(crate) fn build_einsum<'c, 'a>(
             false => value,
         });
     }
+    // A dynamic output axis is read off the operand that walks its letter.
+    let walks: Vec<(Value, &OperandAxes)> = values.iter().copied().zip(&maps).collect();
+    let Some(result_sizes) = result_extents(context, location, block, result_shape, &walks)? else {
+        return Ok(None);
+    };
     let written: OperandAxes = Some((0..result_shape.len()).map(Some).collect());
     maps.push(written.clone());
 
@@ -139,7 +145,10 @@ pub(crate) fn build_einsum<'c, 'a>(
         _ => IntegerAttribute::new(element_type, 0).into(),
     };
     let zero = append(block, arith::constant(context, zero, location))?;
-    let empty = append(block, empty_tensor(location, tensor_type, &[])?)?;
+    let empty = append(
+        block,
+        empty_tensor(location, tensor_type, &dynamic_sizes(&result_sizes))?,
+    )?;
     let seeded = apply(
         context,
         location,
@@ -182,13 +191,24 @@ pub(crate) fn build_einsum<'c, 'a>(
             .enumerate()
             .any(|(at, letter)| subscript[..at].contains(letter))
     });
-    if !diagonal && lowering.checks() == checks {
+    // The schedule's blocks divide static extents, so a letter of a dynamic axis keeps the
+    // naive nest.
+    let dynamic_letter = |letter: &usize| {
+        operands.iter().zip(inputs).any(|(operand, subscript)| {
+            let shape = tensor_parts(&operand.ty).map(|(_, shape)| shape);
+            subscript.iter().enumerate().any(|(axis, walked)| {
+                walked == letter && shape.is_some_and(|shape| shape[axis].is_none())
+            })
+        })
+    };
+    let dynamic = output.iter().chain(&contracted).any(dynamic_letter);
+    if !diagonal && !dynamic && lowering.checks() == checks {
         let loops: Vec<u64> = std::iter::repeat_n(1, lead)
             .chain(
                 output
                     .iter()
                     .chain(&contracted)
-                    .map(|&letter| extents[letter] as u64),
+                    .map(|&letter| extents[letter].map_or(1, |extent| extent as u64)),
             )
             .collect();
         schedule::tag(
@@ -237,9 +257,19 @@ fn product_block<'c>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{GpuTarget, context::new_context, lower::build_linkable_module, lower_for_gpu};
+    use crate::{
+        GpuTarget,
+        bridge::tests::{
+            assert_host_only_on_gpu, assert_launches_on_gpu, assert_lowered, mlir_of, operand,
+            outlined, tensor_of,
+        },
+        context::new_context,
+        lower::build_linkable_module,
+        lower_for_gpu,
+    };
 
-    use neuro_hir::{HirProgram, HirTarget};
+    use neuro_hir::{HirExpr, HirExprKind, HirProgram, HirTarget, HirType};
+    use shared_types::Span;
 
     fn program(body: &str) -> HirProgram {
         let source = format!(
@@ -306,5 +336,62 @@ mod tests {
             2,
             "a zero fill, then the contraction"
         );
+    }
+
+    /// `func f(a: A, b: B) -> R { return einsum(...) }`, with the subscript tables as the HIR
+    /// holds them.
+    fn contraction(
+        (left, right): (Vec<Option<usize>>, Vec<Option<usize>>),
+        result: Vec<Option<usize>>,
+        extents: Vec<usize>,
+    ) -> HirProgram {
+        let span = Span::new(0, 1);
+        let a = tensor_of(HirType::F32, left);
+        let b = tensor_of(HirType::F32, right);
+        let r = tensor_of(HirType::F32, result);
+        let einsum = HirExpr::new(
+            HirExprKind::TensorEinsum {
+                operands: vec![operand("a", &a), operand("b", &b)],
+                inputs: vec![vec![0, 1], vec![1, 2]],
+                output: vec![0, 2],
+                extents: extents.into_iter().map(Some).collect(),
+            },
+            r.clone(),
+            span,
+        );
+        outlined(&[("a", a), ("b", b)], einsum, r)
+    }
+
+    /// The letter of a dynamic row axis is read off the operand that walks it.
+    #[test]
+    fn a_dynamic_letter_sizes_the_result_from_its_operand() {
+        let program = contraction(
+            (vec![None, Some(3)], vec![Some(3), Some(4)]),
+            vec![None, Some(4)],
+            vec![0, 3, 4],
+        );
+        let mlir = mlir_of(&program);
+        assert!(
+            mlir.contains("tensor.dim") && mlir.contains(r#""reduction""#),
+            "{mlir}"
+        );
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
+    }
+
+    /// A dynamic contracted letter has no static trip count in the HIR, and the body takes it
+    /// from the operands; the schedule keeps the naive nest.
+    #[test]
+    fn a_dynamic_contracted_letter_is_the_operands_trip_count() {
+        let program = contraction(
+            (vec![Some(2), None], vec![None, Some(4)]),
+            vec![Some(2), Some(4)],
+            vec![2, 0, 4],
+        );
+        let mlir = mlir_of(&program);
+        assert!(mlir.contains(r#""reduction""#), "{mlir}");
+        assert!(!mlir.contains("neuro.tiles"), "{mlir}");
+        assert_lowered(&program);
+        assert_launches_on_gpu(&program);
     }
 }

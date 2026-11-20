@@ -631,6 +631,12 @@ pub(super) fn unify_array_len(
     arg: &ArrayLen,
     subst: &mut HashMap<String, Type>,
 ) -> bool {
+    // A dynamic axis binds no parameter and checks no extent at compile time: a call
+    // accepts any extent there and the name, when it has one, is bound from it afterwards
+    // (`bind_dynamic_names`). A run-time mismatch is the run-time check's to report.
+    if param.is_dynamic() {
+        return true;
+    }
     // An extent expression binds nothing, since `N + 1` against 5 would need solving:
     // it is compared once every name it reads is bound, and until then it accepts.
     if let ArrayLen::Expr(expr) = param {
@@ -643,7 +649,7 @@ pub(super) fn unify_array_len(
         ArrayLen::Fixed(v) => Type::ConstValue(*v as u64),
         ArrayLen::Param(name) => Type::Generic(name.clone()),
         ArrayLen::Expr(expr) => Type::Extent(expr.clone()),
-        ArrayLen::Dynamic | ArrayLen::Splice(_) => return param == arg,
+        ArrayLen::Dynamic(_) | ArrayLen::Splice(_) => return param == arg,
     };
     match param {
         ArrayLen::Param(name) => match subst.get(name) {
@@ -653,7 +659,7 @@ pub(super) fn unify_array_len(
                 true
             }
         },
-        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) | ArrayLen::Expr(_) => {
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic(_) | ArrayLen::Splice(_) | ArrayLen::Expr(_) => {
             param == arg
         }
     }
@@ -713,7 +719,7 @@ fn unify_tensor_shape(
     let ArrayLen::Splice(name) = &param[at].extent else {
         return false;
     };
-    if taken.iter().any(|axis| axis.extent == ArrayLen::Dynamic) {
+    if taken.iter().any(|axis| axis.extent.is_dynamic()) {
         // Bound all the same, so the mismatch is the one error reported, not also an
         // uninferable parameter.
         subst.entry(name.clone()).or_insert(Type::Unknown);
@@ -840,7 +846,7 @@ pub(crate) fn conflicting_shape_param(
 fn extent_param_name(extent: &ArrayLen) -> Option<&str> {
     match extent {
         ArrayLen::Param(name) => Some(name),
-        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) | ArrayLen::Expr(_) => None,
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic(_) | ArrayLen::Splice(_) | ArrayLen::Expr(_) => None,
     }
 }
 
@@ -863,7 +869,7 @@ pub(super) fn substitute_array_len(size: &ArrayLen, subst: &HashMap<String, Type
             .ok()
             .and_then(ArrayLen::from_extent)
             .unwrap_or_else(|| size.clone()),
-        ArrayLen::Fixed(_) | ArrayLen::Dynamic | ArrayLen::Splice(_) => size.clone(),
+        ArrayLen::Fixed(_) | ArrayLen::Dynamic(_) | ArrayLen::Splice(_) => size.clone(),
     }
 }
 
@@ -955,7 +961,7 @@ mod tests {
     #[test]
     fn a_dynamic_axis_binds_no_splice() {
         let mut subst = HashMap::new();
-        let found = [axis(ArrayLen::Dynamic), axis(ArrayLen::Fixed(2))];
+        let found = [axis(ArrayLen::Dynamic(None)), axis(ArrayLen::Fixed(2))];
         assert!(!unify_tensor_shape(
             &[splice("S"), param("N")],
             &found,

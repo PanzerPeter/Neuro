@@ -134,6 +134,7 @@ pub(crate) fn bind(
             Some(from) => order.push(*from),
             None => match &sig.params[index].default {
                 Some(default) => defaults.push((index, default.clone())),
+                None if sig.omittable(index) => {}
                 None => {
                     return Err(ArgumentError::MissingArgumentLabel {
                         callee: callee.to_string(),

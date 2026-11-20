@@ -65,6 +65,9 @@ fn broadcast_shapes(left: &[TensorAxis], right: &[TensorAxis]) -> Option<Vec<Ten
 /// A splice joins only the same splice: aligned at the same depth from the end, the two
 /// stand for the same axes whatever the instantiation, while against anything else the
 /// axes it stands for would align differently per rank.
+///
+/// A dynamic axis joins only the same name: it is never stretched, so a literal 1 beside
+/// it is no broadcast, and an anonymous `?` equals nothing (see `ArrayLen::aligns_with`).
 fn join_axes(left: &TensorAxis, right: &TensorAxis) -> Option<TensorAxis> {
     let spliced = |axis: &TensorAxis| matches!(axis.extent, ArrayLen::Splice(_));
     if (spliced(left) || spliced(right)) && left.extent != right.extent {
@@ -73,7 +76,7 @@ fn join_axes(left: &TensorAxis, right: &TensorAxis) -> Option<TensorAxis> {
     if left.extent == right.extent {
         // Both operands walk this axis, so a name either supplies is the result's and a
         // disagreement is a dimension-name mismatch rather than a silent relabel.
-        if !left.names_agree_with(right) {
+        if !left.names_agree_with(right) || !left.extent.aligns_with(&right.extent) {
             return None;
         }
         let name = left.name.clone().or_else(|| right.name.clone());
@@ -85,10 +88,27 @@ fn join_axes(left: &TensorAxis, right: &TensorAxis) -> Option<TensorAxis> {
     // A stretched axis contributes no extent and no name: the axis the result keeps is
     // entirely the other operand's.
     match (&left.extent, &right.extent) {
-        (ArrayLen::Fixed(IMPLICIT_LEADING_EXTENT), _) => Some(right.clone()),
-        (_, ArrayLen::Fixed(IMPLICIT_LEADING_EXTENT)) => Some(left.clone()),
+        (ArrayLen::Fixed(IMPLICIT_LEADING_EXTENT), other) if !other.is_dynamic() => {
+            Some(right.clone())
+        }
+        (other, ArrayLen::Fixed(IMPLICIT_LEADING_EXTENT)) if !other.is_dynamic() => {
+            Some(left.clone())
+        }
         _ => None,
     }
+}
+
+/// The first pair of aligned axes, counted from the trailing end, that a dynamic axis
+/// refuses to join, as the two extents written. `None` when every dynamic axis they share
+/// joins: a failed broadcast with no such pair is a plain shape mismatch.
+fn dynamic_conflict(left: &[TensorAxis], right: &[TensorAxis]) -> Option<(String, String)> {
+    left.iter()
+        .rev()
+        .zip(right.iter().rev())
+        .find(|(l, r)| {
+            (l.extent.is_dynamic() || r.extent.is_dynamic()) && !l.extent.aligns_with(&r.extent)
+        })
+        .map(|(l, r)| (l.extent.to_string(), r.extent.to_string()))
 }
 
 /// Whether two shapes describe the same element layout. Axis NAMES are deliberately left
@@ -194,8 +214,19 @@ impl TypeChecker {
                 if target_element.is_compatible_with(&element) =>
             {
                 let joined = broadcast_shapes(target_shape, &shape);
-                if joined.is_some_and(|joined| shapes_have_equal_extents(&joined, target_shape)) {
+                if let Some(joined) = &joined
+                    && shapes_have_equal_extents(joined, target_shape)
+                {
                     return true;
+                }
+                if joined.is_none() {
+                    self.record_axis_join_failure(
+                        &format!("{op}="),
+                        (target_ty, target_shape),
+                        (value_ty, &shape),
+                        span,
+                    );
+                    return false;
                 }
                 self.record_error(TypeError::TensorBroadcastMismatch {
                     op: format!("{op}="),
@@ -213,6 +244,36 @@ impl TypeChecker {
                 });
                 false
             }
+        }
+    }
+
+    /// Report an element-wise or compound join that failed on the shapes `left` and `right`:
+    /// a dynamic axis refused the join when one did, otherwise the shapes simply do not
+    /// broadcast.
+    pub(crate) fn record_axis_join_failure(
+        &mut self,
+        op: &str,
+        (left_ty, left): (&Type, &[TensorAxis]),
+        (right_ty, right): (&Type, &[TensorAxis]),
+        span: Span,
+    ) {
+        match dynamic_conflict(left, right) {
+            Some((left_axis, right_axis)) => {
+                self.record_error(TypeError::TensorDynamicAxisMismatch {
+                    op: op.to_string(),
+                    left: left_ty.clone(),
+                    right: right_ty.clone(),
+                    left_axis,
+                    right_axis,
+                    span,
+                })
+            }
+            None => self.record_error(TypeError::TensorBroadcastMismatch {
+                op: op.to_string(),
+                left: left_ty.clone(),
+                right: right_ty.clone(),
+                span,
+            }),
         }
     }
 
@@ -321,14 +382,6 @@ impl TypeChecker {
             });
             return None;
         }
-        // The result is a fresh buffer, so its element count must be a number here; the
-        // operands' own extents are what it is computed from.
-        if let Type::Tensor { shape, .. } = &result {
-            let shape = shape.clone();
-            if self.reject_dynamic_extent(&shape, &format!("`{op}`"), &result, span) {
-                return None;
-            }
-        }
         Some(result)
     }
 
@@ -371,13 +424,6 @@ impl TypeChecker {
             });
             return None;
         }
-        // All three of M, K and N must be countable here: K to walk the contraction, and
-        // M x N to size the fresh result's buffer. A `?` supplies none of them.
-        if self.reject_dynamic_extent(shape, "`@`", left_ty, span)
-            || self.reject_dynamic_extent(other_shape, "`@`", right_ty, span)
-        {
-            return None;
-        }
         let mismatch = |checker: &mut Self| {
             checker.record_error(TypeError::TensorMatMulMismatch {
                 left: left_ty.clone(),
@@ -407,11 +453,32 @@ impl TypeChecker {
         };
         // A shape parameter counts as equal to itself, which is what makes the `K` of
         // `matmul<M, N, K>` check once at the declaration rather than per instantiation.
-        if inner.extent != contracted.extent || !inner.names_agree_with(contracted) {
+        // A dynamic contracted axis joins only the same name.
+        if !inner.extent.aligns_with(&contracted.extent) || !inner.names_agree_with(contracted) {
+            if inner.extent.is_dynamic() || contracted.extent.is_dynamic() {
+                self.record_error(TypeError::TensorDynamicAxisMismatch {
+                    op: "`@`".to_string(),
+                    left: left_ty.clone(),
+                    right: right_ty.clone(),
+                    left_axis: inner.extent.to_string(),
+                    right_axis: contracted.extent.to_string(),
+                    span,
+                });
+                return None;
+            }
             return mismatch(self);
         }
         // The batch axes broadcast as an element-wise operator's whole shapes do.
         let Some(mut result) = broadcast_shapes(left_batch, right_batch) else {
+            if dynamic_conflict(left_batch, right_batch).is_some() {
+                self.record_axis_join_failure(
+                    "`@`",
+                    (left_ty, left_batch),
+                    (right_ty, right_batch),
+                    span,
+                );
+                return None;
+            }
             return mismatch(self);
         };
         result.extend([rows.clone(), columns.clone()]);
@@ -447,12 +514,12 @@ impl TypeChecker {
                     return None;
                 }
                 let Some(joined) = broadcast_shapes(shape, other_shape) else {
-                    self.record_error(TypeError::TensorBroadcastMismatch {
-                        op: op.to_string(),
-                        left: left_ty.clone(),
-                        right: right_ty.clone(),
+                    self.record_axis_join_failure(
+                        &op.to_string(),
+                        (left_ty, shape),
+                        (right_ty, other_shape),
                         span,
-                    });
+                    );
                     return None;
                 };
                 (element.clone(), joined)

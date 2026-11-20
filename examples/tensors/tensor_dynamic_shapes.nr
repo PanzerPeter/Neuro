@@ -1,58 +1,83 @@
-// Dynamic tensor shapes: `Tensor<f32, [?, 784]>`. A `?` marks an axis whose extent is known
-// only at run time. It accepts any extent there, so a function written against `[?, 4]`
-// takes `[2, 4]` and `[7, 4]` alike, while the other axes stay checked: `[2, 8]` is still a
-// compile error. Widening goes one way. A static tensor is accepted where a `?` is
-// expected, but not the reverse, because a dynamic tensor's shape could be anything. A `?`
-// tensor binds, moves and is released like any other. Operations that need an extent (a
-// constructor, a tensor literal, `.clone()`, an index, the shape casts) reject it, so build
-// it at a static shape and pass it where the `?` is expected.
+// Dynamic tensor shapes: `Tensor<f32, [?B, 784]>`. A `?` marks an axis whose extent is known
+// only at run time, so one compiled body serves every batch size. `?B` names the extent:
+// every `?B` in a signature or body is the same value, so two tensors carrying it combine
+// element-wise and under `@` with no check, and `B` itself reads as a `u64`. A bare `?` is
+// equal to nothing, so it combines with nothing until `.as_shape` narrows it.
+//
+// A name gets its value where a tensor first meets it: a call's arguments (a later argument
+// that disagrees panics before the body runs), a `val` annotation, a constructor's `dims:`,
+// a struct literal, or a fresh name in `.as_shape`.
 
-// One signature, every batch size. The second axis is fixed, so a row of the wrong
-// width is still rejected at compile time.
-
-func embed_width(batch: &Tensor<i32, [?, 4]>) -> i32 {
-    return 4
+// The batch extent arrives with `x`; the weights are static. The result keeps `B`.
+func scores(x: &Tensor<f32, [?B, 3]>, w: &Tensor<f32, [3, 2]>) -> Tensor<f32, [?B, 2]> {
+    x @ w
 }
 
-// A named axis may be dynamic too: the name documents the axis, the `?` says its extent
-// arrives later, and the two are independent.
-func batch_embed(batch: &Tensor<i32, [batch: ?, embed: 3]>) -> i32 {
-    return 3
+// `B` is a value inside the scope, like an extent parameter.
+func mean_score(x: &Tensor<f32, [?B, 3]>, w: &Tensor<f32, [3, 2]>) -> f32 {
+    val total = scores(x, w).sum()
+    total / (B * 2) as f32
 }
 
-// Widening happens at the return: the body hands back a fully shaped tensor, and the
-// signature forgets the first extent for every caller.
-func as_batch(rows: Tensor<i32, [2, 4]>) -> Tensor<i32, [?, 4]> {
-    return rows
+// A struct field may name an extent. It belongs to each value, so one `Batch` type holds
+// batches of every size, and the literal checks that its fields agree.
+struct Batch {
+    images: Tensor<f32, [?B, 3]>,
+    labels: Tensor<i32, [?B]>,
+}
+
+func make_batch(n: u64) -> Batch {
+    // A constructor takes one `dims:` entry per open axis.
+    mut images = Tensor::<f32, [?, 3]>::zeros(dims: [n])
+    mut labels = Tensor::<i32, [?]>::zeros(dims: [n])
+    mut i: u64 = 0
+    while i < n {
+        images[i, 0] = (i + 1) as f32
+        images[i, 1] = 1.0
+        labels[i] = (i % 2) as i32
+        i += 1
+    }
+    Batch { images: images, labels: labels }
+}
+
+// A run-time check turns a dynamic tensor back into a static one: `None` when the extents
+// differ, consuming the tensor either way.
+func first_pair(images: Tensor<f32, [?, 3]>) -> f32 {
+    val Some(pair) = images.as_shape::<[2, 3]>() else {
+        return -1.0
+    }
+    pair[0, 0] + pair[1, 0]
 }
 
 func main() -> i32 {
-    val pair: Tensor<i32, [2, 4]> = [
-        [1, 2, 3, 4],
-        [5, 6, 7, 8]
+    val w: Tensor<f32, [3, 2]> = [
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0]
     ]
-    val seven = Tensor::<i32, [7, 4]>::ones()
 
-    // Two different extents at the same `?` axis, one function.
-    println("embed_width(&pair)     = {embed_width(&pair)}")
-    println("embed_width(&seven)    = {embed_width(&seven)}")
+    val small = make_batch(2)
+    val large = make_batch(5)
+    println("small mean score = {mean_score(&small.images, &w)}")
+    println("large mean score = {mean_score(&large.images, &w)}")
+    println("large labels sum = {large.labels.sum()}")
 
-    val rows: Tensor<i32, [batch: 3, embed: 3]> = [
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1]
-    ]
-    println("batch_embed(&rows)     = {batch_embed(&rows)}")
+    // A fresh name in `.as_shape` stays in scope after it, holding the extent.
+    val loaded = Tensor::<f32, [?, 3]>::ones(dims: [4])
+    val Some(batch) = loaded.as_shape::<[?N, 3]>() else {
+        return 1
+    }
+    val doubled = &batch + &batch
+    println("N = {N}, doubled sum = {doubled.sum()}")
 
-    // The statically shaped tensor still reads its own elements; the dynamic view of it
-    // is what crosses the boundary.
-    val first = pair[0, 3]
-    println("pair[0, 3]             = {first}")
+    // Rows of 3 reshape to rows of 6 when the count allows; the count is checked at run time.
+    val wide = doubled.reshape([-1, 6])
+    println("wide sum = {wide.sum()}")
 
-    // `pair` MOVES into the widened tensor, which owns the same buffer and frees it here
-    // at the end of `main`.
-    val batch = as_batch(pair)
-    println("a [2, 4] widened to [?, 4]")
+    val two = Tensor::<f32, [?, 3]>::ones(dims: [2])
+    val five = Tensor::<f32, [?, 3]>::ones(dims: [5])
+    println("first_pair(two) = {first_pair(two)}")
+    println("first_pair(five) = {first_pair(five)}")
 
-    return embed_width(&seven) * batch_embed(&rows) + first + 26
+    return N as i32 * 10 + 2
 }

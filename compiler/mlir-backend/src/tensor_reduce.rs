@@ -30,15 +30,21 @@
 // An integer sum starts at 0 and folds left to right with the host's overflow check, never in
 // lanes: the host folds an integer run in order, and where an overflow is caught depends on
 // the order of the additions.
+//
+// A dynamic run may be longer than `REDUCE_LANES`, and the shape it folds in is decided at run
+// time, so a float run of dynamic length always takes the lanes (the device's shape, on the host
+// too), with `min(length, REDUCE_LANES)` of them. Every lane starts inside the run, so the lanes
+// of a short run are its elements in order, which is the sequential fold a short static run
+// takes, and the bits match. A mean divides by the run-time count.
 
 use crate::{
     errors::MlirError,
     guards::{At, Element, Lowering, Side},
     lower::map_type,
     tensor_arithmetic::{
-        Generic, OperandAxes, build_expression, cast_elements, empty_tensor, fill_block,
-        generic_op, half_precision, indexing_maps, iterator_types, iterators, parse_attribute,
-        tensor_parts, with_element,
+        Extent, Generic, OperandAxes, build_expression, cast_elements, dynamic_sizes, empty_tensor,
+        fill_block, generic_op, half_precision, indexing_maps, iterator_types, iterators, multiply,
+        parse_attribute, result_extents, shape_type, tensor_parts, with_element,
     },
     tensor_layout::linalg_index,
     tensor_sort::precedes,
@@ -52,7 +58,7 @@ use melior::{
         Block, BlockLike, Identifier, Location, Region, RegionLike, Type, Value,
         attribute::{FloatAttribute, IntegerAttribute},
         operation::OperationBuilder,
-        r#type::RankedTensorType,
+        r#type::{IntegerType, RankedTensorType},
     },
 };
 use neuro_hir::{HirExpr, HirExprKind, HirReduceOp, HirType, REDUCE_LANES};
@@ -83,7 +89,7 @@ pub(crate) fn build_reduce<'c, 'a>(
     let HirExprKind::TensorReduce { receiver, op, axis } = &reduce.kind else {
         return Ok(None);
     };
-    let (Some((element, source)), Some((_, extents))) =
+    let (Some((element, source_shape)), Some((_, extents))) =
         (tensor_parts(&receiver.ty), tensor_parts(result))
     else {
         return Ok(None);
@@ -97,7 +103,7 @@ pub(crate) fn build_reduce<'c, 'a>(
         true => (&wide, with_element(result, &wide)),
         false => (element, result.clone()),
     };
-    let Some(layout) = ReduceLayout::new(source, extents, *axis) else {
+    let Some(layout) = ReduceLayout::new(source_shape, extents, *axis) else {
         return Ok(None);
     };
     let Some(kind) = Element::of(element) else {
@@ -120,51 +126,85 @@ pub(crate) fn build_reduce<'c, 'a>(
         )?,
         false => source,
     };
+    // The run-time extent of every source axis, and of the run each result element folds.
+    let dims = source_extents(context, location, block, source, source_shape)?;
+    let length = run_length(context, location, block, &dims, *axis)?;
 
     let tensor_type = map_type(context, &folded_type)?;
     let element_type = map_type(context, element)?;
-    let length = layout.length;
     let fold = Fold {
         lowering,
         op: *op,
         kind,
         offset: reduce.span.start,
     };
+    // A float run past `REDUCE_LANES` folds in lanes. A dynamic run may be that long, so it
+    // always does, with as many lanes as its length needs: a short run's lanes are its elements,
+    // in the order the sequential fold takes them, so the bits are the same.
+    let laned = kind == Element::Float
+        && match length {
+            Extent::Static(length) => length > REDUCE_LANES,
+            Extent::Dynamic(_) => true,
+        };
     let (source, layout) = match layout.lanes {
-        Some(ref run) if length > REDUCE_LANES && kind == Element::Float => {
+        Some(ref run) if laned => {
+            let static_source = source_shape.iter().all(Option::is_some);
             let lanes = Lanes {
                 context,
                 location,
                 source,
                 run,
+                dims: &dims,
+                length,
                 fold: &fold,
                 element_type,
             };
             // A last-axis run of a few rows folds lane by lane on the host too: the same
             // order, so the same bits, with each partial kept in a register.
-            let few_rows = length.div_ceil(REDUCE_LANES) <= HOST_LANE_ROW_LOOP_MAX_ROWS
-                && run.axis.is_some_and(|axis| axis + 1 == run.extents.len());
-            let (partials, (shape, axis)) = match lowering.side {
-                Side::Host if !few_rows => (
-                    build_host_lanes(block, lanes)?,
+            let few_rows = match length {
+                Extent::Static(length) => {
+                    length.div_ceil(REDUCE_LANES) <= HOST_LANE_ROW_LOOP_MAX_ROWS
+                        && run.axis.is_some_and(|axis| axis + 1 == run.extents.len())
+                }
+                Extent::Dynamic(_) => false,
+            };
+            let host_length = match (lowering.side, length) {
+                (Side::Host, Extent::Static(length)) if static_source && !few_rows => Some(length),
+                _ => None,
+            };
+            let (partials, (shape, axis)) = match host_length {
+                Some(length) => (
+                    build_host_lanes(block, lanes, length)?,
                     (run.host_partials(), run.axis),
                 ),
-                Side::Host | Side::Device => (
-                    build_lanes(block, &lanes)?,
-                    (run.partials(), Some(run.result_rank)),
-                ),
+                None => {
+                    let count = match length {
+                        Extent::Static(_) => Some(REDUCE_LANES),
+                        Extent::Dynamic(_) => None,
+                    };
+                    (
+                        build_lanes(block, &lanes)?,
+                        (run.partials(count), Some(run.result_rank)),
+                    )
+                }
             };
-            let Some(lanes) = ReduceLayout::new(&shape, extents, axis) else {
+            let Some(partial_layout) = ReduceLayout::new(&shape, extents, axis) else {
                 return Ok(None);
             };
-            (partials, lanes)
+            (partials, partial_layout)
         }
         _ => (source, layout),
     };
     let parallel = layout.result_rank;
     let result_axes: OperandAxes = Some((0..parallel).map(Some).collect());
+    // The result's dynamic axes are the source's kept ones, in order. A whole-tensor result is
+    // one static element.
     let empty = block
-        .append_operation(empty_tensor(location, tensor_type, &[])?)
+        .append_operation(empty_tensor(
+            location,
+            tensor_type,
+            &dynamic_sizes(&kept_extents(&dims, *axis)),
+        )?)
         .result(0)?
         .into();
 
@@ -229,17 +269,13 @@ pub(crate) fn build_reduce<'c, 'a>(
     )?;
     let value = match *op {
         HirReduceOp::Mean => {
-            let length = FloatAttribute::new(context, element_type, length as f64).into();
-            let length = block
-                .append_operation(arith::constant(context, length, location))
-                .result(0)?
-                .into();
+            let count = count_of(context, location, block, element_type, length)?;
             apply(
                 context,
                 location,
                 block,
                 Generic {
-                    inputs: &[length],
+                    inputs: &[count],
                     destination: folded,
                     indexing_maps: indexing_maps(context, parallel, &[&None, &result_axes])?,
                     iterators: iterator_types(context, parallel, 0)?,
@@ -254,6 +290,85 @@ pub(crate) fn build_reduce<'c, 'a>(
         true => cast_elements(context, location, block, value, (&wide, result))?,
         false => value,
     }))
+}
+
+/// The run-time extent of each axis of `source`, of shape `shape`: a static one as it is, a
+/// dynamic one read off `source` itself.
+fn source_extents<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    source: Value<'c, 'a>,
+    shape: &[Option<usize>],
+) -> Result<Vec<Extent<'c, 'a>>, MlirError> {
+    let own: OperandAxes = Some((0..shape.len()).map(Some).collect());
+    result_extents(context, location, block, shape, &[(source, &own)])?
+        .ok_or(MlirError::ModuleVerificationFailed)
+}
+
+/// The extents a reduction's result keeps: the source's, but the reduced axis. A whole-tensor
+/// reduction keeps none, its result being one static element.
+fn kept_extents<'c, 'a>(dims: &[Extent<'c, 'a>], axis: Option<usize>) -> Vec<Extent<'c, 'a>> {
+    match axis {
+        None => Vec::new(),
+        Some(axis) => dims
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != axis)
+            .map(|(_, extent)| *extent)
+            .collect(),
+    }
+}
+
+/// How many elements one run folds: the reduced axis's extent, or every element's for a
+/// whole-tensor reduction. Multiplied out at run time only when an extent is dynamic.
+fn run_length<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    dims: &[Extent<'c, 'a>],
+    axis: Option<usize>,
+) -> Result<Extent<'c, 'a>, MlirError> {
+    let reduced = match axis {
+        Some(axis) => &dims[axis..=axis],
+        None => dims,
+    };
+    reduced
+        .iter()
+        .try_fold(Extent::Static(1), |product, extent| {
+            multiply(context, location, block, (product, *extent))
+        })
+}
+
+/// `length` as the float a mean divides by, of `element`.
+fn count_of<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    element: Type<'c>,
+    length: Extent<'c, '_>,
+) -> Result<Value<'c, 'a>, MlirError> {
+    match length {
+        Extent::Static(length) => append(
+            block,
+            arith::constant(
+                context,
+                FloatAttribute::new(context, element, length as f64).into(),
+                location,
+            ),
+        ),
+        Extent::Dynamic(length) => {
+            let wide = IntegerType::new(context, 64).into();
+            let length = append(block, arith::index_cast(length, wide, location))?;
+            append(
+                block,
+                OperationBuilder::new("arith.sitofp", location)
+                    .add_operands(&[length])
+                    .add_results(&[element])
+                    .build()?,
+            )
+        }
+    }
 }
 
 /// What one fold step computes: the reduction, its element, and where a sum's overflow
@@ -277,15 +392,14 @@ struct ReduceLayout {
     first: Vec<Option<usize>>,
     /// The reduced source axis, `None` for a whole-tensor reduction.
     axis: Option<usize>,
-    /// How many elements one run folds, which a mean divides by.
-    length: usize,
     /// Where a run's elements sit, for folding a long run in lanes.
     lanes: Option<Run>,
 }
 
 /// The source shape and reduced axis, which place each run position in the source.
 struct Run {
-    extents: Vec<usize>,
+    /// The source's extents, `None` where one is dynamic.
+    extents: Vec<Option<usize>>,
     /// The reduced axis; `None` for a whole-tensor reduction, whose run is the source in
     /// row-major order.
     axis: Option<usize>,
@@ -293,16 +407,17 @@ struct Run {
 }
 
 impl Run {
-    /// The partials tensor's extents: the result's, then one per lane.
-    fn partials(&self) -> Vec<Option<usize>> {
+    /// The partials tensor's extents: the result's, then one per lane, `lanes` of them (`None`
+    /// when that count is only known at run time).
+    fn partials(&self, lanes: Option<usize>) -> Vec<Option<usize>> {
         let mut extents: Vec<Option<usize>> = match self.axis {
             None => vec![Some(1)],
             Some(axis) => (0..self.extents.len())
                 .filter(|&i| i != axis)
-                .map(|i| Some(self.extents[i]))
+                .map(|i| self.extents[i])
                 .collect(),
         };
-        extents.push(Some(REDUCE_LANES));
+        extents.push(lanes);
         extents
     }
 
@@ -313,21 +428,20 @@ impl Run {
         let Some(axis) = self.axis else {
             return vec![Some(REDUCE_LANES)];
         };
-        let mut extents: Vec<Option<usize>> = self.extents.iter().copied().map(Some).collect();
+        let mut extents = self.extents.clone();
         extents[axis] = Some(REDUCE_LANES);
         extents
     }
 }
 
 impl ReduceLayout {
-    /// `None` for anything but a static source reduced to the result shape it implies.
+    /// `None` for a source that does not reduce to the result shape it implies.
     fn new(
         source: &[Option<usize>],
         result: &[Option<usize>],
         axis: Option<usize>,
     ) -> Option<Self> {
-        let extents = source.iter().copied().collect::<Option<Vec<usize>>>()?;
-        let rank = extents.len();
+        let rank = source.len();
         let Some(axis) = axis else {
             // One parallel axis of extent 1, then every source axis reduced.
             return (result == [Some(1)]).then(|| Self {
@@ -336,19 +450,21 @@ impl ReduceLayout {
                 walk: (1..=rank).map(Some).collect(),
                 first: vec![None; rank],
                 axis: None,
-                length: extents.iter().product(),
                 lanes: Some(Run {
-                    extents: extents.clone(),
+                    extents: source.to_vec(),
                     axis: None,
                     result_rank: 1,
                 }),
             });
         };
+        if axis >= rank {
+            return None;
+        }
         let kept: Vec<Option<usize>> = (0..rank)
             .filter(|&i| i != axis)
-            .map(|i| Some(extents[i]))
+            .map(|i| source[i])
             .collect();
-        if axis >= rank || kept != result {
+        if kept != result {
             return None;
         }
         let result_axis = |i: usize| (i != axis).then(|| if i < axis { i } else { i - 1 });
@@ -360,9 +476,8 @@ impl ReduceLayout {
                 .collect(),
             first: (0..rank).map(result_axis).collect(),
             axis: Some(axis),
-            length: extents[axis],
             lanes: Some(Run {
-                extents: extents.clone(),
+                extents: source.to_vec(),
                 axis: Some(axis),
                 result_rank: rank - 1,
             }),
@@ -370,12 +485,16 @@ impl ReduceLayout {
     }
 }
 
-/// One long run's lanes: the source they read and the fold they run.
+/// One long run's lanes: the source they read, the run they cover, and the fold they run.
 struct Lanes<'r, 'c, 'v> {
     context: &'c Context,
     location: Location<'c>,
     source: Value<'c, 'v>,
     run: &'r Run,
+    /// The run-time extent of each source axis.
+    dims: &'r [Extent<'c, 'v>],
+    /// How many elements one run folds.
+    length: Extent<'c, 'v>,
     fold: &'r Fold<'r, 'c, 'v>,
     element_type: Type<'c>,
 }
@@ -383,25 +502,11 @@ struct Lanes<'r, 'c, 'v> {
 impl<'c> Lanes<'_, 'c, '_> {
     /// The type of a partials tensor of extents `shape`.
     fn partials_type(&self, shape: &[Option<usize>]) -> Type<'c> {
-        // Every extent is static: `ReduceLayout::new` admits only a static source.
-        let dimensions: Vec<u64> = shape
-            .iter()
-            .map(|extent| extent.map_or(0, |extent| extent as u64))
-            .collect();
-        RankedTensorType::new(&dimensions, self.element_type, None).into()
-    }
-
-    /// How many elements one run folds.
-    fn length(&self) -> usize {
-        match self.run.axis {
-            Some(axis) => self.run.extents[axis],
-            None => self.run.extents.iter().product(),
-        }
+        shape_type(self.element_type, shape)
     }
 
     /// Run position `row * REDUCE_LANES + lane` folded into `carried`. A `ragged` row may
-    /// end before the lanes do: past the run's end the lane reads its own first element and
-    /// keeps `carried`.
+    /// end before the lanes do: past the run's end the lane keeps `carried`.
     fn fold_row<'b>(
         &self,
         block: &'b Block<'c>,
@@ -422,6 +527,7 @@ impl<'c> Lanes<'_, 'c, '_> {
                 block,
                 self.source,
                 self.run,
+                self.dims,
                 kept,
                 at,
                 self.element_type,
@@ -437,21 +543,25 @@ impl<'c> Lanes<'_, 'c, '_> {
                 carried,
             );
         }
-        let end = index_constant(context, location, block, self.length())?;
+        let end = self.length.index(context, location, block)?;
         let inside = append(
             block,
             arith::cmpi(context, CmpiPredicate::Ult, position, end, location),
         )?;
-        let at = append(block, arith::select(inside, position, lane, location))?;
+        // A position past the run's end reads element 0, which a non-empty run always has. Its
+        // answer is discarded below, so only that the read is in bounds matters.
+        let zero = index_constant(context, location, block, 0)?;
+        let at = append(block, arith::select(inside, position, zero, location))?;
         let folded = fold_step(context, location, block, self.fold, read(at)?, carried)?;
         append(block, arith::select(inside, folded, carried, location))
     }
 }
 
 /// Fold a long run's lanes into a partials tensor of the result's axes and a lane axis,
-/// one GPU thread per lane. Lane `l` starts at run position `l` (inside the run, which is
-/// longer than the lanes) and folds `l + k * REDUCE_LANES` for `k` from 1 while that is
-/// inside the run, the order the LLVM backend's lanes take.
+/// one GPU thread per lane. Lane `l` starts at run position `l` and folds `l + k * REDUCE_LANES`
+/// for `k` from 1 while that is inside the run, the order the LLVM backend's lanes take. A
+/// dynamic run has `min(length, REDUCE_LANES)` lanes, so every lane starts inside the run and no
+/// partial is a placeholder: the partials are no bigger than the run needs.
 fn build_lanes<'c, 'a>(
     block: &'a Block<'c>,
     lanes: &Lanes<'_, 'c, '_>,
@@ -459,9 +569,25 @@ fn build_lanes<'c, 'a>(
     let (context, location, element_type) = (lanes.context, lanes.location, lanes.element_type);
     let run = lanes.run;
     let index = Type::index(context);
-    let partials_type = lanes.partials_type(&run.partials());
+    let lane_count = match lanes.length {
+        Extent::Static(_) => Extent::Static(REDUCE_LANES),
+        Extent::Dynamic(length) => {
+            let width = index_constant(context, location, block, REDUCE_LANES)?;
+            Extent::Dynamic(append(block, arith::minui(length, width, location))?)
+        }
+    };
+    let static_lanes = match lane_count {
+        Extent::Static(count) => Some(count),
+        Extent::Dynamic(_) => None,
+    };
+    let partials = run.partials(static_lanes);
+    let partials_type = lanes.partials_type(&partials);
     let rank = run.result_rank + 1;
-    let empty = append(block, empty_tensor(location, partials_type, &[])?)?;
+    let mut sizes = dynamic_sizes(&kept_extents(lanes.dims, run.axis));
+    if let Extent::Dynamic(count) = lane_count {
+        sizes.push(count);
+    }
+    let empty = append(block, empty_tensor(location, partials_type, &sizes)?)?;
 
     let body = Block::new(&[(element_type, location)]);
     // The result position, one `linalg.index` per surviving source axis.
@@ -475,17 +601,24 @@ fn build_lanes<'c, 'a>(
         &body,
         lanes.source,
         run,
+        lanes.dims,
         &kept,
         lane,
         element_type,
     )?;
     let first = index_constant(context, location, &body, 1)?;
-    let rows = index_constant(
-        context,
-        location,
-        &body,
-        lanes.length().div_ceil(REDUCE_LANES),
-    )?;
+    let rows = match lanes.length {
+        Extent::Static(length) => {
+            index_constant(context, location, &body, length.div_ceil(REDUCE_LANES))?
+        }
+        Extent::Dynamic(_) => {
+            let length = lanes.length.index(context, location, &body)?;
+            let slack = index_constant(context, location, &body, REDUCE_LANES - 1)?;
+            let biased = append(&body, arith::addi(length, slack, location))?;
+            let width = index_constant(context, location, &body, REDUCE_LANES)?;
+            append(&body, arith::divui(biased, width, location))?
+        }
+    };
 
     let step = Block::new(&[(index, location), (element_type, location)]);
     let row: Value = step.argument(0)?.into();
@@ -538,10 +671,11 @@ fn build_lanes<'c, 'a>(
 fn build_host_lanes<'c, 'a>(
     block: &'a Block<'c>,
     lanes: Lanes<'_, 'c, 'a>,
+    length: usize,
 ) -> Result<Value<'c, 'a>, MlirError> {
     let (context, location, element_type) = (lanes.context, lanes.location, lanes.element_type);
-    let length = lanes.length();
     let flat;
+    let flat_dims;
     let lanes = match lanes.run.axis {
         None if lanes.run.extents.len() > 1 => {
             let rank = lanes.run.extents.len();
@@ -559,13 +693,16 @@ fn build_host_lanes<'c, 'a>(
                     .build()?,
             )?;
             flat = Run {
-                extents: vec![length],
+                extents: vec![Some(length)],
                 axis: None,
                 result_rank: 1,
             };
+            flat_dims = [Extent::Static(length)];
             Lanes {
                 source,
                 run: &flat,
+                dims: &flat_dims,
+                length: Extent::Static(length),
                 ..lanes
             }
         }
@@ -638,6 +775,7 @@ fn host_lane_pass<'c, 'b>(
                 &body,
                 lanes.source,
                 run,
+                lanes.dims,
                 &kept,
                 lane,
                 element_type,
@@ -664,7 +802,7 @@ fn host_lane_pass<'c, 'b>(
 
 /// The source element at run position `position` of the run whose result position is
 /// `kept`: along the reduced axis for an axis reduction, and row-major through every axis
-/// for a whole-tensor one.
+/// for a whole-tensor one. `dims` are the source's extents, read at run time where dynamic.
 #[expect(
     clippy::too_many_arguments,
     reason = "the builder's context, location and block travel beside the run's operands, so a parameter struct would only rename them"
@@ -675,31 +813,37 @@ fn read_run<'c, 'a>(
     at: &'a Block<'c>,
     source: Value<'c, '_>,
     run: &Run,
+    dims: &[Extent<'c, '_>],
     kept: &[Value<'c, '_>],
     position: Value<'c, '_>,
     element_type: Type<'c>,
 ) -> Result<Value<'c, 'a>, MlirError> {
-    let constant = |value| index_constant(context, location, at, value);
     let mut operands: Vec<Value> = vec![source];
     match run.axis {
         // `kept` holds one index per surviving axis, in order, so axis `i` past the reduced
         // one is `kept[i - 1]`.
-        Some(axis) => operands.extend((0..run.extents.len()).map(|i| match i.cmp(&axis) {
+        Some(axis) => operands.extend((0..dims.len()).map(|i| match i.cmp(&axis) {
             std::cmp::Ordering::Less => kept[i],
             std::cmp::Ordering::Equal => position,
             std::cmp::Ordering::Greater => kept[i - 1],
         })),
         None => {
-            let mut stride: usize = run.extents.iter().product();
-            for (i, extent) in run.extents.iter().enumerate() {
-                stride /= extent;
+            // An axis's coordinate is the position divided by the product of the extents after
+            // it, modulo its own extent.
+            let mut strides = vec![Extent::Static(1); dims.len()];
+            let mut stride = Extent::Static(1);
+            for (slot, extent) in strides.iter_mut().zip(dims).rev() {
+                *slot = stride;
+                stride = multiply(context, location, at, (stride, *extent))?;
+            }
+            for (axis, (stride, extent)) in strides.iter().zip(dims).enumerate() {
                 let mut coordinate = position;
-                if stride > 1 {
-                    let divisor = constant(stride)?;
+                if !matches!(stride, Extent::Static(1)) {
+                    let divisor = stride.index(context, location, at)?;
                     coordinate = append(at, arith::divui(coordinate, divisor, location))?;
                 }
-                if i > 0 {
-                    let modulus = constant(*extent)?;
+                if axis > 0 {
+                    let modulus = extent.index(context, location, at)?;
                     coordinate = append(at, arith::remui(coordinate, modulus, location))?;
                 }
                 operands.push(coordinate);
@@ -839,9 +983,20 @@ pub(crate) fn yield_value<'c>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{GpuTarget, lower_for_gpu, lower_for_link};
+    use crate::{
+        GpuTarget,
+        bridge::tests::{
+            assert_host_only_on_gpu, assert_launches_on_gpu, assert_lowered, mlir_of, operand,
+            tensor_of,
+        },
+        lower_for_gpu, lower_for_link,
+    };
 
-    use neuro_hir::{HirItem, HirProgram, HirTarget};
+    use neuro_hir::{
+        HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirProgram, HirReduceOp, HirStmt,
+        HirTarget, HirType,
+    };
+    use shared_types::Span;
 
     /// A program with a transfer, so lowering outlines its operations. The harness binds
     /// no named arguments, so an axis is positional.
@@ -1061,5 +1216,126 @@ mod tests {
         let bodies =
             lower_for_link(&program, crate::Overflow::Checked).expect("the CPU path lowers");
         assert_eq!(bodies.functions.len(), outlined(&program));
+    }
+
+    /// `func f(a: T) -> R { return a.OP(axis) }`, outlined the way lowering writes it: a
+    /// whole-tensor reduction is boxed in a one-element tensor, an axis reduction is bare.
+    fn reduction_over(
+        element: HirType,
+        shape: Vec<Option<usize>>,
+        op: HirReduceOp,
+        axis: Option<usize>,
+    ) -> HirProgram {
+        let span = Span::new(0, 1);
+        let source = tensor_of(element.clone(), shape.clone());
+        let reduce = |ty: HirType| {
+            HirExpr::new(
+                HirExprKind::TensorReduce {
+                    receiver: Box::new(operand("a", &source)),
+                    op,
+                    axis,
+                },
+                ty,
+                span,
+            )
+        };
+        let (result, body) = match axis {
+            None => {
+                let boxed = tensor_of(element.clone(), vec![Some(1)]);
+                let literal = HirExpr::new(
+                    HirExprKind::TensorLiteral {
+                        elements: vec![reduce(element)],
+                    },
+                    boxed.clone(),
+                    span,
+                );
+                (boxed, literal)
+            }
+            Some(axis) => {
+                let kept: Vec<Option<usize>> = shape
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| *index != axis)
+                    .map(|(_, extent)| *extent)
+                    .collect();
+                let result = tensor_of(element, kept);
+                (result.clone(), reduce(result))
+            }
+        };
+        HirProgram {
+            items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
+                name: "f".to_string(),
+                params: vec![HirParam {
+                    name: "a".to_string(),
+                    ty: source,
+                    span,
+                }],
+                return_type: result,
+                body: vec![HirStmt::Return {
+                    value: Some(body),
+                    span,
+                }],
+                target: HirTarget::FollowsOperands,
+                span,
+            })],
+        }
+    }
+
+    /// A float sum over a dynamic run may be longer than `REDUCE_LANES`, so it folds in lanes
+    /// whatever its run-time length: the lane loop is an `scf.for`, and the answer is the
+    /// language's lane order.
+    #[test]
+    fn a_dynamic_float_sum_folds_in_lanes() {
+        let program = reduction_over(HirType::F32, vec![None, Some(3)], HirReduceOp::Sum, None);
+        let mlir = mlir_of(&program);
+        assert!(mlir.contains("scf.for"), "the lanes are a loop:\n{mlir}");
+        assert_lowered(&program);
+        assert_launches_on_gpu(&program);
+    }
+
+    /// `.mean(axis: 0)` over a dynamic axis divides by that axis's run-time count.
+    #[test]
+    fn a_dynamic_mean_divides_by_the_run_time_count() {
+        let program = reduction_over(
+            HirType::F32,
+            vec![None, Some(3)],
+            HirReduceOp::Mean,
+            Some(0),
+        );
+        let mlir = mlir_of(&program);
+        assert!(
+            mlir.contains("arith.sitofp") && mlir.contains("tensor.dim"),
+            "the divisor is the run-time count:\n{mlir}"
+        );
+        assert_lowered(&program);
+        assert_launches_on_gpu(&program);
+    }
+
+    /// An integer sum folds in order and never in lanes, so a dynamic one is one sequential fold.
+    #[test]
+    fn a_dynamic_integer_sum_folds_in_order() {
+        let program = reduction_over(HirType::I32, vec![None], HirReduceOp::Sum, None);
+        let mlir = mlir_of(&program);
+        assert!(
+            !mlir.contains("scf.for"),
+            "no lanes for an integer run:\n{mlir}"
+        );
+        assert!(
+            mlir.contains("memref<1xi64>"),
+            "the overflow check:\n{mlir}"
+        );
+        assert_lowered(&program);
+        assert_launches_on_gpu(&program);
+    }
+
+    /// A max over a dynamic kept axis keeps that axis dynamic in the result.
+    #[test]
+    fn a_dynamic_kept_axis_stays_dynamic_in_an_axis_reduction() {
+        let program = reduction_over(HirType::F32, vec![None, Some(3)], HirReduceOp::Max, Some(1));
+        let mlir = mlir_of(&program);
+        assert!(mlir.contains("tensor<?xf32>"), "{mlir}");
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
     }
 }

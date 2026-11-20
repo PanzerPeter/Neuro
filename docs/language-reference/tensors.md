@@ -139,7 +139,7 @@ val tall = &m + &column                     // each column entry stretches acros
 
 So a `[2, 3]` combines with a `[3]`, a `[2, 1]` and a `[1, 3]`. It does not combine with a `[2]`, because 2 lines up against the 3 at the trailing axis and neither is `1`. A pair that does not broadcast is a compile error naming both operands, for example ``the operands of `+` do not broadcast: Tensor<f32, [2, 3]> against Tensor<f32, [2]>``.
 
-An extent parameter (see [shape generics](#shape-generics)) is never the axis that stretches, because whether it is `1` is not known until instantiation. It can still be stretched *into*, since a literal `1` on the other side is known at the call site. A dynamic `?` axis has no by-value operator, because a `?` gives no element count to size the result with.
+An extent parameter (see [shape generics](#shape-generics)) is never the axis that stretches, because whether it is `1` is not known until instantiation. It can still be stretched *into*, since a literal `1` on the other side is known at the call site. A dynamic axis is never stretched either ([Dynamic shapes](#dynamic-shapes)).
 
 ### Scalar broadcast
 
@@ -181,7 +181,7 @@ val shared = Tensor::<f32, [16, 2]>::ones()
 val each = &heads @ &shared             // [8, 4, 2]: `shared` repeats across the 8
 ```
 
-There is no vector form, because a rank-1 operand has no inner axis to contract, and no scalar form: a matrix-vector product is `m @ v.reshape([-1, 1])`. A `?` extent is rejected on either operand, because the contracted axis bounds the sum and the result's axes size its buffer.
+There is no vector form, because a rank-1 operand has no inner axis to contract, and no scalar form: a matrix-vector product is `m @ v.reshape([-1, 1])`. A dynamic axis follows the naming rule of [Dynamic shapes](#dynamic-shapes): the contracted axes must be the same literal, parameter or name.
 
 Shape parameters make `@` generic. The repeated `K` is checked once, at the declaration, rather than per call site:
 
@@ -594,7 +594,7 @@ Three rules are compile-time errors:
 
 - The element type must be an integer or a float. A `bool` tensor has nothing to fold: `` `.sum()` reduces a tensor's elements, which requires an integer or float element type; this tensor holds bool ``.
 - `.mean()` is for floats only, because an integer mean would have to pick a rounding rule the language does not give: `` `.mean()` averages i32 elements, which has no rounding rule ``. Sum and divide explicitly instead.
-- A reduction over **no** elements is rejected, since `.max()` of nothing has no answer. Over an extent or shape parameter the run length is known only at each instance, which is where an empty one is refused ([Reshaping over parameters](#reshaping-over-parameters)). A `?` axis has no run length at compile time, so a reduction refuses one.
+- A reduction over **no** elements is rejected, since `.max()` of nothing has no answer. Over an extent or shape parameter the run length is known only at each instance, which is where an empty one is refused ([Reshaping over parameters](#reshaping-over-parameters)). Over a dynamic axis the run is counted at run time, and an empty one panics.
 
 A half-precision reduction accumulates in `f32`, so a long `bf16` sum does not stall.
 
@@ -635,7 +635,7 @@ Equal elements keep the order they were written in, which makes an `argsort` of 
 
 Like a reduction, a selection **reads** its receiver. It allocates its own result and leaves the ordered buffer where it was, so it is offered on `&Tensor<T, S>` too.
 
-`k:` and `descending:` must be constants, because the result's shape and the comparator are both settled before any element is read. `k` must lie between `1` and the sorted axis's extent, so `` `.topk(k: 5)` selects more elements than the sorted axis holds, which is 4 `` is an error. The element type must be an integer or a float, half precision included. The receiver must have at least one axis, and its shape must be numbers rather than parameters or `?`.
+`k:` and `descending:` must be constants, because the result's shape and the comparator are both settled before any element is read. `k` must lie between `1` and the sorted axis's extent, so `` `.topk(k: 5)` selects more elements than the sorted axis holds, which is 4 `` is an error. The element type must be an integer or a float, half precision included. The receiver must have at least one axis, and its shape must be numbers or dynamic axes rather than parameters; on a dynamic sorted axis, `k` past the extent panics.
 
 ## Einstein notation
 
@@ -699,7 +699,7 @@ A subscript that disagrees with its operands is a compile error **naming the let
 - An output letter no input binds: `` `einsum` writes 'k' on the right of `->` but no operand's subscript binds it ``.
 - An output letter written twice: `` `einsum` writes 'i' twice on the right of `->` ``.
 
-The rest are checked the same way: one comma-separated subscript per operand, one letter per axis, every operand a tensor, and every operand sharing one integer or float element type, half precision included. A lettered extent may be an extent parameter, so `einsum("ij,jk->ik", a, b)` serves every `[M, K]` and `[K, N]`, and a letter bound to two different parameters is the same conflict as one bound to two numbers. A `?` axis is rejected, and the axes `...` covers may be a shape parameter.
+The rest are checked the same way: one comma-separated subscript per operand, one letter per axis, every operand a tensor, and every operand sharing one integer or float element type, half precision included. A lettered extent may be an extent parameter, so `einsum("ij,jk->ik", a, b)` serves every `[M, K]` and `[K, N]`, and a letter bound to two different parameters is the same conflict as one bound to two numbers. A letter may walk a dynamic axis when every operand that writes it carries the same name, and the axes `...` covers may be a shape parameter.
 
 A result axis carries no dimension name. A subscript letter is a local label for the contraction, not a name the type keeps. The result's axes are unnamed, and an annotation may name them.
 
@@ -742,7 +742,7 @@ func main() -> i32 {
 }
 ```
 
-Like a reduction, all three **read** their operands. Each allocates its own result and leaves the walked buffers in place, so all three are offered on `&Tensor<T, S>`, and a chain such as `t.map(f).map(g)` releases its intermediate. The result has the walked shape, so a traversal works over extent and shape parameters, and each instance walks its own length. A `?` axis is rejected.
+Like a reduction, all three **read** their operands. Each allocates its own result and leaves the walked buffers in place, so all three are offered on `&Tensor<T, S>`, and a chain such as `t.map(f).map(g)` releases its intermediate. The result has the walked shape, so a traversal works over extent and shape parameters, and each instance walks its own length. A dynamic axis is walked at its run-time length.
 
 There is deliberately **no `.filter`**. A filter's output length depends on the values in the buffer, so its result would have no shape the type system can name. Use a `Vec<T>` where a data-dependent length is what you want. The shape-preserving alternative is a boolean mask. A `Tensor<bool, S>` is a tensor like any other and already selects as the second operand of a `.zip`. Nothing produces one yet, though: a traversal cannot answer `bool`, and `a > b` is not defined on two tensors, so a mask must be written out by hand.
 
@@ -769,47 +769,51 @@ In a `@grad` body each one is differentiated by its own rule (see [automatic dif
 
 ## Dynamic shapes
 
-An axis written `?` has no compile-time extent. It opts that one axis out of compile-time shape checking and leaves every other axis checked as before. One signature therefore serves every extent at that position:
+An axis written `?` has no compile-time extent. The body reads it from the tensor's DLPack shape at run time, so one compiled function serves every extent at that position, and every other axis is still checked at compile time. A dynamic extent is not monomorphized.
 
 ```neuro
-func embed_width(batch: &Tensor<f32, [?, 4]>) -> i32 {
-    return 4
-}
-
-func main() -> i32 {
-    val pair: Tensor<f32, [2, 4]>  = [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]
-    val seven = Tensor::<f32, [7, 4]>::zeros()
-
-    embed_width(&pair)                        // ok
-    embed_width(&seven)                       // ok, same function
-    return 0
+func scores(x: &Tensor<f32, [?B, 3]>, w: &Tensor<f32, [3, 2]>) -> Tensor<f32, [?B, 2]> {
+    x @ w
 }
 ```
 
-A dimension name may sit on a dynamic axis like any other (`[batch: ?, embed: 768]`). The name rule is unchanged: names are compared wherever both shapes supply one, so a transposed argument is still rejected even when the extents say nothing.
+**Named and anonymous.** `?B` names the extent. Every `?B` in one signature or body is the same run-time value, so two tensors that carry it combine element-wise and under `@` with no check, and inside the scope `B` reads as a `u64` (`for i in 0..B`). A bare `?` is anonymous and equal to nothing, not even another `?`. The element-wise operators, `@`, `einsum` and compound assignment join two axes only when both are the same literal, the same extent parameter or the same name. Any other pairing is a compile error whose hint names `.as_shape` (below). Broadcasting never stretches a dynamic axis.
 
-**The `?` is an expectation, not a value.** A statically shaped tensor is accepted where a `?` axis is expected. The reverse is not, because a dynamic tensor's run-time shape could be anything. A static annotation would let the next reader index it at strides its buffer may not have:
+**Where a name gets its value.** A name is bound the first time a value meets it:
+
+- at a call, from the arguments in parameter order. A later argument with the same name and a different extent panics before the body runs, naming both values;
+- at a `val` or `mut` annotation, `val x: Tensor<f32, [?B, 784]> = load()`, from the value;
+- at a constructor, from `dims:` (below);
+- at a struct literal. A field's type may name an extent, and every field naming `?B` must agree when the value is built. The name belongs to the value, not to the struct type, so one `Batch` type holds batches of every size, and a field read sees `?`;
+- at `.as_shape`, from the receiver (below).
+
+Once a name is bound, a binding site compares any other extent against it at run time and panics on a mismatch. A return value and an assignment do not: there an expected `?B` accepts only `?B`. A call's result names the caller's extent, so `scores(&x, &w)` is a `Tensor<f32, [?N, 2]>` for an `x: Tensor<f32, [?N, 3]>` and a `Tensor<f32, [4, 2]>` for a `[4, 3]` argument. Inside an `Option` or any type other than a tuple or a borrow, a static extent comes back as `?`.
+
+A name may be written at the top of a parameter's tensor type (through one `&` or `&mut`), in a return type when a parameter also carries it, at the top of a `val` / `mut` annotation or a struct field's type, in a constructor's shape and in `.as_shape`. Anywhere else it is a compile error: in a closure's signature, nested in another parameter type (`Vec<Tensor<f32, [?B]>>`), in a type alias, an enum payload or a trait, and in a `@grad`, `@gpu` or `@kernel` signature. Each of those positions takes an anonymous `?`.
+
+**Constructing.** `zeros`, `ones`, `identity` and `random_normal` take one `u64` in `dims:` per anonymous `?` and per name not yet in scope, in order of first occurrence. A name already in scope takes no entry, and `identity` needs one name twice, `[?N, ?N]`:
 
 ```neuro
-func widen(t: Tensor<f32, [2, 4]>) -> Tensor<f32, [?, 4]> {
-    return t                              // ok: widening
-}
-
-val back: Tensor<f32, [2, 4]> = widen(Tensor::<f32, [2, 4]>::zeros())
-// error: type mismatch: expected Tensor<f32, [2, 4]>, found Tensor<f32, [?, 4]>
+val buf = Tensor::<f32, [?, 128]>::zeros(dims: [n])
+val out = Tensor::<f32, [?B, 10]>::zeros()               // B already in scope
 ```
 
-A `?` binds no extent or shape parameter. A call such as `func rows<N>(t: &Tensor<f32, [N, 4]>)` with a dynamic argument is therefore a type mismatch, since nothing supplies `N`.
+A bound name is read only from a shape written on the call. `val out: Tensor<f32, [?B, 10]> = Tensor::zeros()` is a compile error, and its hint gives the turbofish form.
 
-A `?`-shaped tensor binds, moves, crosses a call boundary, is returned and is released at scope exit like any other, because a tensor value is a DLPack handle and none of that needs an extent. What needs an extent is a compile error naming the axis. This covers the construction helpers and tensor literals (no size to allocate), `.clone()` and `.to(device)` (no size to copy), indexing and slicing (no strides), the shape casts (no element count), in-place compound assignment, and every operator, reduction, sort, traversal or `einsum` (no element count to size the result):
+**What works on a dynamic axis.** Everything a static axis supports, with the checks that depend on an extent moved to run time: `.clone()` and `.to(device)`; indexing, where every position is bounds-checked; slicing, where `..` keeps the axis and a range with constant bounds gives a static extent whose end is checked; the reductions and sorting; the shape casts, where `.reshape` compares element counts at run time and a `-1` there is `?`; compound assignment, `@`, `einsum`, `.map` / `.zip` / `.reduce` and the element-wise operators. A reduction over an empty run panics.
+
+**Narrowing.** `.as_shape::<[...]>()` checks a tensor's extents against a written shape at run time and returns `Option<Tensor<T, [...]>>`, consuming its receiver either way. The written shape may use literals, extent parameters, names in scope and a fresh name, which stays in scope after the expression whatever the outcome:
 
 ```neuro
-func f(t: &Tensor<f32, [?, 4]>) -> f32 {
-    return t.sum()                        // error: `.sum` needs every extent of `Tensor<f32, [?, 4]>` at compile time, but an axis is `?`
-}
+val Some(batch) = x.as_shape::<[32, 784]>() else { continue }     // dynamic to static
+val Some(rows) = loaded.as_shape::<[?N, 3]>() else { return 1 }   // binds N
 ```
 
-Build such a tensor at a static shape and pass it where the `?` is expected.
+Static to dynamic needs no call: a `Tensor<f32, [32, 784]>` is accepted where a `Tensor<f32, [?B, 784]>` is expected, binding `B` to 32. The other way round is a type mismatch without `.as_shape`, because the next reader would index the buffer at strides it may not have.
+
+A `?` binds no extent or shape parameter. A call such as `func rows<N>(t: &Tensor<f32, [N, 4]>)` with a dynamic argument is a type mismatch, since nothing supplies `N`. A dimension name may sit on a dynamic axis like any other (`[batch: ?B, embed: 768]`), and names are still compared wherever both shapes supply one.
+
+[`tensor_dynamic_shapes.nr`](../../examples/tensors/tensor_dynamic_shapes.nr) runs each binding site, a constructor and both narrowings; [`dynamic_batches.nr`](../../examples/integration/tensors/dynamic_batches.nr) scores batches of several sizes through one compiled body.
 
 ## Device transfer
 
@@ -966,7 +970,7 @@ The attribute goes on a free function, never beside `@gpu` or `@grad`. A kernel 
 
 These are the limits a reader is most likely to hit. Each one is described in full in the section linked.
 
-- A `?` axis is a widening only. Nothing that needs an extent works on it, and no run-time check narrows it back to a literal (see [Dynamic shapes](#dynamic-shapes)).
+- An operation whose result has a dynamic axis runs on the host only, so it panics on a GPU tensor; `.rev()` and `.step(n)` ranges refuse a dynamic axis; and a `@grad`, `@gpu` or `@kernel` signature cannot name one (see [Dynamic shapes](#dynamic-shapes)).
 - There is no `.filter`, and no operation produces a `Tensor<bool, S>` mask, so a mask is written by hand (see [Functional traversals](#functional-traversals)).
 - `.sort`, `.argsort` and `.topk` need every extent to be a number, so they are not available inside a shape-generic function (see [Sorting and selection](#sorting-and-selection)).
 - `@gpu` is not accepted on a method (see [Running on a GPU](#running-on-a-gpu-gpu)).

@@ -36,6 +36,15 @@ pub enum ParseError {
     #[error("type alias '{name}' shadows a built-in type; choose a different name")]
     TypeAliasShadowsBuiltin { name: String, span: Span },
 
+    #[error(
+        "type alias '{alias}' writes the dynamic extent `?{name}`; a dynamic name is bound where a value meets it (a parameter, an annotation, a struct field, a constructor), so a type alias cannot name one"
+    )]
+    DynamicNameInAlias {
+        alias: String,
+        name: String,
+        span: Span,
+    },
+
     #[error("type alias '{name}' is defined in terms of itself (cyclic alias)")]
     CyclicTypeAlias { name: String, span: Span },
 
@@ -150,6 +159,7 @@ impl ParseError {
             | ParseError::DuplicateParameterLabel { span, .. }
             | ParseError::DuplicateTypeAlias { span, .. }
             | ParseError::TypeAliasShadowsBuiltin { span, .. }
+            | ParseError::DynamicNameInAlias { span, .. }
             | ParseError::CyclicTypeAlias { span, .. }
             | ParseError::UndeclaredLifetime { span, .. }
             | ParseError::UnquotedLoopLabel { span, .. }

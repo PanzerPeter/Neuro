@@ -10,6 +10,34 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.57.0] - 2026-11-20
+
+### Added
+
+- Named dynamic extents. `Tensor<f32, [?B, 784]>` marks an axis whose extent is read at run time,
+  so one compiled body serves every batch size, and `B` reads as a `u64` inside the scope. Every
+  `?B` in a signature or body is the same value, so two tensors carrying it combine element-wise,
+  under `@` and in `einsum` with no check; a bare `?` equals nothing. A name is bound at a call (a
+  later argument that disagrees panics before the body runs), at a `val` / `mut` annotation, at a
+  constructor, at a struct literal whose fields must agree, and at `.as_shape`. A call's result
+  names the caller's extent.
+- These tensor operations accept a dynamic axis: construction, `.clone()`, `.to(device)`,
+  indexing and slicing with run-time bounds checks, reductions, sorting, the shape casts (a
+  `.reshape` compares element counts at run time), compound assignment, `@`, `einsum`, `.map` /
+  `.zip` / `.reduce` and the element-wise operators.
+- `zeros`, `ones`, `identity` and `random_normal` take `dims:`, one `u64` per open axis:
+  `Tensor::<f32, [?, 128]>::zeros(dims: [n])`.
+- `.as_shape::<[...]>()` checks a tensor's extents against a written shape at run time and returns
+  `Option`, narrowing a dynamic tensor back to a static one or binding a fresh name.
+- The editor grammar colors `?` and `?B` in a shape apart from the `?` operator.
+
+### Fixed
+
+- A borrowing tensor method on a field of a temporary (`make().b.sum()`) leaked the field's
+  buffer on every evaluation.
+- `val Some(x) = opt else { ... }` over a named `opt` freed the payload twice once `x`, or the
+  `else` binding, was moved on.
+
 ## [5.56.0] - 2026-11-18
 
 ### Added

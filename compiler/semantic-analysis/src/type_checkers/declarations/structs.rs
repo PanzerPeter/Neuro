@@ -10,6 +10,7 @@ use super::{
 };
 use crate::errors::TypeError;
 use crate::type_checkers::TypeChecker;
+use crate::type_checkers::resolution::NameSlot;
 use crate::types::Type;
 use ast_types::{ImplDef, StructDef};
 use shared_types::Span;
@@ -48,7 +49,7 @@ impl TypeChecker {
         self.enter_generic_scope(&[], &def.lifetimes);
         let mut fields: Vec<(String, Type)> = Vec::new();
         for field in &def.fields {
-            if let Some(ty) = self.resolve_type(&field.ty) {
+            if let Some(ty) = self.resolve_type_naming(&field.ty, NameSlot::Top) {
                 fields.push((field.name.name.clone(), ty));
             }
         }
@@ -342,7 +343,7 @@ impl TypeChecker {
         self.enter_generic_scope(&def.generics, &def.lifetimes);
         let mut fields: Vec<(String, Type)> = Vec::new();
         for field in &def.fields {
-            if let Some(ty) = self.resolve_type(&field.ty) {
+            if let Some(ty) = self.resolve_type_naming(&field.ty, NameSlot::Top) {
                 fields.push((field.name.name.clone(), ty));
             }
         }

@@ -259,8 +259,10 @@ impl<'ctx> TypeMapper<'ctx> {
     /// row-major `[d0*d1*... x T]` array.
     ///
     /// The rank-0 tensor holds one element, the empty product, which is why
-    /// `Tensor<f32, []>` is `[1 x float]` and not a zero-length array. Host memory only;
-    /// device buffers arrive with the GPU backend.
+    /// `Tensor<f32, []>` is `[1 x float]` and not a zero-length array. A dynamic tensor's
+    /// element count is a run-time value, so its layout is the zero-length array: the
+    /// elements are reached by a flat index into the allocation, never through this type's
+    /// length. Host memory only; device buffers arrive with the GPU backend.
     pub(crate) fn tensor_buffer_type(&self, ty: &Type) -> CodegenResult<BasicTypeEnum<'ctx>> {
         let Type::Tensor { element, shape } = ty else {
             return Err(CodegenError::UnsupportedType(format!(
@@ -269,7 +271,10 @@ impl<'ctx> TypeMapper<'ctx> {
             )));
         };
         let elem_llvm = self.map_type(element)?;
-        let count: usize = crate::types::static_extents(shape)?.iter().product();
+        let count = shape
+            .iter()
+            .try_fold(1usize, |count, extent| extent.map(|d| count * d))
+            .unwrap_or(0);
         Ok(elem_llvm.array_type(count as u32).into())
     }
 
@@ -283,7 +288,9 @@ impl<'ctx> TypeMapper<'ctx> {
     /// never through `manager_ctx`.
     ///
     /// `grad` and `hessian` are the slots a `.backward()` fills, the second only under
-    /// `@grad(order: 2)`: each null, or a handle the slot owns.
+    /// `@grad(order: 2)`: each null, or a handle the slot owns. `shape` is the per-value
+    /// shape block of a dynamic tensor (`2 * rank` `i64`s, extents then strides), null for
+    /// a static one. It is last so the slots keep their offsets.
     pub(crate) fn dlpack_control_block_type(&self) -> inkwell::types::StructType<'ctx> {
         let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
         self.context.struct_type(
@@ -291,6 +298,7 @@ impl<'ctx> TypeMapper<'ctx> {
                 self.context.i64_type().into(), // data_bytes
                 ptr_ty.into(),                  // grad
                 ptr_ty.into(),                  // hessian
+                ptr_ty.into(),                  // shape block
             ],
             false,
         )
@@ -398,10 +406,11 @@ impl<'ctx> TypeMapper<'ctx> {
         Ok(u64::from(self.dlpack_dtype(element)?.bits) / 8)
     }
 
-    /// The byte size of a tensor's element buffer: `d0 * d1 * ... * sizeof(T)`.
+    /// The byte size of a static tensor's element buffer: `d0 * d1 * ... * sizeof(T)`.
     ///
     /// The rank-0 tensor holds one element, the empty product, so its buffer is one
-    /// element wide, not zero.
+    /// element wide, not zero. A dynamic tensor has no such constant; its size is computed
+    /// at run time by `extents::element_run`.
     pub(crate) fn tensor_buffer_bytes(&self, ty: &Type) -> CodegenResult<u64> {
         let Type::Tensor { element, shape } = ty else {
             return Err(CodegenError::UnsupportedType(format!(
@@ -712,14 +721,15 @@ mod tests {
             .get_field_type_at_index(1)
             .and_then(|field| field.try_into().ok())
             .expect("the second field is the control block");
-        // The element buffer's byte length, then the gradient and Hessian slots.
-        assert_eq!(control.count_fields(), 3);
+        // The element buffer's byte length, the gradient and Hessian slots, then the
+        // shape block a dynamic tensor owns.
+        assert_eq!(control.count_fields(), 4);
         assert!(
             control
                 .get_field_type_at_index(0)
                 .is_some_and(|field| field.into_int_type().get_bit_width() == 64)
         );
-        for slot in [1, 2] {
+        for slot in [1, 2, 3] {
             assert!(
                 control
                     .get_field_type_at_index(slot)

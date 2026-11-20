@@ -104,6 +104,7 @@ const HESSIAN_METHOD: &str = "hessian";
 const ZERO_GRAD_METHOD: &str = "zero_grad";
 const DETACH_METHOD: &str = "detach";
 const ITEM_METHOD: &str = "item";
+const AS_SHAPE_METHOD: &str = "as_shape";
 const FLAT_METHOD: &str = "flat";
 const SHAPE_RANK_METHOD: &str = "rank";
 const SHAPE_COUNT_METHOD: &str = "count";
@@ -400,6 +401,7 @@ impl Lowerer {
         if let Some((params, ret)) = self.functions.get(name).cloned() {
             let args = self.borrow_kernel_inputs(name, args);
             let args = self.lower_args(&args, &params)?;
+            let ret = crate::extents::instantiate_result(self.extent_sigs.get(name), &args, ret);
             let callee = HirExpr::new(
                 HirExprKind::Variable(name.to_string()),
                 HirType::Function {
@@ -580,6 +582,13 @@ impl Lowerer {
             });
         }
 
+        // A template's written return type names the extents its arguments bind (R6).
+        let ret = crate::extents::instantiate_result(
+            crate::extents::ExtentSignature::of(&template.params, template.return_type.as_ref())
+                .as_ref(),
+            &lowered_args,
+            ret,
+        );
         let callee = HirExpr::new(
             HirExprKind::Variable(mangled),
             HirType::Function {
@@ -1128,6 +1137,13 @@ impl Lowerer {
         if crate::tensor_shape::is_shape_method(method) && matches!(recv, HirType::Tensor { .. }) {
             return self.lower_tensor_shape_cast(object, method, args, span);
         }
+        // `.as_shape::<[...]>()` narrows an owned tensor to a written shape.
+        if method == AS_SHAPE_METHOD
+            && let HirType::Tensor { .. } = recv
+            && let [ast_types::GenericArg::Shape { dims, .. }] = type_args
+        {
+            return self.lower_as_shape(object, dims, span);
+        }
 
         // `.detach()` consumes an owned tensor, as the checker makes it; a borrowed receiver
         // falls through like a shape cast's.
@@ -1156,14 +1172,8 @@ impl Lowerer {
             && let HirType::Tensor { element, shape, .. } = recv.referent()
         {
             let element = (**element).clone();
-            let extents = shape
-                .iter()
-                .copied()
-                .collect::<Option<Vec<usize>>>()
-                .ok_or_else(|| LoweringError::Malformed {
-                    detail: "`.flat` on a tensor with a `?` extent".to_string(),
-                })?;
-            return self.lower_tensor_flat(object, element, &extents, args, span);
+            let shape = shape.clone();
+            return self.lower_tensor_flat(object, element, &shape, args, span);
         }
 
         if method == PARTITION_METHOD
@@ -1282,7 +1292,10 @@ impl Lowerer {
                 } else {
                     &params[1..]
                 };
-                (self.lower_args(args, visible)?, ret)
+                let args = self.lower_args(args, visible)?;
+                let ret =
+                    crate::extents::instantiate_result(self.extent_sigs.get(&mangled), &args, ret);
+                (args, ret)
             } else if method == CLONE_METHOD && self.clone_structs.contains(&struct_name) {
                 (self.lower_args(args, &[])?, HirType::Struct(struct_name))
             } else {
@@ -1346,7 +1359,7 @@ impl Lowerer {
         &mut self,
         object: HirExpr,
         element: HirType,
-        extents: &[usize],
+        shape: &[Option<usize>],
         args: &[Expr],
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
@@ -1369,7 +1382,30 @@ impl Lowerer {
         };
 
         let mut stmts = Vec::new();
-        let read = if extents.len() > 1 {
+        // A dynamic extent is read from the receiver at run time. A temporary receiver is bound
+        // first, so the reads and the index see one tensor.
+        let object = if shape.iter().any(Option::is_none) && !crate::tensor_index::is_place(&object)
+        {
+            let owner = self.fresh_extent_temp();
+            let ty = object.ty.clone();
+            stmts.push(HirStmt::VarDecl {
+                name: owner.clone(),
+                ty: ty.clone(),
+                init: Some(object),
+                mutable: false,
+                span,
+            });
+            HirExpr::new(HirExprKind::Variable(owner), ty, span)
+        } else {
+            object
+        };
+        let source = crate::extents::borrow(object.clone());
+        let extent_of = |axis: usize| match shape[axis] {
+            Some(value) => literal(value),
+            None => crate::extents::extent_read(source.clone(), axis, span),
+        };
+
+        let read = if shape.len() > 1 {
             let name = format!("__flat_{}", self.flat_counter);
             self.flat_counter += 1;
             stmts.push(HirStmt::VarDecl {
@@ -1383,15 +1419,26 @@ impl Lowerer {
         } else {
             position
         };
-        let mut axes = Vec::with_capacity(extents.len());
-        for (axis, &extent) in extents.iter().enumerate() {
-            let stride: usize = extents[axis + 1..].iter().map(|&e| e.max(1)).product();
+        let mut axes = Vec::with_capacity(shape.len());
+        for axis in 0..shape.len() {
+            let behind = &shape[axis + 1..];
             let mut index = read.clone();
-            if stride > 1 {
-                index = binary(BinaryOp::Divide, index, literal(stride));
+            if behind.iter().any(Option::is_none) {
+                let stride = (axis + 1..shape.len())
+                    .map(extent_of)
+                    .reduce(|left, right| binary(BinaryOp::Multiply, left, right))
+                    .unwrap_or_else(|| literal(1));
+                index = binary(BinaryOp::Divide, index, stride);
+            } else {
+                let stride: usize = behind.iter().flatten().map(|&e| e.max(1)).product();
+                if stride > 1 {
+                    index = binary(BinaryOp::Divide, index, literal(stride));
+                }
             }
-            if axis > 0 && extent > 0 {
-                index = binary(BinaryOp::Modulo, index, literal(extent));
+            // The first axis is the whole tensor's bound, so it needs no modulo; a static
+            // zero extent has no element to read, so it needs none either.
+            if axis > 0 && shape[axis] != Some(0) {
+                index = binary(BinaryOp::Modulo, index, extent_of(axis));
             }
             axes.push(HirTensorAxis::Position(index));
         }

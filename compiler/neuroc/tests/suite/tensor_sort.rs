@@ -332,20 +332,18 @@ func main() -> i32 {
     );
 }
 
+/// A dynamic run sorts like a static one: the pass count comes from the run-time extent.
 #[test]
-fn a_dynamic_extent_is_rejected() {
+fn a_dynamic_extent_sorts_at_run_time() {
     let source = r#"
 func main() -> i32 {
-    val m: Tensor<f32, [?, 3]> = Tensor::<f32, [2, 3]>::zeros()
+    val fixed: Tensor<f32, [2, 3]> = [[3.0, 1.0, 2.0], [9.0, 7.0, 8.0]]
+    val m: Tensor<f32, [?, 3]> = fixed
     val s = m.sort()
-    return 0
+    return (s[0, 0] + s[1, 2] * 10.0) as i32
 }
 "#;
-    let errors = rejected("tensor_sort_dynamic.nr", source);
-    assert!(
-        errors.contains("at compile time"),
-        "the diagnostic names the dynamic extent: {errors}"
-    );
+    assert_eq!(run("tensor_sort_dynamic.nr", source), 91);
 }
 
 #[test]

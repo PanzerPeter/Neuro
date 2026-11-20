@@ -24,8 +24,10 @@ Reads and rewrites the AST it is handed; touches no files.
 - **A compiler-known callee has no `Item` to read its labels off, so its signature is
   seeded.** `SignatureTable::build` calls `seed_builtins` before `collect`, which records the
   entries spelled with their labels in the specification but constructed by the compiler
-  rather than declared in the prelude: the associated function
-  `Tensor::random_normal(mean:, std:)`, and the labelled builtin *methods*
+  rather than declared in the prelude: the associated functions
+  `Tensor::random_normal(mean:, std:, dims:)` and `Tensor::zeros(dims:)` / `ones(dims:)` /
+  `identity(dims:)` (`dims:` carries the run-time extents of a shape's open axes), and the
+  labelled builtin *methods*
   `tensor.flatten(dims:)`, the four tensor reductions
   `.sum(axis:)` / `.mean(axis:)` / `.max(axis:)` / `.min(axis:)`, and the three order-based
   selections `.sort(axis:, descending:)` / `.argsort(axis:, descending:)` / `.topk(k:, axis:)`.
@@ -34,7 +36,7 @@ Reads and rewrites the AST it is handed; touches no files.
   through `record_method` rather than inserted, so a program whose own `flatten` or `min`
   names its parameters differently is reported as the ambiguity it is instead of silently
   binding against the builtin. Every label here is optional except `.topk`'s `k:`, so
-  `.flatten()`, `t.sum()` and a fully positional `random_normal(0.0f32, 0.02f32)` pass through
+  `zeros()`, `.flatten()`, `t.sum()` and a fully positional `random_normal(0.0f32, 0.02f32)` pass through
   untouched.
 - **A seeded builtin parameter may carry a default, which is the only reason a labelled call
   can be shorter than its signature.** `ParamBinding::default` holds the expression bound when

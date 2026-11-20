@@ -30,6 +30,26 @@ pub(crate) fn is_tensor_constructor(ctor: &str) -> bool {
     )
 }
 
+/// The `dims:` argument of a constructor whose fixed arguments come first: the array literal
+/// at `at`, when the call passes one.
+fn dims_argument(args: &[Expr], at: usize) -> Option<&[Expr]> {
+    match args.get(at) {
+        Some(Expr::ArrayLiteral { elements, .. }) => Some(elements),
+        _ => None,
+    }
+}
+
+/// `node` after the statements that bind the names its constructor introduced, in a block
+/// whose value is the node.
+fn with_bindings(mut stmts: Vec<neuro_hir::HirStmt>, node: HirExpr) -> HirExpr {
+    if stmts.is_empty() {
+        return node;
+    }
+    let (ty, span) = (node.ty.clone(), node.span);
+    stmts.push(neuro_hir::HirStmt::Expr(node));
+    HirExpr::new(HirExprKind::Block { stmts }, ty, span)
+}
+
 /// The number of elements a tensor of `shape` holds. The rank-0 shape is one element,
 /// which is what makes the empty product the right answer.
 pub(crate) fn tensor_element_count(shape: &[usize]) -> usize {
@@ -119,28 +139,57 @@ impl Lowerer {
             });
         };
         let element = (**element).clone();
-        let shape = crate::static_extents(shape)?;
+        let open_shape = shape.clone();
+        let annotation = match type_args {
+            [GenericArg::Type(annotation)] => Some(annotation),
+            _ => None,
+        };
 
-        let kind = match ctor {
-            CTOR_ZEROS => HirExprKind::TensorFill {
-                value: Box::new(self.tensor_fill_constant(&element, 0.0, span)?),
-            },
-            CTOR_ONES => HirExprKind::TensorFill {
-                value: Box::new(self.tensor_fill_constant(&element, 1.0, span)?),
-            },
-            CTOR_IDENTITY => HirExprKind::TensorIdentity,
+        // The open axes of a constructor take their extents from `dims:`, the last argument
+        // after the ones the constructor fixes. `from` and `scalar` take static shapes only.
+        match ctor {
+            CTOR_ZEROS | CTOR_ONES | CTOR_IDENTITY => {
+                let value = match ctor {
+                    CTOR_ONES => 1.0,
+                    _ => 0.0,
+                };
+                let (stmts, dims) =
+                    self.constructor_dims(annotation, &open_shape, dims_argument(args, 0), span)?;
+                let node = match ctor {
+                    CTOR_IDENTITY => HirExprKind::TensorIdentity { dims },
+                    _ => HirExprKind::TensorFill {
+                        value: Box::new(self.tensor_fill_constant(&element, value, span)?),
+                        dims,
+                    },
+                };
+                return Ok(with_bindings(stmts, HirExpr::new(node, ty, span)));
+            }
             CTOR_RANDOM_NORMAL => {
-                let [mean, std] = args else {
+                let [mean, std, ..] = args else {
                     return Err(LoweringError::Malformed {
                         detail: "`Tensor::random_normal` takes a mean and a standard deviation"
                             .to_string(),
                     });
                 };
-                HirExprKind::TensorRandomNormal {
-                    mean: Box::new(self.lower_expr(mean, Some(&element))?),
-                    std: Box::new(self.lower_expr(std, Some(&element))?),
-                }
+                let mean = self.lower_expr(mean, Some(&element))?;
+                let std = self.lower_expr(std, Some(&element))?;
+                let (stmts, dims) =
+                    self.constructor_dims(annotation, &open_shape, dims_argument(args, 2), span)?;
+                let node = HirExpr::new(
+                    HirExprKind::TensorRandomNormal {
+                        mean: Box::new(mean),
+                        std: Box::new(std),
+                        dims,
+                    },
+                    ty,
+                    span,
+                );
+                return Ok(with_bindings(stmts, node));
             }
+            _ => {}
+        }
+        let shape = crate::static_extents(shape)?;
+        let kind = match ctor {
             CTOR_SCALAR => {
                 let [value] = args else {
                     return Err(LoweringError::Malformed {

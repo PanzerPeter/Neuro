@@ -44,8 +44,6 @@ pub(crate) enum ArmOwnership {
     /// they take is theirs for the arm's duration. `shares` says the scrutinee keeps its
     /// function values, so a binding of one takes a count of its own.
     Arm { shares: bool },
-    /// A `val ... else` binding out of a place, which keeps its payload.
-    Enclosing,
 }
 
 impl<'ctx> CodegenContext<'ctx> {

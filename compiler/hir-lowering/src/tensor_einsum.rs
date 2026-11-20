@@ -58,7 +58,7 @@ impl Lowerer {
         // subscripts become those indices in the same pass, so nothing re-reads the
         // string afterwards.
         let mut letters: HashMap<char, usize> = HashMap::new();
-        let mut extents: Vec<usize> = Vec::new();
+        let mut extents: Vec<Option<usize>> = Vec::new();
         // The indices the ellipsis's axes take, interned by the first operand that writes it.
         let mut leading: Option<Vec<usize>> = None;
         let mut element: Option<HirType> = None;
@@ -74,7 +74,7 @@ impl Lowerer {
                     "`einsum` reached lowering on a non-tensor operand".to_string(),
                 ));
             };
-            let shape = crate::static_extents(&shape)?;
+            let shape = shape.clone();
             let written = subscript.first() == Some(&ELLIPSIS);
             let named = &subscript[usize::from(written)..];
             let covered = shape.len().checked_sub(named.len());
@@ -114,8 +114,9 @@ impl Lowerer {
                 });
                 if extents[index] != *extent {
                     return Err(malformed(format!(
-                        "`einsum` reached lowering binding '{letter}' to both {} and {extent}",
-                        extents[index]
+                        "`einsum` reached lowering binding '{letter}' to both {} and {}",
+                        neuro_hir::extent_display(&extents[index]),
+                        neuro_hir::extent_display(extent)
                     )));
                 }
                 axes.push(index);
@@ -149,10 +150,11 @@ impl Lowerer {
         let ty = if result_axes.is_empty() && !output.contains(&ELLIPSIS) {
             element
         } else {
-            let shape: Vec<usize> = result_axes.iter().map(|index| extents[*index]).collect();
+            let shape: Vec<Option<usize>> =
+                result_axes.iter().map(|index| extents[*index]).collect();
             HirType::Tensor {
                 element: Box::new(element),
-                shape: neuro_hir::static_shape(&shape),
+                shape: shape.clone(),
                 names: AxisNames(vec![None; shape.len()]),
             }
         };

@@ -11,6 +11,9 @@ use shared_types::{Literal, Span};
 /// `.sort` / `.argsort` / `.topk` their sorted axis.
 const AXIS_LABEL: &str = "axis";
 
+/// The run-time extents of a tensor constructor's open axes: `zeros(dims: [n])`.
+const DIMS_LABEL: &str = "dims";
+
 /// The label `.sort` / `.argsort` take their direction under.
 const DESCENDING_LABEL: &str = "descending";
 
@@ -120,7 +123,19 @@ impl Signature {
     /// specified default, which is what lets a builtin be called with one of its two
     /// labels rather than both.
     pub(crate) fn has_defaults(&self) -> bool {
-        self.params.iter().any(|p| p.default.is_some())
+        self.params.iter().any(|p| p.default.is_some()) || self.omittable(self.params.len())
+    }
+
+    /// Whether the parameter at `index` may be left out with no value in its place: a
+    /// constructor's trailing `dims:`, which a shape with no open axis takes nothing for.
+    /// `index` past the end asks about the last parameter.
+    pub(crate) fn omittable(&self, index: usize) -> bool {
+        let last = self.params.len().saturating_sub(1);
+        index.min(last) == last
+            && self
+                .params
+                .last()
+                .is_some_and(|p| p.name.as_deref() == Some(DIMS_LABEL))
     }
 
     /// Whether `label` names a parameter whose `_` label makes it positional-only.
@@ -209,11 +224,22 @@ impl SignatureTable {
                 ty: None,
                 default: None,
             })
+            .chain(std::iter::once(optional(DIMS_LABEL, None)))
             .collect();
         self.assoc.insert(
             ("Tensor".to_string(), "random_normal".to_string()),
             Signature { params },
         );
+        // A constructor whose shape leaves axes open takes their run-time extents under
+        // `dims:`, and a static one takes nothing, so the label is optional.
+        for constructor in ["zeros", "ones", "identity"] {
+            self.assoc.insert(
+                ("Tensor".to_string(), constructor.to_string()),
+                Signature {
+                    params: vec![optional(DIMS_LABEL, None)],
+                },
+            );
+        }
         // `tensor.flatten(dims: [...])` is compiler-known too, and is the one builtin
         // *method* spelled with a label. It goes through `record_method` rather than a
         // direct insert so a program declaring its own `flatten` with different

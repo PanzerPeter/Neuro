@@ -55,9 +55,11 @@ impl TypeChecker {
             });
             return Type::Unknown;
         }
+        // A dynamic axis is ordered at run time, with `k` checked there, so only an extent
+        // parameter or a splice has to be a number here.
         if let Some(symbolic) = shape
             .iter()
-            .find(|axis| !matches!(axis.extent, ArrayLen::Fixed(_)))
+            .find(|axis| !matches!(axis.extent, ArrayLen::Fixed(_) | ArrayLen::Dynamic(_)))
         {
             self.record_error(TypeError::TensorShapeCastSymbolicExtent {
                 method: method.to_string(),
@@ -122,10 +124,15 @@ impl TypeChecker {
         let Some(axis) = self.sort_axis(shape, args.get(1), TOPK_METHOD, call_span) else {
             return Type::Unknown;
         };
-        let ArrayLen::Fixed(extent) = shape[axis].extent else {
+        if k == 0 {
+            self.record_error(TypeError::TensorTopKZero { span: call_span });
             return Type::Unknown;
-        };
-        if k == 0 || k > extent {
+        }
+        // A dynamic axis's extent is a run-time number, so `k` past it is the run-time
+        // index check's to report.
+        if let ArrayLen::Fixed(extent) = shape[axis].extent
+            && k > extent
+        {
             self.record_error(TypeError::TensorTopKOutOfRange {
                 k,
                 extent,

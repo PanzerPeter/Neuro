@@ -960,7 +960,7 @@ which size nothing; `enter/exit_generic_scope` sets the scopes. An array length 
 extent naming a `value_consts` entry, and an `impl` passing one to its type's extent
 (`register_generic_impl`), is `ConstParamSizes`, whose hint is the bare form. `Type::Array.size` and the `extent` of every
 `TensorAxis` in `Type::Tensor.shape` are an `ArrayLen`
-(`Fixed` / `Param` / `Dynamic`, the last reachable only from a tensor's `?`, plus a tensor's
+(`Fixed` / `Param` / `Dynamic`, the last reachable only from a tensor's `?` or `?B`, plus a tensor's
 `Splice` and `Expr`, below) and a
 `Type::ConstValue` marker carries a const argument through
 monomorphization; `Type::Extent` carries one computed from the caller's own parameters
@@ -1018,16 +1018,54 @@ as a type argument, resolves to `Type::Generic` (`seed_turbofish`, `resolve_type
 instantiation check each argument's kind against its parameter (`arg_kind`,
 `generic_arg_kind`).
 
-**Dynamic shapes.** `resolve_type` maps a `TensorExtent::Dynamic` to `ArrayLen::Dynamic`, and
-`ArrayLen::satisfies` is the whole rule: an EXPECTED `?` accepts any extent, and the
-reverse is refused, since a `?` found where a literal is expected would let the consumer index at
-strides the run-time shape may not have. A `?` binds no shape parameter (`unify_array_len` has no
-case for it), so a shape-generic call over a dynamic argument is an uninferable parameter rather
-than a wrong extent. `reject_dynamic_extent` (in `tensors.rs`) is the single gate every
-extent-consuming operation passes through (construction, literal coercion, indexing, the four
-shape casts, `.clone()`, `.to(device)`, and compound assignment) reporting
-`TensorDynamicExtent` with the operation and the type. What remains legal on a `?`-shaped tensor
-is what needs no extent: binding, passing, returning, moving and dropping.
+**Dynamic shapes.** An axis written `?` is `ArrayLen::Dynamic(None)`, and `?B` is
+`Dynamic(Some("B"))`. The dynamic-shape rules are decided in five places.
+- *Where a name may be written* (`resolve_type_naming`, `NameSlot` in `resolution.rs`).
+  `resolve_type` refuses a name (`DynamicNameNotAllowed`); a parameter's or a field's top-level
+  tensor (through one reference) and a `val`/`mut` annotation take `NameSlot::Top`; a return type
+  takes `NameSlot::Return`, which also passes through references, tuples, arrays, slices,
+  collections and `Option`/`Result` arguments. Closures, enum payloads, type aliases, user generic
+  arguments, constants, trait declarations, `@grad`/`@gpu`/`@kernel` signatures and trait impl
+  methods refuse names. A type alias is refused by the parser (`DynamicNameInAlias`), since
+  aliases are expanded before this checker runs. Every name a return type writes must be named by
+  a parameter (`DynamicNameUnbound`, `refuse_unbound_return_names`).
+- *Scope* (`type_checkers/dynamic_names.rs`). A name is in the symbol table under the key `?B`,
+  so the block scoping of variables governs it. A signature's names come into scope at body entry;
+  the fresh names of a `val`/`mut` annotation, a constructor's `dims:` and `.as_shape` come into
+  scope where they bind. A name bound from another name records that name (`Type::Generic`) and
+  reads as its target (`canonical_dynamic_name`), so both spellings are one run-time value. A
+  variable, parameter or constant of the same identifier is `DynamicNameConflict`. A dynamic name
+  read as a value is a `u64` (`expressions/mod.rs`).
+- *Binding and checking.* `ArrayLen::satisfies` (R5): an expected `?` accepts any extent, an
+  expected `?B` only `?B`, and a literal or parameter only an equal extent. Binding sites (call
+  arguments, annotations, struct literals) see the names anonymized (`anonymize_dynamic`), so any
+  extent is accepted there and the run-time check is the value's. A call's result takes each name
+  from the first argument that carries it and is not `?` (`bind_dynamic_names`,
+  `dynamic_call_result`). Through tensors, tuples and borrows any extent carries over; inside any
+  other type (an `Option`) only a dynamic one does, and a static one is `?`, matching the type
+  lowering gives the result (`substitute_dynamic`). `unify_array_len` accepts any extent at a
+  dynamic parameter axis. A
+  field read or write sees its field anonymized. An annotation binds its fresh names after its
+  initializer is checked (`bind_annotation_names`), and the variable keeps the names it wrote.
+- *Operators* (R8). `ArrayLen::aligns_with`: axes combine when equal and not an anonymous `?`, so
+  `?` joins nothing, not even `?`. A dynamic axis joins only the same name; a literal 1 never
+  stretches it. A failed join with a dynamic axis is `TensorDynamicAxisMismatch`, whose hint names
+  `.as_shape::<[...]>()`, and the same rule applies to element-wise operators, compound assignment,
+  `@`'s contracted and batch axes, `.zip`, and every einsum letter and ellipsis axis.
+- *Single-operand operations* (R9) keep the operand's axis and its name: `.clone()`, `.to`,
+  `.detach`, the math methods, the reductions, `.sort`/`.argsort`/`.topk` (`k` checked at run
+  time), `.map`/`.zip`/`.reduce`, `.t()`, `.permute`, `.flat(i)`, and indexing (a position and `..`
+  keep their axis, a constant range takes its static extent with `end` checked at run time).
+  A reversed or stepped range on a dynamic axis is `TensorDynamicExtent`. `.reshape` and
+  `.flatten` are in the shape paragraph below. Unary `-` on a tensor is refused for static tensors
+  too (`InvalidOperator`), so it is not a dynamic gap. A literal, `Tensor::from`, a safetensors
+  read or write and a kernel parameter keep `reject_dynamic_extent` (`TensorDynamicExtent`).
+  Run-time checks (the panics of R7) are emitted by lowering and the backends, not decided here.
+- *Narrowing* (R11, `check_as_shape` in `tensor_shape.rs`). `.as_shape::<[...]>()` takes an owned
+  receiver (`TensorAsShapeBorrowed` otherwise) of equal rank (`TensorAsShapeRank`), and its axes
+  are literals, extent parameters, `?` or `?B` (`TensorAsShapeEntry` for a splice or an extent
+  expression). A fresh name takes the receiver's extent at its axis and is in scope after the
+  expression, whatever the narrowing answers. The result is `Option<Tensor<T, [...]>>`.
 
 ### Traits
 **The derivable traits** (`derivable.rs`). The prelude declares `Copy`, `Clone`, `Debug` and
@@ -1160,11 +1198,11 @@ same check for return-position `impl Trait<Assoc = U>`.
   stretched across a wider one, a lower-rank operand supplying the innermost axes. A shape
   parameter's extent is never the axis that stretches (whether it is 1 is unknown until the
   instantiation) but is stretched into, since a literal 1 on the other side is known. A pair
-  that does not join is `TensorBroadcastMismatch`; only the five arithmetic operators and `@`
-  are defined (`InvalidBinaryOperator` otherwise); the element must have arithmetic
-  (`TensorElementNotArithmetic`); a `?` extent has no element count for the fresh result
-  (`TensorDynamicExtent`); and an owned operand is moved once the operands are known to
-  combine, so a rejected operator does not also report a use-after-move.
+  that does not join is `TensorBroadcastMismatch`, or `TensorDynamicAxisMismatch` when a dynamic
+  axis is the reason (`record_axis_join_failure`; see Dynamic shapes); only the five arithmetic
+  operators and `@` are defined (`InvalidBinaryOperator` otherwise); the element must have
+  arithmetic (`TensorElementNotArithmetic`); and an owned operand is moved once the operands are
+  known to combine, so a rejected operator does not also report a use-after-move.
   A scalar operand carries the element's own type: `tensor_element_expectation` types the
   right operand by the left tensor's element, and `scalar_broadcast_expectation` does the same
   in reverse for a literal written to the left of a tensor BINDING, which is the one place a
@@ -1181,10 +1219,11 @@ same check for return-position `impl Trait<Assoc = U>`.
   names. The axes in front are batch axes and go through `broadcast_shapes`, so a splice may
   stand for them (`[..S, M, K] @ [..S, K, N]`) but not for a matrix axis (`TensorSpliceRank`).
   Anything else (a rank below 2, a scalar operand, a disagreeing inner extent, disagreeing axis
-  NAMES on the contracted axis, batch axes that do not broadcast) is `TensorMatMulMismatch`. `ArrayLen` equality is what compares the inner axes, so `matmul<M, N, K>`
-  checks its repeated `K` once at the declaration rather than per instantiation. A `?` is rejected
-  on BOTH operand shapes rather than only the result's (`TensorDynamicExtent`), because the
-  contracted axis bounds the loop even though it appears in neither operand's result. Everything
+  NAMES on the contracted axis, batch axes that do not broadcast) is `TensorMatMulMismatch`.
+  `ArrayLen` equality is what compares the inner axes, so `matmul<M, N, K>` checks its repeated
+  `K` once at the declaration rather than per instantiation. A dynamic contracted axis joins only
+  the same name on the other operand (`TensorDynamicAxisMismatch`), because the contracted axis
+  bounds the loop even though it appears in neither operand's result. Everything
   after the join (the element-arithmetic check, the move recording) is shared with the
   element-wise operators. A user type reaches `@` through the `MatMul` operator trait instead.
 - **Compound assignment** (`Stmt::Assign` with `op: Some(_)`) implements the operator-trait
@@ -1503,9 +1542,17 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   expectation otherwise; neither is `TensorTypeNotInferable`. The six helpers are `zeros`,
   `ones`, `identity`, `random_normal`, `scalar`, and `from` (`UnknownTensorConstructor`
   otherwise), each with its own applicability rule reported as
-  `TensorConstructorNotApplicable`: `identity` is square and rank 2, `random_normal` draws only
-  into `f32`/`f64`, `scalar` is rank 0, and `from` takes the same nested literal the annotated
-  form coerces.
+  `TensorConstructorNotApplicable`: `identity` is square and rank 2 (`[N, N]` or `[?B, ?B]`, an
+  anonymous `?` never square), `random_normal` draws only into `f32`/`f64`, `scalar` is rank 0,
+  and `from` takes the same nested literal the annotated form coerces (static only, like a
+  literal). The four with open axes take `dims:`, one `u64` entry per open axis: a `?`, and a
+  dynamic name not yet in scope once however often it is written. A bound name takes no entry,
+  and a fresh one is in scope after the call. The entries are found by their array-literal form
+  (`split_dims_argument`), so the `dims:` label itself is `argument-binding`'s to bind, which
+  must seed `dims` for these constructors. `dims:` on a closed shape is
+  `TensorDimsWithoutOpenAxis`; a wrong count is `TensorDimsCount`. A constructor without a
+  turbofish whose expected type names a bound extent is `TensorCtorBoundNameInferred`, since
+  lowering receives that type with its names erased.
 - **Tensor shape manipulation, in `type_checkers/tensor_shape.rs`.** `.t()`,
   `.reshape([...])`, `.permute([...])`, and `.flatten()` / `.flatten(dims: [...])` reach
   `check_tensor_shape_method` from the builtin arm, matched on `recv` (not the referent) like
@@ -1517,7 +1564,10 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   (`TensorReshapeRepeatedInference`) and may not change the element count
   (`TensorReshapeElementCount`, `TensorReshapeIndivisible`); `.permute` names every axis
   exactly once (`TensorPermuteRank`, `TensorAxisRepeated`); `.flatten` merges an ADJACENT run
-  (`TensorFlattenNotAdjacent`) and merges everything when given no argument. An unknown
+  (`TensorFlattenNotAdjacent`) and merges everything when given no argument. On a dynamic
+  receiver the count is left to run time: an entry naming a dynamic name in scope is that result
+  axis (`?B`), a `-1` that the counts cannot divide out is an anonymous `?`, and a merged run
+  holding a dynamic axis is `?`. An unknown
   dimension name is `UnknownTensorAxisName`, which lists the names the shape does declare.
   `.t()` and `.permute` carry each axis's name along; `.reshape` and a merged `.flatten` axis
   are unnamed, a new extent not being the axis the old name documented. A `Param` extent has
@@ -1538,9 +1588,8 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   no rounding rule in the specification (`TensorReduceMeanNotFloat`); a reduced run of zero
   elements has no value to produce, `.max()` least of all, so the whole family reports
   `TensorReduceEmpty` rather than each inventing an identity. Every extent must be a number
-  here (`TensorShapeCastSymbolicExtent`, `TensorDynamicExtent`): the run length decides
-  whether the reduction has a value, and the backend walks the buffer at strides the shape
-  supplies. The `axis:` label is bound by the `argument-binding` slice's seeded builtin
+  here: an extent parameter or a splice is reduced per instance, and a dynamic axis is reduced at
+  run time, where its run length decides whether the reduction has a value. The `axis:` label is bound by the `argument-binding` slice's seeded builtin
   signatures.
 - **Tensor order-based selections, in `type_checkers/tensor_sort.rs`.** `.sort()`,
   `.argsort()` and `.topk()` reach `check_tensor_sort` from the builtin arm, matched on the
@@ -1555,9 +1604,10 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   before any element exists (`TensorSortArgNotConstant`). The element must be an integer or a
   float, half precision included (`TensorSortElementType`); a rank-0 receiver has no axis to order
   (`TensorSortRankZero`); an empty axis has no ordering (`TensorSortEmpty`); and `k` must lie
-  in `1..=extent` (`TensorTopKOutOfRange`). Every extent must be a number here
-  (`TensorShapeCastSymbolicExtent`, `TensorDynamicExtent`), because the result's shape and
-  the backend's strides are both built from it.
+  in `1..=extent` (`TensorTopKOutOfRange`, `TensorTopKZero` for 0). A dynamic axis is ordered at
+  run time and `k` past it is checked there; an extent parameter or a splice must be a number
+  here (`TensorShapeCastSymbolicExtent`), because the result's shape and the backend's strides
+  are built from it.
 - **Functional traversals, in `type_checkers/tensor_apply.rs`.** `.map(f)`,
   `.zip(other, f)`, and `.reduce(init, f)` reach `check_tensor_apply` from
   `resolve_builtin_method`, matched on the REFERENT for the reason the reductions are: the
@@ -1621,7 +1671,9 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   on. Both bounds of a range must fold through `eval_literal_int`
   (`expressions/const_predicates.rs`) or it is `TensorSliceBoundNotConstant`: the extent is
   part of the result's TYPE, so it cannot wait for a value. A reversed or over-long range is
-  `TensorSliceOutOfRange`. Two spellings reach this: `Expr::TensorIndex` through
+  `TensorSliceOutOfRange`. A dynamic axis is indexed at run time: a position is bounds-checked
+  there and `..` keeps the axis and its name, a constant range takes its static extent, and a
+  reversed or stepped range on it is `TensorDynamicExtent`. Two spellings reach this: `Expr::TensorIndex` through
   `check_tensor_index_expr`, and the one-argument `Expr::Index` whose object is a tensor,
   routed from `check_index_expr` (`expressions/places.rs`) ahead of the sequence rules so a
   rank-1 tensor takes the ordinary bracket. Indexing READS its receiver (nothing is moved,

@@ -98,8 +98,19 @@ impl Lowerer {
 
     pub(super) fn register_struct(&mut self, def: &StructDef) -> Result<(), LoweringError> {
         let mut fields = Vec::with_capacity(def.fields.len());
+        let mut extents = Vec::new();
         for field in &def.fields {
             fields.push((field.name.name.clone(), self.resolve_type(&field.ty)?));
+            for (axis, name) in crate::extents::tensor_names(&field.ty) {
+                extents.push(crate::extents::FieldExtent {
+                    field: field.name.name.clone(),
+                    axis,
+                    name,
+                });
+            }
+        }
+        if !extents.is_empty() {
+            self.struct_extents.insert(def.name.name.clone(), extents);
         }
         self.structs.insert(def.name.name.clone(), fields);
         self.record_derives(def);
@@ -319,6 +330,11 @@ impl Lowerer {
             }
             let (params, ret) = self.method_signature(&self_ty, method)?;
             self.functions.insert(mangled.clone(), (params, ret));
+            if let Some(sig) =
+                crate::extents::ExtentSignature::of(&method.params, method.return_type.as_ref())
+            {
+                self.extent_sigs.insert(mangled.clone(), sig);
+            }
             if crate::autodiff::is_grad(&method.attributes) {
                 let names = method.params.iter().map(|p| p.name.name.clone()).collect();
                 let grad = crate::autodiff::GradParams::of(names, &method.attributes)?;
@@ -444,6 +460,11 @@ impl Lowerer {
         }
         let ret = self.declared_return_type(func)?;
         self.functions.insert(func.name.name.clone(), (params, ret));
+        if let Some(sig) =
+            crate::extents::ExtentSignature::of(&func.params, func.return_type.as_ref())
+        {
+            self.extent_sigs.insert(func.name.name.clone(), sig);
+        }
         if crate::autodiff::is_grad(&func.attributes) {
             let grad = crate::autodiff::GradParams::of(crate::param_names(func), &func.attributes)?;
             self.grad_params.insert(func.name.name.clone(), grad);

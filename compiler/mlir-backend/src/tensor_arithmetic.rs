@@ -1,14 +1,14 @@
 use crate::{
     errors::MlirError,
     guards::{At, Element, Guard, Lowering, MAX_SITES, Overflow, Side},
-    lower::map_type,
+    lower::{dynamic_extent, map_type},
     schedule,
     tensor_apply::build_traversal,
     tensor_compound::build_compound,
     tensor_einsum::build_einsum,
     tensor_layout::{build_permute, build_slice, linalg_index},
     tensor_math::build_math,
-    tensor_reduce::build_reduce,
+    tensor_reduce::{append, build_reduce, index_constant},
     tensor_sort::build_sort,
 };
 
@@ -18,9 +18,10 @@ use melior::{
     dialect::{arith, func},
     ir::{
         Attribute, Block, BlockLike, Identifier, Location, Operation, Region, RegionLike, Type,
-        Value,
+        TypeLike, Value, ValueLike,
         attribute::{DenseI32ArrayAttribute, FloatAttribute, IntegerAttribute},
         operation::OperationBuilder,
+        r#type::RankedTensorType,
     },
 };
 use neuro_hir::{HirExpr, HirExprKind, HirFunction, HirSortKind, HirStmt, HirType};
@@ -389,7 +390,13 @@ fn build_elementwise<'c, 'a>(
     let Some(rhs) = build_expression(context, location, block, right, scope, lowering)? else {
         return Ok(None);
     };
-    let Some(sizes) = dynamic_sizes(context, location, block, result_shape, &[lhs, rhs], &axes)?
+    let Some(extents) = result_extents(
+        context,
+        location,
+        block,
+        result_shape,
+        &[(lhs, &axes[0]), (rhs, &axes[1])],
+    )?
     else {
         return Ok(None);
     };
@@ -399,7 +406,11 @@ fn build_elementwise<'c, 'a>(
     let rank = result_shape.len();
 
     let destination = block
-        .append_operation(empty_tensor(location, tensor_type, &sizes)?)
+        .append_operation(empty_tensor(
+            location,
+            tensor_type,
+            &dynamic_sizes(&extents),
+        )?)
         .result(0)?
         .into();
 
@@ -410,7 +421,7 @@ fn build_elementwise<'c, 'a>(
     body.append_block(scalar_body(
         context,
         location,
-        (element_type, result_shape),
+        (element_type, &extents),
         lowering,
         (*op, kind),
         expression.span.start,
@@ -463,9 +474,6 @@ fn build_matmul<'c, 'a>(
     let Some(zero) = zero_attribute(context, element, map_type(context, element)?) else {
         return Ok(None);
     };
-    // Every extent must be static here. The destination's are what `tensor.empty` is
-    // sized with, and the contracted one bounds the reduction; a `?` supplies none of
-    // them, and a `tensor.dim` cannot recover an axis the result does not have.
     let Some((left_axes, right_axes, contracted)) = contraction_axes(left, right, result_shape)
     else {
         return Ok(None);
@@ -501,8 +509,24 @@ fn build_matmul<'c, 'a>(
     let element_type = map_type(context, element)?;
     let rank = result_shape.len();
 
+    // A dynamic result axis is read off whichever operand walks it. The contracted axis needs
+    // no size: `linalg` takes its trip count from the operands, which carry it.
+    let Some(extents) = result_extents(
+        context,
+        location,
+        block,
+        result_shape,
+        &[(lhs, &left_axes), (rhs, &right_axes)],
+    )?
+    else {
+        return Ok(None);
+    };
     let empty = block
-        .append_operation(empty_tensor(location, tensor_type, &[])?)
+        .append_operation(empty_tensor(
+            location,
+            tensor_type,
+            &dynamic_sizes(&extents),
+        )?)
         .result(0)?
         .into();
     let identity = block
@@ -556,13 +580,10 @@ fn build_matmul<'c, 'a>(
         tensor_type,
         body,
     )?;
-    if lowering.checks() == checks {
-        let extents: Vec<u64> = result_shape
-            .iter()
-            .flatten()
-            .chain([&contracted])
-            .map(|&extent| extent as u64)
-            .collect();
+    // The schedule's blocks divide static extents, so a dynamic contraction keeps the naive nest.
+    if let Some(extents) = static_loops(result_shape.iter().chain([&contracted]))
+        && lowering.checks() == checks
+    {
         schedule::tag(
             context,
             &mut contraction,
@@ -581,10 +602,11 @@ fn build_matmul<'c, 'a>(
     }
 }
 
-/// How each operand of a static `[.., M, K] @ [.., K, N] -> [.., M, N]` is read over the
-/// index space `(batch.., row, column, contracted)`, and the contracted extent. `None`
-/// where the shapes are not that product: an operand below rank 2, the contracted axes
-/// disagreeing, a batch axis that neither matches nor stretches, or a `?` anywhere.
+/// How each operand of a `[.., M, K] @ [.., K, N] -> [.., M, N]` is read over the index space
+/// `(batch.., row, column, contracted)`, and the contracted extent (`None` when it is dynamic).
+/// `None` where the shapes are not that product: an operand below rank 2, the contracted axes
+/// disagreeing, or a batch axis that neither matches nor stretches. A `?` axis matches only the
+/// same `?` axis, which the frontend has already required.
 ///
 /// The frontend has already agreed all of that; it is re-derived here because a stage
 /// carries the rule it needs over the shared type rather than importing a sibling's.
@@ -592,16 +614,13 @@ fn contraction_axes(
     left: &HirExpr,
     right: &HirExpr,
     result: &[Option<usize>],
-) -> Option<(OperandAxes, OperandAxes, usize)> {
+) -> Option<(OperandAxes, OperandAxes, Option<usize>)> {
     let (_, left_shape) = tensor_parts(&left.ty)?;
     let (_, right_shape) = tensor_parts(&right.ty)?;
     let (result_batch, [rows, columns]) = result.split_last_chunk::<2>()?;
     let (left_batch, [left_rows, inner]) = left_shape.split_last_chunk::<2>()?;
     let (right_batch, [contracted, right_columns]) = right_shape.split_last_chunk::<2>()?;
     if left_rows != rows || right_columns != columns || inner != contracted {
-        return None;
-    }
-    if result.iter().chain([contracted]).any(Option::is_none) {
         return None;
     }
     let batch = result_batch.len();
@@ -624,7 +643,14 @@ fn contraction_axes(
     left_axes.extend([Some(row), Some(reduced)]);
     let mut right_axes = batch_axes(right_batch)?;
     right_axes.extend([Some(reduced), Some(column)]);
-    Some((Some(left_axes), Some(right_axes), (*contracted)?))
+    Some((Some(left_axes), Some(right_axes), *contracted))
+}
+
+/// The static extents of `extents`, or `None` as soon as one is dynamic.
+fn static_loops<'a>(extents: impl Iterator<Item = &'a Option<usize>>) -> Option<Vec<u64>> {
+    extents
+        .map(|extent| extent.map(|extent| extent as u64))
+        .collect()
 }
 
 /// The additive identity of `element`, as the attribute an `arith.constant` carries.
@@ -737,27 +763,69 @@ pub(crate) fn broadcast_axes(
         .map(Some)
 }
 
-/// One `index` value per dynamic result axis, sizing the `tensor.empty` the
-/// result is written into. `None` where no operand walks such an axis, leaving
-/// its extent unknowable at the destination.
-fn dynamic_sizes<'c, 'a>(
+/// One axis's extent inside a body: a constant, or the `index` a dynamic axis is read as off an
+/// operand. A destination's dynamic axes are sized from these, and a dynamic axis's run
+/// positions are computed from them.
+#[derive(Clone, Copy)]
+pub(crate) enum Extent<'c, 'a> {
+    Static(usize),
+    Dynamic(Value<'c, 'a>),
+}
+
+impl<'c, 'a> Extent<'c, 'a> {
+    /// The extent as an `index`: a constant appended to `block` when it is static.
+    pub(crate) fn index<'b>(
+        self,
+        context: &'c Context,
+        location: Location<'c>,
+        block: &'b Block<'c>,
+    ) -> Result<Value<'c, 'b>, MlirError>
+    where
+        'a: 'b,
+    {
+        match self {
+            Extent::Static(extent) => index_constant(context, location, block, extent),
+            Extent::Dynamic(value) => Ok(value),
+        }
+    }
+}
+
+/// `a * b`, folded at compile time when both are static.
+pub(crate) fn multiply<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    (a, b): (Extent<'c, 'a>, Extent<'c, 'a>),
+) -> Result<Extent<'c, 'a>, MlirError> {
+    match (a, b) {
+        (Extent::Static(a), Extent::Static(b)) => Ok(Extent::Static(a * b)),
+        (a, b) => {
+            let a = a.index(context, location, block)?;
+            let b = b.index(context, location, block)?;
+            Ok(Extent::Dynamic(append(block, arith::muli(a, b, location))?))
+        }
+    }
+}
+
+/// The extent of each axis of a result of shape `result`: a static axis as it is, and a
+/// dynamic one read off the first operand that walks it, at that operand's own position for
+/// it. `walks` pairs each operand with how it is read over the result's index space. `None`
+/// where a dynamic axis no operand walks, which the frontend's shape rules rule out: a
+/// stretched operand is size 1 there and says nothing about the result.
+pub(crate) fn result_extents<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
     result: &[Option<usize>],
-    values: &[Value<'c, 'a>; 2],
-    axes: &[OperandAxes],
-) -> Result<Option<Vec<Value<'c, 'a>>>, MlirError> {
-    let index_type = Type::index(context);
-    let mut sizes = Vec::new();
-
+    walks: &[(Value<'c, 'a>, &OperandAxes)],
+) -> Result<Option<Vec<Extent<'c, 'a>>>, MlirError> {
+    let mut extents = Vec::with_capacity(result.len());
     for (axis, extent) in result.iter().enumerate() {
-        if extent.is_some() {
+        if let Some(extent) = extent {
+            extents.push(Extent::Static(*extent));
             continue;
         }
-        // Only an operand that walks the axis carries its extent; a stretched
-        // operand is size 1 there and says nothing about the result.
-        let Some((value, position)) = values.iter().zip(axes).find_map(|(value, axes)| {
+        let Some((value, position)) = walks.iter().find_map(|(value, axes)| {
             let position = axes
                 .as_ref()?
                 .iter()
@@ -766,24 +834,33 @@ fn dynamic_sizes<'c, 'a>(
         }) else {
             return Ok(None);
         };
-
-        let position = block
-            .append_operation(arith::constant(
-                context,
-                IntegerAttribute::new(index_type, position as i64).into(),
-                location,
-            ))
-            .result(0)?
-            .into();
-        sizes.push(
-            block
-                .append_operation(dim_op(location, value, position, index_type)?)
-                .result(0)?
-                .into(),
-        );
+        extents.push(Extent::Dynamic(dim_of(
+            context, location, block, value, position,
+        )?));
     }
+    Ok(Some(extents))
+}
 
-    Ok(Some(sizes))
+/// The `index` sizes of a destination of `extents`: one per dynamic axis, in axis order, which
+/// is what `tensor.empty` takes.
+pub(crate) fn dynamic_sizes<'c, 'a>(extents: &[Extent<'c, 'a>]) -> Vec<Value<'c, 'a>> {
+    extents
+        .iter()
+        .filter_map(|extent| match extent {
+            Extent::Dynamic(size) => Some(*size),
+            Extent::Static(_) => None,
+        })
+        .collect()
+}
+
+/// The tensor or memref type of `element` over `shape`, a `None` axis being MLIR's dynamic
+/// extent.
+pub(crate) fn shape_type<'c>(element: Type<'c>, shape: &[Option<usize>]) -> Type<'c> {
+    let extents: Vec<u64> = shape
+        .iter()
+        .map(|extent| extent.map_or_else(dynamic_extent, |extent| extent as u64))
+        .collect();
+    RankedTensorType::new(&extents, element, None).into()
 }
 
 /// What one `linalg.generic` needs beyond its types: the inputs it reads, the
@@ -838,7 +915,7 @@ pub(crate) fn generic_op<'c>(
 fn scalar_body<'c>(
     context: &'c Context,
     location: Location<'c>,
-    (element, extents): (Type<'c>, &[Option<usize>]),
+    (element, extents): (Type<'c>, &[Extent<'c, '_>]),
     lowering: &Lowering<'c, '_>,
     (op, kind): (BinaryOp, Element),
     offset: usize,
@@ -851,7 +928,7 @@ fn scalar_body<'c>(
     // decides which one the host gives.
     let position = match (op, kind) {
         (BinaryOp::Divide | BinaryOp::Modulo, Element::Signed(_) | Element::Unsigned(_)) => {
-            row_major(context, location, &block, extents)?
+            Some(row_major(context, location, &block, extents)?)
         }
         _ => None,
     };
@@ -870,48 +947,22 @@ fn scalar_body<'c>(
 }
 
 /// The row-major position of the element a `linalg.generic` over `extents` is computing,
-/// as an `index`. `None` where an extent is `?`, which no linked body has.
+/// as an `index`. A dynamic extent is the run-time value its operand carries, so the position
+/// is the one the host's loops reach at run time.
 pub(crate) fn row_major<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
-    extents: &[Option<usize>],
-) -> Result<Option<Value<'c, 'a>>, MlirError> {
-    let Some(extents) = extents.iter().copied().collect::<Option<Vec<usize>>>() else {
-        return Ok(None);
-    };
-    let index = Type::index(context);
-    let mut position: Value = block
-        .append_operation(arith::constant(
-            context,
-            IntegerAttribute::new(index, 0).into(),
-            location,
-        ))
-        .result(0)?
-        .into();
+    extents: &[Extent<'c, '_>],
+) -> Result<Value<'c, 'a>, MlirError> {
+    let mut position = index_constant(context, location, block, 0)?;
     for (dimension, extent) in extents.iter().enumerate() {
-        let extent = block
-            .append_operation(arith::constant(
-                context,
-                IntegerAttribute::new(index, *extent as i64).into(),
-                location,
-            ))
-            .result(0)?
-            .into();
-        let at = block
-            .append_operation(linalg_index(context, location, dimension)?)
-            .result(0)?
-            .into();
-        let scaled = block
-            .append_operation(arith::muli(position, extent, location))
-            .result(0)?
-            .into();
-        position = block
-            .append_operation(arith::addi(scaled, at, location))
-            .result(0)?
-            .into();
+        let extent = extent.index(context, location, block)?;
+        let at = append(block, linalg_index(context, location, dimension)?)?;
+        let scaled = append(block, arith::muli(position, extent, location))?;
+        position = append(block, arith::addi(scaled, at, location))?;
     }
-    Ok(Some(position))
+    Ok(position)
 }
 
 /// Whether `element` is a half-precision float, which every operation but the element-wise
@@ -963,11 +1014,19 @@ pub(crate) fn cast_elements<'c, 'a>(
     );
     let region = Region::new();
     region.append_block(body);
+    let own: OperandAxes = Some((0..rank).map(Some).collect());
+    // The source has the target's shape, so its own dimensions size the destination.
+    let Some(extents) = result_extents(context, location, block, shape, &[(source, &own)])? else {
+        return Err(MlirError::ModuleVerificationFailed);
+    };
     let destination = block
-        .append_operation(empty_tensor(location, tensor_type, &[])?)
+        .append_operation(empty_tensor(
+            location,
+            tensor_type,
+            &dynamic_sizes(&extents),
+        )?)
         .result(0)?
         .into();
-    let own: OperandAxes = Some((0..rank).map(Some).collect());
     Ok(block
         .append_operation(generic_op(
             context,
@@ -998,17 +1057,27 @@ pub(crate) fn empty_tensor<'c>(
         .build()?)
 }
 
-/// The run-time extent of one axis of an operand, read back off the value itself.
-fn dim_op<'c>(
+/// The run-time extent of `axis` of `value`, a tensor or a memref, read back off the value.
+fn dim_of<'c, 'a>(
+    context: &'c Context,
     location: Location<'c>,
-    tensor: Value<'c, '_>,
-    axis: Value<'c, '_>,
-    index: Type<'c>,
-) -> Result<Operation<'c>, MlirError> {
-    Ok(OperationBuilder::new("tensor.dim", location)
-        .add_operands(&[tensor, axis])
-        .add_results(&[index])
-        .build()?)
+    block: &'a Block<'c>,
+    value: Value<'c, '_>,
+    axis: usize,
+) -> Result<Value<'c, 'a>, MlirError> {
+    let index = Type::index(context);
+    let position = index_constant(context, location, block, axis)?;
+    let name = match value.r#type().is_mem_ref() {
+        true => "memref.dim",
+        false => "tensor.dim",
+    };
+    append(
+        block,
+        OperationBuilder::new(name, location)
+            .add_operands(&[value, position])
+            .add_results(&[index])
+            .build()?,
+    )
 }
 
 /// How `op` computes one element of `element`, or `None` where the language gives tensors
@@ -1108,7 +1177,10 @@ pub(crate) fn parse_attribute<'c>(
 
 #[cfg(test)]
 mod tests {
-    use crate::lower::lower_program;
+    use crate::{
+        bridge::tests::{assert_host_only_on_gpu, assert_launches_on_gpu, assert_lowered, mlir_of},
+        lower::lower_program,
+    };
 
     use neuro_hir::{
         AxisNames, HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirProgram, HirStmt,
@@ -1150,6 +1222,7 @@ mod tests {
     fn program_over(ty: HirType, body: Vec<HirStmt>) -> HirProgram {
         HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "f".to_string(),
                 params: vec![
                     HirParam {
@@ -1165,7 +1238,7 @@ mod tests {
                 ],
                 return_type: ty,
                 body,
-                target: neuro_hir::HirTarget::Host,
+                target: neuro_hir::HirTarget::FollowsOperands,
                 span: span(),
             })],
         }
@@ -1202,6 +1275,7 @@ mod tests {
 
         HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "f".to_string(),
                 params: vec![
                     HirParam {
@@ -1220,7 +1294,7 @@ mod tests {
                     value: Some(sum),
                     span: span(),
                 }],
-                target: neuro_hir::HirTarget::Host,
+                target: neuro_hir::HirTarget::FollowsOperands,
                 span: span(),
             })],
         }
@@ -1500,6 +1574,7 @@ mod tests {
 
         HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "f".to_string(),
                 params: vec![
                     HirParam {
@@ -1518,7 +1593,7 @@ mod tests {
                     value: Some(product),
                     span: span(),
                 }],
-                target: neuro_hir::HirTarget::Host,
+                target: neuro_hir::HirTarget::FollowsOperands,
                 span: span(),
             })],
         }
@@ -1639,9 +1714,10 @@ mod tests {
         );
     }
 
-    /// `@` contracts an axis it must know the length of, and a `?` supplies none.
+    /// `@` over a dynamic row axis: the destination takes the run-time row count from the left
+    /// operand, and the contraction is the static one.
     #[test]
-    fn a_dynamic_extent_leaves_a_matrix_product_a_declaration() {
+    fn a_dynamic_row_axis_sizes_a_matrix_product() {
         let left = dynamic_rows(3);
         let right = tensor(HirType::F32, &[3, 4]);
         let result = HirType::Tensor {
@@ -1649,14 +1725,154 @@ mod tests {
             shape: vec![None, Some(4)],
             names: AxisNames(vec![None, None]),
         };
+        let program = binary_over(BinaryOp::MatMul, left, right, result);
+        let ir = mlir_of(&program);
+
+        assert!(
+            ir.contains("tensor.dim"),
+            "the rows come from the left operand:\n{ir}"
+        );
+        assert!(ir.contains(r#""reduction""#), "{ir}");
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
+    }
+
+    /// A dynamic contracted axis has no size of its own in the destination, which `linalg` takes
+    /// from the operands, and the schedule keeps the naive nest rather than tiling it.
+    #[test]
+    fn a_dynamic_contracted_axis_is_the_operands_trip_count() {
+        let left = HirType::Tensor {
+            element: Box::new(HirType::F32),
+            shape: vec![Some(2), None],
+            names: AxisNames::default(),
+        };
+        let right = dynamic_rows(4);
+        let result = tensor(HirType::F32, &[2, 4]);
+        let program = binary_over(BinaryOp::MatMul, left, right, result);
+
+        let ir = mlir_of(&program);
+        assert!(ir.contains(r#""reduction""#), "{ir}");
+        assert!(
+            !ir.contains("neuro.tiles"),
+            "a dynamic contraction is not tiled:\n{ir}"
+        );
+        assert_lowered(&program);
+        assert_launches_on_gpu(&program);
+    }
+
+    /// A dynamic batch axis leads the index space and is walked by both operands, as a static
+    /// one is, so the contraction runs over every batch element.
+    #[test]
+    fn a_dynamic_batch_axis_leads_the_index_space() {
+        let left = HirType::Tensor {
+            element: Box::new(HirType::F32),
+            shape: vec![None, Some(2), Some(3)],
+            names: AxisNames::default(),
+        };
+        let right = HirType::Tensor {
+            element: Box::new(HirType::F32),
+            shape: vec![None, Some(3), Some(4)],
+            names: AxisNames::default(),
+        };
+        let result = HirType::Tensor {
+            element: Box::new(HirType::F32),
+            shape: vec![None, Some(2), Some(4)],
+            names: AxisNames::default(),
+        };
+        let program = binary_over(BinaryOp::MatMul, left, right, result);
+
+        let ir = mlir_of(&program);
+        assert!(
+            ir.contains("affine_map<(d0, d1, d2, d3) -> (d0, d1, d3)>")
+                && ir.contains("affine_map<(d0, d1, d2, d3) -> (d0, d3, d2)>"),
+            "{ir}"
+        );
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
+    }
+
+    /// An element-wise operation over a dynamic axis sizes its destination from the operand that
+    /// walks it, and a lower-rank operand still aligns at the trailing axis.
+    #[test]
+    fn a_dynamic_broadcast_extends_rank_without_stretching_the_dynamic_axis() {
+        let matrix = dynamic_rows(3);
+        let row = tensor(HirType::F32, &[3]);
+        let program = returns_sum_over(matrix.clone(), row, matrix);
+
+        let ir = mlir_of(&program);
+        assert!(
+            ir.contains("affine_map<(d0, d1) -> (d1)>") && ir.contains("tensor.dim"),
+            "{ir}"
+        );
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
+    }
+
+    #[test]
+    fn a_dynamic_scalar_broadcast_lowers() {
+        let vector = HirType::Tensor {
+            element: Box::new(HirType::F32),
+            shape: vec![None],
+            names: AxisNames::default(),
+        };
+        let program = returns_sum_over(vector.clone(), HirType::F32, vector);
+
+        let ir = mlir_of(&program);
+        assert!(ir.contains("affine_map<(d0) -> ()>"), "{ir}");
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
+    }
+
+    /// An integer division over a dynamic axis reports its element's position, which is a
+    /// run-time row-major index: the extents it multiplies by are read off the operands.
+    #[test]
+    fn a_dynamic_integer_division_takes_its_position_from_the_run_time_extents() {
+        let ty = HirType::Tensor {
+            element: Box::new(HirType::I32),
+            shape: vec![None, Some(3)],
+            names: AxisNames::default(),
+        };
+        let program = returns_binary_over(BinaryOp::Divide, ty);
+
+        let ir = mlir_of(&program);
+        assert!(
+            ir.contains("memref<1xi64>")
+                && ir.contains("linalg.index")
+                && ir.contains("tensor.dim"),
+            "a checked division reads its run-time position:\n{ir}"
+        );
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
+    }
+
+    /// `returns_binary` over a tensor of `ty`, which may be dynamic.
+    fn returns_binary_over(op: BinaryOp, ty: HirType) -> HirProgram {
+        let sum = binary(
+            op,
+            variable("a", ty.clone()),
+            variable("b", ty.clone()),
+            ty.clone(),
+        );
+        program_over(
+            ty,
+            vec![HirStmt::Return {
+                value: Some(sum),
+                span: span(),
+            }],
+        )
+    }
+
+    /// `func f(a: L, b: R) -> T { return a @ b }` over possibly dynamic operands.
+    fn binary_over(op: BinaryOp, left: HirType, right: HirType, result: HirType) -> HirProgram {
         let product = binary(
-            BinaryOp::MatMul,
+            op,
             variable("a", left.clone()),
             variable("b", right.clone()),
             result.clone(),
         );
-        let program = HirProgram {
+        HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "f".to_string(),
                 params: vec![
                     HirParam {
@@ -1675,16 +1891,10 @@ mod tests {
                     value: Some(product),
                     span: span(),
                 }],
-                target: neuro_hir::HirTarget::Host,
+                target: neuro_hir::HirTarget::FollowsOperands,
                 span: span(),
             })],
-        };
-        let ir = lower_program(&program).expect("the program should still lower");
-
-        assert!(
-            !ir.contains(r#""reduction""#),
-            "a dynamic extent has no contraction to emit:\n{ir}"
-        );
+        }
     }
 
     #[test]
@@ -1692,6 +1902,7 @@ mod tests {
         // Scalar arithmetic is permanently the inkwell backend's, per 2C's decision.
         let program = HirProgram {
             items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
                 name: "add".to_string(),
                 params: vec![
                     HirParam {
@@ -1715,7 +1926,7 @@ mod tests {
                     )),
                     span: span(),
                 }],
-                target: neuro_hir::HirTarget::Host,
+                target: neuro_hir::HirTarget::FollowsOperands,
                 span: span(),
             })],
         };

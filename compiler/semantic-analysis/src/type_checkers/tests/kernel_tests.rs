@@ -391,8 +391,8 @@ fn flat_takes_a_u64_position_of_a_static_shape() {
 ";
     let errors = semantic_errors(src);
     assert!(
-        matches!(errors.as_slice(), [TypeError::TensorDynamicExtent { operation, .. }] if operation == "`.flat`"),
-        "got {errors:?}"
+        errors.is_empty(),
+        "`.flat` reads a dynamic axis at run time; got {errors:?}"
     );
     let errors =
         semantic_errors("func f(t: &Tensor<f32, [2, 3]>, i: i32) -> f32 {\n    t.flat(i)\n}\n");

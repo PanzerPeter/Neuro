@@ -16,8 +16,8 @@ use crate::{
     guards::Guard,
     lower::map_type,
     tensor_arithmetic::{
-        Generic, OperandAxes, empty_tensor, fill_block, indexing_maps, iterator_types, read_type,
-        tensor_parts,
+        Generic, OperandAxes, dynamic_sizes, empty_tensor, fill_block, indexing_maps,
+        iterator_types, read_type, result_extents, tensor_parts,
     },
     tensor_reduce::{append, apply, yield_value},
 };
@@ -76,9 +76,6 @@ pub(crate) fn build_traversal<'c>(
     let Some((_, shape)) = tensor_parts(&receiver.ty) else {
         return Ok(None);
     };
-    if shape.iter().any(Option::is_none) {
-        return Ok(None);
-    }
 
     let mut slots = Vec::with_capacity(function.params.len());
     for param in &function.params {
@@ -126,7 +123,19 @@ pub(crate) fn build_traversal<'c>(
 
     let rank = shape.len();
     let result_type = map_type(context, &body.ty)?;
-    let empty = append(&block, empty_tensor(location, result_type, &[])?)?;
+    // The result has the receiver's extents, which a dynamic axis reads off the receiver.
+    let Some((_, result_shape)) = tensor_parts(&body.ty) else {
+        return Ok(None);
+    };
+    let own: OperandAxes = Some((0..rank).map(Some).collect());
+    let Some(extents) = result_extents(context, location, &block, result_shape, &[(source, &own)])?
+    else {
+        return Ok(None);
+    };
+    let empty = append(
+        &block,
+        empty_tensor(location, result_type, &dynamic_sizes(&extents))?,
+    )?;
     let result = match (kind, other) {
         (HirTensorApply::Reduce, Some(seed)) => {
             let space = rank + 1;
@@ -176,7 +185,6 @@ pub(crate) fn build_traversal<'c>(
                 inputs.push(other);
                 types.push((element_type(context, &operand.ty)?, location));
             }
-            let own: OperandAxes = Some((0..rank).map(Some).collect());
             let maps = vec![&own; inputs.len() + 1];
             types.push((target.answer, location));
             let step = Block::new(&types);
@@ -248,5 +256,72 @@ fn element_type<'c>(context: &'c Context, tensor: &HirType) -> Result<Type<'c>, 
     match tensor_parts(tensor) {
         Some((element, _)) => map_type(context, element),
         None => Err(MlirError::ModuleVerificationFailed),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bridge::tests::{assert_lowered, mlir_of, operand, tensor_of};
+
+    use neuro_hir::{
+        HirExpr, HirExprKind, HirFunction, HirItem, HirParam, HirProgram, HirStmt, HirTarget,
+        HirTensorApply, HirType,
+    };
+    use shared_types::Span;
+
+    /// `func f(a: Tensor<f32, [?]>, g: fn(f32) -> f32) -> Tensor<f32, [?]> { return a.map(g) }`
+    fn map_over_dynamic() -> HirProgram {
+        let span = Span::new(0, 1);
+        let tensor = tensor_of(HirType::F32, vec![None]);
+        let callee = HirType::Function {
+            params: vec![HirType::F32],
+            ret: Box::new(HirType::F32),
+        };
+        let apply = HirExpr::new(
+            HirExprKind::TensorApply {
+                kind: HirTensorApply::Map,
+                receiver: Box::new(operand("a", &tensor)),
+                operand: None,
+                callee: Box::new(operand("g", &callee)),
+            },
+            tensor.clone(),
+            span,
+        );
+        HirProgram {
+            items: vec![HirItem::Function(HirFunction {
+                result_extents: Vec::new(),
+                name: "f".to_string(),
+                params: vec![
+                    HirParam {
+                        name: "a".to_string(),
+                        ty: tensor.clone(),
+                        span,
+                    },
+                    HirParam {
+                        name: "g".to_string(),
+                        ty: callee,
+                        span,
+                    },
+                ],
+                return_type: tensor,
+                body: vec![HirStmt::Expr(apply)],
+                target: HirTarget::FollowsOperands,
+                span,
+            })],
+        }
+    }
+
+    /// A `.map` over a dynamic tensor sizes its result from the receiver and calls the function
+    /// once per element, with nothing above the `llvm` dialect left.
+    #[test]
+    fn a_dynamic_map_sizes_its_result_from_the_receiver() {
+        let program = map_over_dynamic();
+        let mlir = mlir_of(&program);
+        assert!(
+            mlir.contains("tensor.dim") && mlir.contains("linalg.generic"),
+            "{mlir}"
+        );
+        let ir = assert_lowered(&program);
+        assert!(ir.contains("call"), "the element function is called:\n{ir}");
     }
 }

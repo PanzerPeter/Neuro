@@ -211,6 +211,7 @@ integration/gpu/gpu_layer.nr                        3  gpu
 
 # --- integration/tensors: tensor surface beyond the feature examples --------
 integration/tensors/batched_heads.nr                80
+integration/tensors/dynamic_batches.nr              53
 integration/tensors/head_split.nr                   10
 integration/tensors/mixed_precision.nr              6
 integration/tensors/model_shapes.nr                 232

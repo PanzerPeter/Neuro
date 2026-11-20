@@ -149,7 +149,7 @@ func main() -> i32 {
     ));
     assert!(matches!(
         binding_init(body, "e").kind,
-        HirExprKind::TensorIdentity
+        HirExprKind::TensorIdentity { .. }
     ));
     assert!(matches!(
         binding_init(body, "r").kind,

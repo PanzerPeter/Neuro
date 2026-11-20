@@ -114,6 +114,8 @@ pub(crate) struct StagedResult<'ctx> {
     /// The host buffer `written` is copied back into, or null when the result stays on
     /// the device.
     copy_back: PointerValue<'ctx>,
+    /// The byte length of the buffer, which a copy back moves in full.
+    bytes: IntValue<'ctx>,
 }
 
 impl<'ctx> CodegenContext<'ctx> {
@@ -182,10 +184,10 @@ impl<'ctx> CodegenContext<'ctx> {
         ))
     }
 
-    /// A device buffer for a `tensor_ty` tensor's elements, released only by its deleter.
+    /// A device buffer of `bytes` bytes for a tensor's elements, released only by its deleter.
     pub(crate) fn alloc_device_tensor_buffer(
         &mut self,
-        tensor_ty: &Type,
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
         self.require_gpu_runtime()?;
         let i64_type = self.context.i64_type();
@@ -193,17 +195,16 @@ impl<'ctx> CodegenContext<'ctx> {
             DEVICE_TENSOR_ALLOC_FN,
             self.ptr().fn_type(&[i64_type.into()], false),
         );
-        let bytes = self.dlpack_copy_length(tensor_ty)?;
         self.pointer_call(alloc, &[bytes.into()], "device.tensor")
     }
 
-    /// Copy a `tensor_ty` buffer at `host` to a new device buffer on GPU `index`, and
-    /// return it. The runtime checks `index` and waits for the copy, so `host` may be
-    /// released as soon as this returns.
+    /// Copy `bytes` bytes at `host` to a new device buffer on GPU `index`, and return it. The
+    /// runtime checks `index` and waits for the copy, so `host` may be released as soon as
+    /// this returns.
     pub(crate) fn device_upload(
         &mut self,
         host: PointerValue<'ctx>,
-        tensor_ty: &Type,
+        bytes: IntValue<'ctx>,
         index: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
         self.require_gpu_runtime()?;
@@ -219,7 +220,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 false,
             ),
         );
-        let bytes = self.dlpack_copy_length(tensor_ty)?;
         self.pointer_call(
             upload,
             &[host.into(), bytes.into(), index.into()],
@@ -227,16 +227,15 @@ impl<'ctx> CodegenContext<'ctx> {
         )
     }
 
-    /// Copy the `tensor_ty` elements at `buffer`, on GPU `index`, into `host`, once every
+    /// Copy the `bytes` bytes of elements at `buffer`, on GPU `index`, into `host`, once every
     /// kernel queued before it has written them.
     pub(crate) fn device_download(
         &mut self,
         host: PointerValue<'ctx>,
         buffer: PointerValue<'ctx>,
         index: IntValue<'ctx>,
-        tensor_ty: &Type,
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<()> {
-        let bytes = self.dlpack_copy_length(tensor_ty)?;
         self.device_copy(host, buffer, bytes, index)
     }
 
@@ -271,12 +270,12 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// A new buffer on GPU `index` holding the `tensor_ty` elements at `buffer`, which lives
-    /// there too.
+    /// A new buffer on GPU `index` holding the `bytes` bytes of elements at `buffer`, which
+    /// lives there too.
     pub(crate) fn device_clone(
         &mut self,
         buffer: PointerValue<'ctx>,
-        tensor_ty: &Type,
+        bytes: IntValue<'ctx>,
         index: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
         self.require_gpu_runtime()?;
@@ -291,7 +290,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 false,
             ),
         );
-        let bytes = self.dlpack_copy_length(tensor_ty)?;
         self.pointer_call(
             clone,
             &[buffer.into(), bytes.into(), index.into()],
@@ -299,13 +297,13 @@ impl<'ctx> CodegenContext<'ctx> {
         )
     }
 
-    /// The `tensor_ty` buffer at `buffer`, on GPU `from`, moved to GPU `to`: the same
-    /// buffer when they are one device, and otherwise a copy there, with `buffer` released.
-    /// The runtime checks `to` first.
+    /// The `bytes` bytes at `buffer`, on GPU `from`, moved to GPU `to`: the same buffer when
+    /// they are one device, and otherwise a copy there, with `buffer` released. The runtime
+    /// checks `to` first.
     pub(crate) fn device_move(
         &mut self,
         buffer: PointerValue<'ctx>,
-        tensor_ty: &Type,
+        bytes: IntValue<'ctx>,
         from: IntValue<'ctx>,
         to: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
@@ -323,7 +321,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 false,
             ),
         );
-        let bytes = self.dlpack_copy_length(tensor_ty)?;
         self.pointer_call(
             move_fn,
             &[buffer.into(), bytes.into(), from.into(), to.into()],
@@ -470,6 +467,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let function = self.staging_function()?;
         let on_host = self.dlpack_on_host(handle)?;
         let data = self.load_dlpack_data(handle)?;
+        let bytes = self.dlpack_copy_length(handle, tensor_ty)?;
         let resident = self.current_block()?;
         let stage = self.context.append_basic_block(function, "device.stage");
         let staged = self.context.append_basic_block(function, "device.staged");
@@ -477,8 +475,8 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_conditional_branch(on_host, stage, staged)?;
 
         self.builder.position_at_end(stage);
-        let copy = self.device_scratch(tensor_ty)?;
-        self.build_device_copy(staging, copy, data, tensor_ty)?;
+        let copy = self.device_scratch(bytes)?;
+        self.build_device_copy(staging, copy, data, bytes)?;
         let copied = self.current_block()?;
         self.builder.build_unconditional_branch(staged)?;
 
@@ -503,6 +501,7 @@ impl<'ctx> CodegenContext<'ctx> {
             handle,
             written: operand,
             copy_back,
+            bytes,
         })
     }
 
@@ -514,23 +513,29 @@ impl<'ctx> CodegenContext<'ctx> {
         host: PointerValue<'ctx>,
         status_ty: &Type,
     ) -> CodegenResult<StagedResult<'ctx>> {
-        let word = self.device_scratch(status_ty)?;
-        self.build_device_copy(staging, word, host, status_ty)?;
+        // The status word is a static one-element tensor, so its size is a constant.
+        let bytes = self.element_run(status_ty, &[], 0)?.bytes;
+        let word = self.device_scratch(bytes)?;
+        self.build_device_copy(staging, word, host, bytes)?;
         staging.buffers.push(word);
         Ok(StagedResult {
             handle: host,
             written: word,
             copy_back: host,
+            bytes,
         })
     }
 
-    /// Where the kernels write a `tensor_ty` result. With any operand on the device the
-    /// result stays there too, in a device tensor of its own; otherwise it goes to scratch
-    /// and is copied back into a host tensor, so an all-host call is what it always was.
+    /// Where the kernels write a `tensor_ty` result of `bytes` bytes, whose dynamic axes have
+    /// the run-time extents `dims`. With any operand on the device the result stays there too,
+    /// in a device tensor of its own; otherwise it goes to scratch and is copied back into a
+    /// host tensor, so an all-host call is what it always was.
     pub(crate) fn stage_result(
         &mut self,
         staging: &mut DeviceStaging<'ctx>,
         tensor_ty: &Type,
+        dims: &[IntValue<'ctx>],
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<StagedResult<'ctx>> {
         let function = self.staging_function()?;
         let resident = self.context.append_basic_block(function, "device.result");
@@ -542,15 +547,15 @@ impl<'ctx> CodegenContext<'ctx> {
         // An operand on the device is what brought the call here, so `device` names it.
         self.builder.position_at_end(resident);
         let device_handle =
-            self.alloc_device_tensor(tensor_ty, "external.result", staging.device)?;
+            self.alloc_device_tensor(tensor_ty, "external.result", staging.device, dims, bytes)?;
         let device_data = self.load_dlpack_data(device_handle)?;
         let resident_end = self.current_block()?;
         self.builder.build_unconditional_branch(join)?;
 
         self.builder.position_at_end(returned);
-        let host_handle = self.alloc_dlpack_tensor(tensor_ty, "external.result")?;
+        let host_handle = self.alloc_dlpack_tensor(tensor_ty, "external.result", dims, bytes)?;
         let host_data = self.load_dlpack_data(host_handle)?;
-        let scratch = self.device_scratch(tensor_ty)?;
+        let scratch = self.device_scratch(bytes)?;
         let returned_end = self.current_block()?;
         self.builder.build_unconditional_branch(join)?;
 
@@ -577,6 +582,7 @@ impl<'ctx> CodegenContext<'ctx> {
             handle,
             written,
             copy_back,
+            bytes,
         })
     }
 
@@ -591,10 +597,10 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn close_device_staging(
         &mut self,
         staging: DeviceStaging<'ctx>,
-        results: &[(Type, StagedResult<'ctx>)],
+        results: &[StagedResult<'ctx>],
     ) -> CodegenResult<()> {
         let function = self.staging_function()?;
-        for (tensor_ty, result) in results {
+        for result in results {
             let copy = self.context.append_basic_block(function, "device.copy_out");
             let settle = self.context.append_basic_block(function, "device.settle");
             let returning = self
@@ -604,7 +610,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 .build_conditional_branch(returning, copy, settle)?;
 
             self.builder.position_at_end(copy);
-            self.build_device_copy(&staging, result.copy_back, result.written, tensor_ty)?;
+            self.build_device_copy(&staging, result.copy_back, result.written, result.bytes)?;
             self.builder.build_unconditional_branch(settle)?;
             self.builder.position_at_end(settle);
         }
@@ -624,17 +630,13 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// A device buffer sized for `tensor_ty` from the device arena, for one call.
-    fn device_scratch(&mut self, tensor_ty: &Type) -> CodegenResult<PointerValue<'ctx>> {
+    /// A device buffer of `bytes` bytes from the device arena, for one call.
+    fn device_scratch(&mut self, bytes: IntValue<'ctx>) -> CodegenResult<PointerValue<'ctx>> {
         // A zero-extent tensor still gets an address: the runtime answers a zero-byte
         // request with null, which the allocator would report as a failure.
-        let bytes = self.type_mapper.tensor_buffer_bytes(tensor_ty)?.max(1);
+        let bytes = self.at_least_one(bytes)?;
         let alloc = self.device_alloc_fn();
-        self.pointer_call(
-            alloc,
-            &[self.context.i64_type().const_int(bytes, false).into()],
-            "device.buffer",
-        )
+        self.pointer_call(alloc, &[bytes.into()], "device.buffer")
     }
 
     fn build_pointer_phi(
@@ -665,7 +667,7 @@ impl<'ctx> CodegenContext<'ctx> {
         staging: &DeviceStaging<'ctx>,
         dst: PointerValue<'ctx>,
         src: PointerValue<'ctx>,
-        tensor_ty: &Type,
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<()> {
         let ptr = self.ptr();
         let memcpy = self.extern_fn(
@@ -680,7 +682,6 @@ impl<'ctx> CodegenContext<'ctx> {
                 false,
             ),
         );
-        let bytes = self.dlpack_copy_length(tensor_ty)?;
         self.builder.build_call(
             memcpy,
             &[dst.into(), src.into(), bytes.into(), staging.stream.into()],

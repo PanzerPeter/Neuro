@@ -186,7 +186,7 @@ func main() -> i32 {
 }
 
 #[test]
-fn a_dynamic_axis_leaves_the_run_length_unknown() {
+fn a_dynamic_axis_reduces_at_run_time() {
     let errors = semantic_errors(
         r#"
 func total(t: Tensor<f32, [?, 4]>) -> f32 {
@@ -199,10 +199,8 @@ func main() -> i32 {
 "#,
     );
     assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::TensorDynamicExtent { .. })),
-        "a dynamic extent should be rejected; got {errors:?}"
+        errors.is_empty(),
+        "a reduction over a dynamic axis is a run-time loop; got {errors:?}"
     );
 }
 

@@ -236,6 +236,7 @@ impl Emitter {
         let kind = match ty {
             HirType::Tensor { element, .. } => HirExprKind::TensorFill {
                 value: Box::new(literal(Literal::Float(0.0, None), element)),
+                dims: Vec::new(),
             },
             HirType::F32 | HirType::F64 => return Ok(literal(Literal::Float(0.0, None), ty)),
             HirType::Bool => return Ok(literal(Literal::Boolean(false), ty)),
@@ -395,6 +396,7 @@ impl Emitter {
         let kind = HirExprKind::TensorShapeCast {
             receiver: Box::new(receiver),
             permutation,
+            dims: Vec::new(),
         };
         Ok(self.bind(kind, ty))
     }
@@ -460,6 +462,7 @@ impl Emitter {
         if let Leaf::Const(_) = value {
             let kind = HirExprKind::TensorFill {
                 value: self.read(value),
+                dims: Vec::new(),
             };
             return Ok(self.bind(kind, ty.clone()));
         }
@@ -472,6 +475,7 @@ impl Emitter {
         let zero = self.float(0.0, element_type(ty));
         let kind = HirExprKind::TensorFill {
             value: self.read(&zero),
+            dims: Vec::new(),
         };
         self.bind(kind, ty.clone())
     }
@@ -532,7 +536,7 @@ impl Emitter {
                 .collect(),
             inputs,
             output,
-            extents,
+            extents: extents.into_iter().map(Some).collect(),
         };
         self.bind(kind, ty)
     }

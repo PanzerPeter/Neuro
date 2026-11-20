@@ -10,10 +10,12 @@
 use inkwell::module::Linkage;
 use inkwell::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue};
 
+use inkwell::AddressSpace;
+
 use crate::codegen::alias::MemoryClass;
 use crate::codegen::context::{ALIGNED_ALLOC_FN, CodegenContext};
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::Type;
+use crate::types::{Type, is_dynamic, static_extents};
 
 /// DLPack version this compiler produces. 1.1 is the versioned structure; the
 /// unversioned `DLManagedTensor` it replaced is deprecated.
@@ -37,7 +39,7 @@ const DEVICE_TENSOR_ON_HOST: &str = "this tensor lives on a GPU, where host code
 /// `byte_offset`. No major implementation honours it (PyTorch, CuPy, TensorFlow and TVM
 /// all pass unaligned pointers with `byte_offset = 0`), so 64 interoperates with every
 /// consumer that exists while 256 would only satisfy a rule the ecosystem abandoned.
-const DLPACK_DATA_ALIGN: u64 = 64;
+pub(crate) const DLPACK_DATA_ALIGN: u64 = 64;
 
 /// `lanes` is 1 for every Neuro element type: a vector element would be a language
 /// feature of its own rather than an encoding of one.
@@ -80,6 +82,9 @@ const FIELD_CONTROL: u32 = 1;
 const FIELD_DATA_BYTES: u32 = 0;
 const FIELD_GRAD: u32 = 1;
 const FIELD_HESSIAN: u32 = 2;
+/// The per-value shape block of a dynamic tensor: `2 * rank` `i64`s, the extents then the
+/// strides, which `shape` and `strides` point into. Null for a static tensor.
+const FIELD_SHAPE_BLOCK: u32 = 3;
 
 /// One of a tensor's derivative slots, each a `ptr` cell holding null or a handle it owns.
 #[derive(Clone, Copy)]
@@ -123,20 +128,26 @@ impl<'ctx> CodegenContext<'ctx> {
     /// Allocate a tensor's DLPack handle and its element buffer, fill every field of the
     /// structure, and return the handle, the pointer that *is* the tensor value.
     ///
+    /// `dims` carries one run-time extent per dynamic axis of `tensor_ty`, in axis order, and is
+    /// empty for a static tensor. `bytes` is the element run's length from
+    /// [`element_run`](CodegenContext::element_run).
+    ///
     /// The handle and the control block `manager_ctx` addresses come from one `malloc`,
     /// since neither has an alignment requirement the other does not. The ELEMENT buffer
     /// stays a second allocation: fusing it needs the structure's size rounded up to
     /// [`DLPACK_DATA_ALIGN`] as an IR constant expression, and LLVM has been
     /// withdrawing constant-expression arithmetic. The element buffer's size is computable
-    /// in Rust; the structure's is not.
+    /// in Rust for a static tensor and at run time for a dynamic one; the structure's is not.
     pub(crate) fn alloc_dlpack_tensor(
         &mut self,
         tensor_ty: &Type,
         name: &str,
+        dims: &[IntValue<'ctx>],
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
         let handle = self.alloc_dlpack_storage(name)?;
-        let data = self.alloc_host_buffer(tensor_ty)?;
-        self.init_dlpack_handle(handle, data, tensor_ty, TensorHome::Host)?;
+        let data = self.alloc_host_buffer(bytes)?;
+        self.init_dlpack_handle(handle, data, tensor_ty, TensorHome::Host, dims, bytes)?;
         Ok(handle)
     }
 
@@ -148,22 +159,27 @@ impl<'ctx> CodegenContext<'ctx> {
         tensor_ty: &Type,
         name: &str,
         index: IntValue<'ctx>,
+        dims: &[IntValue<'ctx>],
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
-        let data = self.alloc_device_tensor_buffer(tensor_ty)?;
-        self.device_tensor_over(data, tensor_ty, name, index)
+        let data = self.alloc_device_tensor_buffer(bytes)?;
+        self.device_tensor_over(data, tensor_ty, name, index, dims, bytes)
     }
 
     /// A `tensor_ty` handle over `data`, a buffer on GPU `index` that the handle's device
-    /// deleter will release.
+    /// deleter will release. `dims` and `bytes` are as for
+    /// [`alloc_dlpack_tensor`](CodegenContext::alloc_dlpack_tensor).
     pub(crate) fn device_tensor_over(
         &mut self,
         data: PointerValue<'ctx>,
         tensor_ty: &Type,
         name: &str,
         index: IntValue<'ctx>,
+        dims: &[IntValue<'ctx>],
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
         let handle = self.alloc_dlpack_storage(name)?;
-        self.init_dlpack_handle(handle, data, tensor_ty, TensorHome::Gpu(index))?;
+        self.init_dlpack_handle(handle, data, tensor_ty, TensorHome::Gpu(index), dims, bytes)?;
         Ok(handle)
     }
 
@@ -238,22 +254,27 @@ impl<'ctx> CodegenContext<'ctx> {
         self.build_malloc(storage_size, name)
     }
 
-    /// A host element buffer for `tensor_ty`, from the allocator the deleter's release
+    /// A host element buffer of `bytes` bytes, from the allocator the deleter's release
     /// pairs with.
     pub(crate) fn alloc_host_buffer(
         &mut self,
-        tensor_ty: &Type,
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
         // `aligned_alloc` wants a size that is a multiple of the alignment; a tensor
         // buffer is rounded up rather than passed through, since a small tensor's
         // element run is routinely shorter than one alignment unit. `_aligned_malloc`
-        // has no such requirement, and the rounding is harmless there.
+        // has no such requirement, and the rounding is harmless there. A constant run
+        // folds to its padded constant, so a static tensor's call is unchanged.
         let i64_type = self.context.i64_type();
-        let bytes = self.type_mapper.tensor_buffer_bytes(tensor_ty)?;
-        let padded = bytes.div_ceil(DLPACK_DATA_ALIGN) * DLPACK_DATA_ALIGN;
         let aligned_alloc = self.aligned_alloc_fn()?;
         let alignment = i64_type.const_int(DLPACK_DATA_ALIGN, false);
-        let size = i64_type.const_int(padded, false);
+        let padding = i64_type.const_int(DLPACK_DATA_ALIGN - 1, false);
+        let rounded = self.builder.build_int_add(bytes, padding, "tensor.pad")?;
+        let size = self.builder.build_and(
+            rounded,
+            i64_type.const_int(!(DLPACK_DATA_ALIGN - 1), false),
+            "tensor.padded",
+        )?;
         // `aligned_alloc(alignment, size)` against `_aligned_malloc(size, alignment)`:
         // the two spellings take the same pair the other way round.
         let args = if cfg!(target_os = "windows") {
@@ -279,14 +300,14 @@ impl<'ctx> CodegenContext<'ctx> {
         data: PointerValue<'ctx>,
         tensor_ty: &Type,
         home: TensorHome<'ctx>,
+        dims: &[IntValue<'ctx>],
+        bytes: IntValue<'ctx>,
     ) -> CodegenResult<()> {
         let Type::Tensor { element, shape } = tensor_ty else {
             return Err(CodegenError::InternalError(
                 "a DLPack handle is only built for a tensor type".to_string(),
             ));
         };
-        let shape = crate::types::static_extents(shape)?;
-        let data_bytes = self.type_mapper.tensor_buffer_bytes(tensor_ty)?;
         let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
         let i8_type = self.context.i8_type();
         let i16_type = self.context.i16_type();
@@ -301,7 +322,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 i32_type.const_int(DLPACK_VERSION_MINOR, false).into(),
             ]);
         self.store_handle_field(handle_ty, handle, &[FIELD_VERSION], version.into())?;
-        let control = self.init_dlpack_control_block(handle, data_bytes)?;
+        let control = self.init_dlpack_control_block(handle, bytes)?;
         self.store_handle_field(handle_ty, handle, &[FIELD_MANAGER_CTX], control.into())?;
         // The buffer is writable, so DLPACK_FLAG_BITMASK_READ_ONLY stays clear.
         self.store_handle_field(
@@ -333,25 +354,171 @@ impl<'ctx> CodegenContext<'ctx> {
             dtype.into(),
         )?;
 
-        let (shape_global, strides_global) = self.dlpack_shape_globals(element, &shape)?;
-        self.store_handle_field(
-            handle_ty,
-            handle,
-            &[FIELD_DL_TENSOR, FIELD_SHAPE],
-            shape_global.into(),
-        )?;
-        self.store_handle_field(
-            handle_ty,
-            handle,
-            &[FIELD_DL_TENSOR, FIELD_STRIDES],
-            strides_global.into(),
-        )?;
+        if is_dynamic(shape) {
+            self.init_dynamic_shape(handle, shape, dims)?;
+        } else {
+            let static_shape = static_extents(shape)?;
+            let (shape_global, strides_global) =
+                self.dlpack_shape_globals(element, &static_shape)?;
+            self.store_handle_field(
+                handle_ty,
+                handle,
+                &[FIELD_DL_TENSOR, FIELD_SHAPE],
+                shape_global.into(),
+            )?;
+            self.store_handle_field(
+                handle_ty,
+                handle,
+                &[FIELD_DL_TENSOR, FIELD_STRIDES],
+                strides_global.into(),
+            )?;
+        }
         self.store_handle_field(
             handle_ty,
             handle,
             &[FIELD_DL_TENSOR, FIELD_BYTE_OFFSET],
             i64_type.const_zero().into(),
         )?;
+        Ok(())
+    }
+
+    /// Give a dynamic tensor's handle its own shape block, filled with its run-time extents
+    /// and row-major strides, and point `shape` and `strides` into it. The control block owns
+    /// the block, so the deleter frees it.
+    fn init_dynamic_shape(
+        &mut self,
+        handle: PointerValue<'ctx>,
+        shape: &[Option<usize>],
+        dims: &[IntValue<'ctx>],
+    ) -> CodegenResult<()> {
+        let extents = self.axis_extents(shape, dims)?;
+        let block = self.alloc_shape_block(shape.len())?;
+        self.write_shape_block(block, &extents)?;
+        self.store_control_shape_block(handle, block)?;
+        self.point_at_shape_block(handle, block, shape.len())
+    }
+
+    /// Point the handle's `shape` and `strides` at `block`, which holds the extents and then
+    /// the strides of a `rank`-axis tensor.
+    fn point_at_shape_block(
+        &self,
+        handle: PointerValue<'ctx>,
+        block: PointerValue<'ctx>,
+        rank: usize,
+    ) -> CodegenResult<()> {
+        let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
+        let strides = self.shape_block_slot(block, rank)?;
+        self.store_handle_field(
+            handle_ty,
+            handle,
+            &[FIELD_DL_TENSOR, FIELD_SHAPE],
+            block.into(),
+        )?;
+        self.store_handle_field(
+            handle_ty,
+            handle,
+            &[FIELD_DL_TENSOR, FIELD_STRIDES],
+            strides.into(),
+        )
+    }
+
+    /// The address of slot `index` of a shape block, whose slots are `i64`s.
+    fn shape_block_slot(
+        &self,
+        block: PointerValue<'ctx>,
+        index: usize,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        // SAFETY: every caller indexes below `2 * rank`, the length `alloc_shape_block` gives
+        // the block.
+        unsafe {
+            self.builder.build_in_bounds_gep(
+                self.context.i64_type(),
+                block,
+                &[self.context.i64_type().const_int(index as u64, false)],
+                "dlpack.shape.slot",
+            )
+        }
+        .map_err(CodegenError::from)
+    }
+
+    /// A shape block for a `rank`-axis tensor: `2 * rank` `i64`s, from the allocator the
+    /// deleter's release pairs with, so an arena pool takes it like any other buffer.
+    fn alloc_shape_block(&self, rank: usize) -> CodegenResult<PointerValue<'ctx>> {
+        let size = self
+            .context
+            .i64_type()
+            .const_int((2 * rank * std::mem::size_of::<i64>()) as u64, false);
+        self.build_malloc(size, "dlpack.shape")
+    }
+
+    /// Fill a shape block with the extents of every axis, then the row-major strides, which
+    /// count elements: each is the product of the extents below it.
+    fn write_shape_block(
+        &self,
+        block: PointerValue<'ctx>,
+        extents: &[IntValue<'ctx>],
+    ) -> CodegenResult<()> {
+        let strides = self.row_major_values(extents)?;
+        for (index, value) in extents.iter().chain(strides.iter()).enumerate() {
+            let slot = self.shape_block_slot(block, index)?;
+            self.builder.build_store(slot, *value)?;
+        }
+        Ok(())
+    }
+
+    /// The control block's address in `handle`'s storage block.
+    fn control_block(&self, handle: PointerValue<'ctx>) -> CodegenResult<PointerValue<'ctx>> {
+        self.builder
+            .build_struct_gep(
+                self.type_mapper.dlpack_tensor_storage_type(),
+                handle,
+                FIELD_CONTROL,
+                "dlpack.control",
+            )
+            .map_err(|_| {
+                CodegenError::InternalError("the DLPack storage block has no control field".into())
+            })
+    }
+
+    /// The shape block `handle`'s control block owns, null for a static tensor.
+    fn control_shape_block(&self, handle: PointerValue<'ctx>) -> CodegenResult<PointerValue<'ctx>> {
+        let control = self.control_block(handle)?;
+        let field = self.builder.build_struct_gep(
+            self.type_mapper.dlpack_control_block_type(),
+            control,
+            FIELD_SHAPE_BLOCK,
+            "dlpack.shape.owned",
+        )?;
+        Ok(self
+            .builder
+            .build_load(
+                self.context.ptr_type(AddressSpace::default()),
+                field,
+                "dlpack.shape.block",
+            )?
+            .into_pointer_value())
+    }
+
+    /// Record `block` as the shape block `handle`'s control block owns, or null to record none.
+    fn store_control_shape_block(
+        &self,
+        handle: PointerValue<'ctx>,
+        block: PointerValue<'ctx>,
+    ) -> CodegenResult<()> {
+        let control = self.control_block(handle)?;
+        self.store_handle_field(
+            self.type_mapper.dlpack_control_block_type(),
+            control,
+            &[FIELD_SHAPE_BLOCK],
+            block.into(),
+        )
+    }
+
+    /// Free a shape block through the release paired with the structure's allocation. A null
+    /// block is a no-op there.
+    fn release_shape_block(&self, block: PointerValue<'ctx>) -> CodegenResult<()> {
+        let release = self.release_fn()?;
+        self.builder.build_call(release, &[block.into()], "")?;
         Ok(())
     }
 
@@ -479,7 +646,7 @@ impl<'ctx> CodegenContext<'ctx> {
     fn init_dlpack_control_block(
         &self,
         handle: PointerValue<'ctx>,
-        data_bytes: u64,
+        data_bytes: IntValue<'ctx>,
     ) -> CodegenResult<PointerValue<'ctx>> {
         let storage_ty = self.type_mapper.dlpack_tensor_storage_type();
         let control = self
@@ -496,17 +663,12 @@ impl<'ctx> CodegenContext<'ctx> {
             .ok_or_else(|| {
                 CodegenError::InternalError("the DLPack control field is not a struct".to_string())
             })?;
-        self.store_handle_field(
-            control_ty,
-            control,
-            &[FIELD_DATA_BYTES],
-            self.context.i64_type().const_int(data_bytes, false).into(),
-        )?;
+        self.store_handle_field(control_ty, control, &[FIELD_DATA_BYTES], data_bytes.into())?;
         let null = self
             .context
             .ptr_type(inkwell::AddressSpace::default())
             .const_null();
-        for field in [FIELD_GRAD, FIELD_HESSIAN] {
+        for field in [FIELD_GRAD, FIELD_HESSIAN, FIELD_SHAPE_BLOCK] {
             self.store_handle_field(control_ty, control, &[field], null.into())?;
         }
         Ok(control)
@@ -603,40 +765,73 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// This is the whole of an order-preserving reshape: the buffer already holds the
     /// result's elements in the result's order, so only the rank, extents, and strides a
-    /// DLPack consumer reads have to change. Nothing is allocated and nothing is copied,
-    /// which is why `.reshape` on a large tensor costs three stores.
+    /// DLPack consumer reads have to change. Nothing is copied, which is why `.reshape` on a
+    /// large tensor costs a few stores. A dynamic result gets a fresh shape block holding
+    /// `dims`, the run-time extents its own dynamic axes take, and a dynamic receiver's old
+    /// block is freed once nothing reads it. `dims` must already be evaluated against the
+    /// receiver, since that read is what the free ends.
     pub(crate) fn build_dlpack_redescribe(
-        &self,
+        &mut self,
         handle: PointerValue<'ctx>,
+        receiver_ty: &Type,
         tensor_ty: &Type,
+        dims: &[IntValue<'ctx>],
     ) -> CodegenResult<()> {
-        let Type::Tensor { element, shape } = tensor_ty else {
+        let (
+            Type::Tensor { element, shape },
+            Type::Tensor {
+                shape: receiver_shape,
+                ..
+            },
+        ) = (tensor_ty, receiver_ty.referent())
+        else {
             return Err(CodegenError::InternalError(
                 "a DLPack handle is only re-described as a tensor type".to_string(),
             ));
         };
         let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
         let i32_type = self.context.i32_type();
+        let old_block = if is_dynamic(receiver_shape) {
+            Some(self.control_shape_block(handle)?)
+        } else {
+            None
+        };
         self.store_handle_field(
             handle_ty,
             handle,
             &[FIELD_DL_TENSOR, FIELD_NDIM],
             i32_type.const_int(shape.len() as u64, false).into(),
         )?;
-        let (shape_global, strides_global) =
-            self.dlpack_shape_globals(element, &crate::types::static_extents(shape)?)?;
-        self.store_handle_field(
-            handle_ty,
-            handle,
-            &[FIELD_DL_TENSOR, FIELD_SHAPE],
-            shape_global.into(),
-        )?;
-        self.store_handle_field(
-            handle_ty,
-            handle,
-            &[FIELD_DL_TENSOR, FIELD_STRIDES],
-            strides_global.into(),
-        )
+        if is_dynamic(shape) {
+            let extents = self.axis_extents(shape, dims)?;
+            let block = self.alloc_shape_block(shape.len())?;
+            self.write_shape_block(block, &extents)?;
+            self.store_control_shape_block(handle, block)?;
+            self.point_at_shape_block(handle, block, shape.len())?;
+        } else {
+            let (shape_global, strides_global) =
+                self.dlpack_shape_globals(element, &static_extents(shape)?)?;
+            if old_block.is_some() {
+                let null = self.context.ptr_type(AddressSpace::default()).const_null();
+                self.store_control_shape_block(handle, null)?;
+            }
+            self.store_handle_field(
+                handle_ty,
+                handle,
+                &[FIELD_DL_TENSOR, FIELD_SHAPE],
+                shape_global.into(),
+            )?;
+            self.store_handle_field(
+                handle_ty,
+                handle,
+                &[FIELD_DL_TENSOR, FIELD_STRIDES],
+                strides_global.into(),
+            )?;
+        }
+        if let Some(old) = old_block {
+            self.release_shape_block(old)?;
+        }
+        Ok(())
     }
 
     /// Store `value` into the handle field reached by walking `path` from the structure
@@ -655,7 +850,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// The address of the handle field `path` reaches, walked as
     /// [`store_handle_field`](CodegenContext::store_handle_field) walks it.
-    fn handle_field_ptr(
+    pub(crate) fn handle_field_ptr(
         &self,
         handle_ty: inkwell::types::StructType<'ctx>,
         handle: PointerValue<'ctx>,
@@ -746,10 +941,11 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Define the shared `deleter`, or return the existing definition.
     ///
-    /// It releases the gradient the slot owns, then the element buffer, then the structure,
-    /// in that order, because reading a field out of the block it is about to free would
-    /// be a use-after-free. The control block needs no release of its own: it is part of
-    /// the structure's allocation, so the one `free(self)` takes both.
+    /// It releases the gradient the slot owns, then the element buffer, then the shape block
+    /// a dynamic tensor owns, then the structure, in that order, because reading a field out
+    /// of the block it is about to free would be a use-after-free. The control block needs no
+    /// release of its own: it is part of the structure's allocation, so the one `free(self)`
+    /// takes both. A static tensor's shape block is null, which the release ignores.
     ///
     /// It reads the gradient slot at its fixed offset and never loads `manager_ctx`. That
     /// is sound because this function only ever runs on a handle whose `deleter` field
@@ -810,6 +1006,9 @@ impl<'ctx> CodegenContext<'ctx> {
                     .build_call(release, &[data.into(), index.into()], "")?;
             }
         }
+        let shape_block = self.control_shape_block(handle)?;
+        self.builder
+            .build_call(free_fn, &[shape_block.into()], "")?;
         self.builder.build_call(free_fn, &[handle.into()], "")?;
         self.builder.build_return(None)?;
         if let Some(block) = saved_block {
@@ -872,14 +1071,140 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// The byte length of a tensor's element buffer, as an `i64` for `memcpy`.
+    /// The byte length of `handle`'s element buffer, as an `i64` for `memcpy`: the constant
+    /// for a static tensor, and for a dynamic one the length its control block recorded when
+    /// the buffer was allocated.
     ///
     /// This is the unpadded run of elements: the padding `aligned_alloc` receives exists
     /// to satisfy the allocator, not to be copied.
-    pub(crate) fn dlpack_copy_length(&self, tensor_ty: &Type) -> CodegenResult<IntValue<'ctx>> {
+    pub(crate) fn dlpack_copy_length(
+        &self,
+        handle: PointerValue<'ctx>,
+        tensor_ty: &Type,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        match tensor_ty {
+            Type::Tensor { shape, .. } if is_dynamic(shape) => self.handle_data_bytes(handle),
+            _ => Ok(self
+                .context
+                .i64_type()
+                .const_int(self.type_mapper.tensor_buffer_bytes(tensor_ty)?, false)),
+        }
+    }
+
+    /// The unpadded byte length a dynamic handle's control block recorded at allocation.
+    fn handle_data_bytes(&self, handle: PointerValue<'ctx>) -> CodegenResult<IntValue<'ctx>> {
+        let control = self.control_block(handle)?;
+        let field = self.builder.build_struct_gep(
+            self.type_mapper.dlpack_control_block_type(),
+            control,
+            FIELD_DATA_BYTES,
+            "dlpack.data_bytes.addr",
+        )?;
         Ok(self
-            .context
-            .i64_type()
-            .const_int(self.type_mapper.tensor_buffer_bytes(tensor_ty)?, false))
+            .builder
+            .build_load(self.context.i64_type(), field, "dlpack.data_bytes")?
+            .into_int_value())
+    }
+
+    /// The extent of axis `axis` of a tensor whose type is `shape`, read from `handle`'s
+    /// `shape` array when the axis is dynamic and a constant otherwise.
+    pub(crate) fn handle_extent(
+        &self,
+        handle: PointerValue<'ctx>,
+        shape: &[Option<usize>],
+        axis: usize,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        match shape.get(axis) {
+            Some(Some(extent)) => Ok(self.context.i64_type().const_int(*extent as u64, false)),
+            Some(None) => self.handle_array_element(handle, FIELD_SHAPE, axis),
+            None => Err(CodegenError::InternalError(format!(
+                "axis {axis} is outside a rank-{} tensor",
+                shape.len()
+            ))),
+        }
+    }
+
+    /// The extent of every axis of a tensor whose type is `shape` and the row-major stride of
+    /// each, both as `i64`s. A static shape has no run-time part, so its values are constants
+    /// and the handle is not read. Otherwise each extent and each stride is read from the
+    /// handle's own `shape` and `strides` arrays, which describe a dynamic and a static
+    /// handle alike.
+    pub(crate) fn handle_axes(
+        &self,
+        handle: PointerValue<'ctx>,
+        shape: &[Option<usize>],
+    ) -> CodegenResult<(Vec<IntValue<'ctx>>, Vec<IntValue<'ctx>>)> {
+        let i64_type = self.context.i64_type();
+        if !is_dynamic(shape) {
+            let extents = static_extents(shape)?;
+            let strides = crate::codegen::expressions::row_major_strides(&extents);
+            return Ok((
+                extents
+                    .iter()
+                    .map(|d| i64_type.const_int(*d as u64, false))
+                    .collect(),
+                strides
+                    .iter()
+                    .map(|s| i64_type.const_int(*s as u64, false))
+                    .collect(),
+            ));
+        }
+        let extents = (0..shape.len())
+            .map(|axis| self.handle_extent(handle, shape, axis))
+            .collect::<CodegenResult<Vec<_>>>()?;
+        let strides = (0..shape.len())
+            .map(|axis| self.handle_array_element(handle, FIELD_STRIDES, axis))
+            .collect::<CodegenResult<Vec<_>>>()?;
+        Ok((extents, strides))
+    }
+
+    /// The run-time extents of a dynamic tensor's dynamic axes, read from `handle`, in axis
+    /// order: what a copy of the tensor takes for its own dynamic axes.
+    pub(crate) fn handle_dynamic_extents(
+        &self,
+        handle: PointerValue<'ctx>,
+        shape: &[Option<usize>],
+    ) -> CodegenResult<Vec<IntValue<'ctx>>> {
+        shape
+            .iter()
+            .enumerate()
+            .filter(|(_, extent)| extent.is_none())
+            .map(|(axis, _)| self.handle_extent(handle, shape, axis))
+            .collect()
+    }
+
+    /// Element `index` of the `i64` array `handle`'s `dl_tensor` field `field` points at: the
+    /// `shape` or the `strides` array.
+    fn handle_array_element(
+        &self,
+        handle: PointerValue<'ctx>,
+        field: u32,
+        index: usize,
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let handle_ty = self.type_mapper.dlpack_managed_tensor_type();
+        let i64_type = self.context.i64_type();
+        let array_field = self.handle_field_ptr(handle_ty, handle, &[FIELD_DL_TENSOR, field])?;
+        let array = self.builder.build_load(
+            self.context.ptr_type(AddressSpace::default()),
+            array_field,
+            "dlpack.array",
+        )?;
+        let array = self
+            .tag_load(array, MemoryClass::TensorHeader)?
+            .into_pointer_value();
+        // SAFETY: a caller indexes an array of a tensor of this rank, which the handle
+        // describes with one slot per axis.
+        let slot = unsafe {
+            self.builder.build_in_bounds_gep(
+                i64_type,
+                array,
+                &[i64_type.const_int(index as u64, false)],
+                "dlpack.axis.slot",
+            )
+        }?;
+        Ok(self
+            .builder
+            .build_load(i64_type, slot, "dlpack.axis")?
+            .into_int_value())
     }
 }

@@ -7,6 +7,7 @@
 // the same `impl TypeChecker` block as the rest of `type_checkers`.
 
 use super::TypeChecker;
+use super::resolution::NameSlot;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, TensorAxis, Type, spliced_param};
 use ast_types::{BinaryOp, Expr, GenericArg, Place};
@@ -53,10 +54,10 @@ impl TypeChecker {
 
     /// Report `operation` when any axis of `shape` is dynamic, and answer whether it did.
     ///
-    /// Every extent-consuming operation funnels through here: a `?` axis has no
-    /// compile-time value, so a buffer size, a stride, or an element count computed from
-    /// it would be a guess. Widening a static tensor into a `?`-shaped type is what the
-    /// axis is for, and stays legal.
+    /// The operations that build a buffer from literal data (a tensor literal, `Tensor::from`,
+    /// a safetensors read or write) need every extent as a number, and funnel through here. A
+    /// dynamic axis is otherwise read at run time, and widening a static tensor into a
+    /// `?`-shaped type is what the axis is for, so that stays legal.
     pub(crate) fn reject_dynamic_extent(
         &mut self,
         shape: &[TensorAxis],
@@ -64,7 +65,7 @@ impl TypeChecker {
         ty: &Type,
         span: Span,
     ) -> bool {
-        if !shape.iter().any(|axis| axis.extent == ArrayLen::Dynamic) {
+        if !shape.iter().any(|axis| axis.extent.is_dynamic()) {
             return false;
         }
         self.record_error(TypeError::TensorDynamicExtent {
@@ -199,6 +200,10 @@ impl TypeChecker {
     /// `type_args` carries the turbofish's assembled tensor type when one was written;
     /// otherwise the type comes from the surrounding expectation, and a position that
     /// supplies neither is reported rather than guessed at.
+    ///
+    /// The open axes of the type (a `?`, or a dynamic name not yet in scope) take their
+    /// run-time extents from `dims:`, one entry per open axis, in axis order with a name
+    /// written twice taking one entry. A name the constructor binds is in scope afterwards.
     pub(crate) fn check_tensor_construction(
         &mut self,
         ctor: &Identifier,
@@ -222,24 +227,59 @@ impl TypeChecker {
         };
         let element = (**element).clone();
         let shape = shape.clone();
-        if self.reject_dynamic_extent(&shape, &format!("`Tensor::{}`", ctor.name), &tensor, span) {
+
+        // A literal's buffer is sized by the literal itself, so `from` takes no run-time
+        // extent: its argument is the nested array literal, never a `dims:` list.
+        if ctor.name == CTOR_FROM {
+            if self.reject_dynamic_extent(
+                &shape,
+                &format!("`Tensor::{}`", ctor.name),
+                &tensor,
+                span,
+            ) {
+                return tensor;
+            }
+            if self.check_tensor_ctor_arity(&args.iter().collect::<Vec<_>>(), 1, span) {
+                match &args[0] {
+                    Expr::ArrayLiteral {
+                        elements,
+                        span: lit_span,
+                    } => {
+                        self.check_tensor_literal(elements, &element, &shape, *lit_span);
+                    }
+                    // `from` exists so a tensor can be built where no annotation
+                    // reaches; its argument is the same nested literal the annotated
+                    // form coerces, not an arbitrary expression.
+                    other => self.reject_tensor_ctor(
+                        ctor,
+                        &tensor,
+                        "`from` takes a nested array literal",
+                        other.span(),
+                    ),
+                }
+            }
             return tensor;
         }
 
+        let (fresh, open) = self.open_axes(&shape);
+        let (positional, dims) = split_dims_argument(args);
+        self.check_tensor_dims(ctor, open, dims, span);
+
         match ctor.name.as_str() {
             CTOR_ZEROS | CTOR_ONES => {
-                self.check_tensor_ctor_arity(args, 0, span);
+                self.check_tensor_ctor_arity(&positional, 0, span);
             }
             CTOR_IDENTITY => {
-                self.check_tensor_ctor_arity(args, 0, span);
+                self.check_tensor_ctor_arity(&positional, 0, span);
                 // The EXTENTS decide squareness; a `[row: 4, col: 4]` identity is
-                // square even though its two axes carry different names.
-                let square = matches!(shape.as_slice(), [rows, cols] if rows.extent == cols.extent);
+                // square even though its two axes carry different names. An anonymous
+                // `?` equals nothing, not even another `?`, so `[?, ?]` is not square.
+                let square = matches!(shape.as_slice(), [rows, cols] if rows.extent.aligns_with(&cols.extent));
                 if !square {
                     self.reject_tensor_ctor(
                         ctor,
                         &tensor,
-                        "an identity matrix is square and rank 2",
+                        "an identity matrix is square and rank 2, and a `?` axis is square only with a `?B` of the same name on the other axis",
                         span,
                     );
                 }
@@ -253,8 +293,8 @@ impl TypeChecker {
                         span,
                     );
                 }
-                if self.check_tensor_ctor_arity(args, 2, span) {
-                    self.check_tensor_ctor_args(args, &element);
+                if self.check_tensor_ctor_arity(&positional, 2, span) {
+                    self.check_tensor_ctor_args(&positional, &element);
                 }
             }
             CTOR_SCALAR => {
@@ -266,34 +306,74 @@ impl TypeChecker {
                         span,
                     );
                 }
-                if self.check_tensor_ctor_arity(args, 1, span) {
-                    self.check_tensor_ctor_args(args, &element);
-                }
-            }
-            CTOR_FROM => {
-                if self.check_tensor_ctor_arity(args, 1, span) {
-                    match &args[0] {
-                        Expr::ArrayLiteral {
-                            elements,
-                            span: lit_span,
-                        } => {
-                            self.check_tensor_literal(elements, &element, &shape, *lit_span);
-                        }
-                        // `from` exists so a tensor can be built where no annotation
-                        // reaches; its argument is the same nested literal the annotated
-                        // form coerces, not an arbitrary expression.
-                        other => self.reject_tensor_ctor(
-                            ctor,
-                            &tensor,
-                            "`from` takes a nested array literal",
-                            other.span(),
-                        ),
-                    }
+                if self.check_tensor_ctor_arity(&positional, 1, span) {
+                    self.check_tensor_ctor_args(&positional, &element);
                 }
             }
             _ => unreachable!("guarded by is_tensor_constructor"),
         }
+        // The names the constructor binds are in scope from here on, whatever it reported.
+        for name in fresh {
+            self.introduce_dynamic_name(&name, None, span);
+        }
         tensor
+    }
+
+    /// The open axes of a constructed shape: how many `dims:` entries it takes, and the
+    /// dynamic names among them that are not in scope yet, each once and in order.
+    fn open_axes(&self, shape: &[TensorAxis]) -> (Vec<String>, usize) {
+        let mut fresh: Vec<String> = Vec::new();
+        let mut open = 0;
+        for axis in shape {
+            match &axis.extent {
+                ArrayLen::Dynamic(None) => open += 1,
+                ArrayLen::Dynamic(Some(name))
+                    if !self.dynamic_name_in_scope(name) && !fresh.contains(name) =>
+                {
+                    fresh.push(name.clone());
+                    open += 1;
+                }
+                _ => {}
+            }
+        }
+        (fresh, open)
+    }
+
+    /// Check a constructor's `dims:` against the open axes it has: one `u64` entry per open
+    /// axis, and none where the shape is closed.
+    fn check_tensor_dims(
+        &mut self,
+        ctor: &Identifier,
+        open: usize,
+        dims: Option<(&[Expr], Span)>,
+        span: Span,
+    ) {
+        let Some((entries, dims_span)) = dims else {
+            if open > 0 {
+                self.record_error(TypeError::TensorDimsCount {
+                    ctor: ctor.name.clone(),
+                    expected: open,
+                    found: 0,
+                    span,
+                });
+            }
+            return;
+        };
+        let entries: Vec<&Expr> = entries.iter().collect();
+        self.check_tensor_ctor_args(&entries, &Type::U64);
+        if open == 0 {
+            self.record_error(TypeError::TensorDimsWithoutOpenAxis {
+                ctor: ctor.name.clone(),
+                span: dims_span,
+            });
+        } else if entries.len() != open {
+            self.record_error(TypeError::TensorDimsCount {
+                ctor: ctor.name.clone(),
+                expected: open,
+                found: entries.len(),
+                span: dims_span,
+            });
+        }
     }
 
     /// The tensor type a construction builds: the turbofish's when one was written,
@@ -306,10 +386,30 @@ impl TypeChecker {
         span: Span,
     ) -> Option<Type> {
         if let [GenericArg::Type(annotation)] = type_args {
-            return self.resolve_type(annotation);
+            return self.resolve_type_naming(annotation, NameSlot::Top);
         }
         match expected {
-            Some(ty @ Type::Tensor { .. }) => Some(ty.clone()),
+            Some(ty @ Type::Tensor { shape, .. }) => {
+                // Lowering sees the expected type with its names erased, so a bound name
+                // there would build an axis it cannot size.
+                let bound = shape.iter().find_map(|axis| match &axis.extent {
+                    ArrayLen::Dynamic(Some(name)) if self.dynamic_name_in_scope(name) => {
+                        Some(name.clone())
+                    }
+                    _ => None,
+                });
+                if let Some(name) = bound {
+                    self.record_error(TypeError::TensorCtorBoundNameInferred {
+                        ctor: ctor.name.clone(),
+                        name,
+                        expected: ty.clone(),
+                        turbofish: ty.to_string().replacen("Tensor<", "Tensor::<", 1),
+                        span,
+                    });
+                    return None;
+                }
+                Some(ty.clone())
+            }
             _ => {
                 // `scalar` builds only the rank-0 tensor, so a `[3, 3]` example would
                 // suggest a turbofish it then refuses.
@@ -330,7 +430,7 @@ impl TypeChecker {
 
     /// Report a constructor whose argument count is wrong, and say whether the rest of
     /// the checking may proceed against `args`.
-    fn check_tensor_ctor_arity(&mut self, args: &[Expr], expected: usize, span: Span) -> bool {
+    fn check_tensor_ctor_arity(&mut self, args: &[&Expr], expected: usize, span: Span) -> bool {
         if args.len() == expected {
             return true;
         }
@@ -346,7 +446,7 @@ impl TypeChecker {
     }
 
     /// Check every constructor argument at the tensor's element type.
-    fn check_tensor_ctor_args(&mut self, args: &[Expr], element: &Type) {
+    fn check_tensor_ctor_args(&mut self, args: &[&Expr], element: &Type) {
         for arg in args {
             let Some(found) = self.check_expr(arg, Some(element)) else {
                 continue;
@@ -376,15 +476,11 @@ impl TypeChecker {
         value: &Expr,
         span: Span,
     ) -> Option<()> {
-        let Type::Tensor { element, shape } = tensor_ty else {
+        let Type::Tensor { element, .. } = tensor_ty else {
             return None;
         };
 
-        // The update walks the buffer element by element, so it needs the element count.
-        let (element_ty, shape) = ((**element).clone(), shape.clone());
-        if self.reject_dynamic_extent(&shape, &format!("`{op}=`"), tensor_ty, span) {
-            return None;
-        }
+        let element_ty = (**element).clone();
         let element = &element_ty;
 
         // The update rewrites the buffer every live borrow of the target reads, so a
@@ -444,4 +540,22 @@ impl TypeChecker {
             span,
         });
     }
+}
+
+/// Split a constructor's arguments into its `dims:` list, the one array literal among them,
+/// and the rest, which are the value arguments (`mean`, `std`, the fill value).
+fn split_dims_argument(args: &[Expr]) -> (Vec<&Expr>, Option<(&[Expr], Span)>) {
+    let dims_at = args
+        .iter()
+        .position(|arg| matches!(arg, Expr::ArrayLiteral { .. }));
+    let dims = dims_at.and_then(|at| match &args[at] {
+        Expr::ArrayLiteral { elements, span } => Some((elements.as_slice(), *span)),
+        _ => None,
+    });
+    let positional = args
+        .iter()
+        .enumerate()
+        .filter_map(|(at, arg)| (Some(at) != dims_at).then_some(arg))
+        .collect();
+    (positional, dims)
 }

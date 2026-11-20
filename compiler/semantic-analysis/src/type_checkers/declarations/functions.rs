@@ -4,10 +4,11 @@
 //! to the same `impl TypeChecker` block.
 
 use crate::errors::TypeError;
+use crate::type_checkers::resolution::NameSlot;
 use crate::type_checkers::val_else::{stmt_diverges, stmts_diverge};
 use crate::type_checkers::{BoundInfo, GenericFnSig, TypeChecker};
 use crate::types::{FunctionMode, Type};
-use ast_types::{FunctionDef, Stmt};
+use ast_types::{Attribute, FunctionDef, Stmt};
 use std::collections::HashMap;
 
 /// The program's entry point, called by the C runtime.
@@ -75,12 +76,21 @@ impl TypeChecker {
         // Resolve parameter types. A kernel's tensors are borrowed at the call, so its
         // `Tensor` and `KernelOut` parameters resolve to the references they are.
         let kernel = crate::type_checkers::kernel::kernel_attribute(&func.attributes).is_some();
+        // A dynamic name is refused in a `@grad`, `@gpu` or `@kernel` signature: those
+        // are compiled against static shapes, and the anonymous `?` the attributes
+        // already refuse stays refused there.
+        let compiled_signature = kernel || has_compiled_attribute(&func.attributes);
+        let param_slot = if compiled_signature {
+            NameSlot::Refused
+        } else {
+            NameSlot::Top
+        };
         let mut param_types = Vec::new();
         for param in &func.params {
             let resolved = if kernel {
                 self.resolve_kernel_param(&param.ty)
             } else {
-                self.resolve_type(&param.ty)
+                self.resolve_type_naming(&param.ty, param_slot)
             };
             if let Some(param_ty) = resolved {
                 param_types.push(param_ty);
@@ -91,13 +101,23 @@ impl TypeChecker {
         }
 
         // Resolve return type (default to Void if not specified).
+        let return_slot = if compiled_signature {
+            NameSlot::Refused
+        } else {
+            NameSlot::Return
+        };
         let return_type = match &func.return_type {
             Some(ast_types::Type::ImplTrait { .. }) => Type::Unknown,
             // A return type that failed to resolve was reported; `Unknown` keeps each call
             // site from reporting it again as a `void` it never wrote.
-            Some(ret_ty) => self.resolve_type(ret_ty).unwrap_or(Type::Unknown),
+            Some(ret_ty) => self
+                .resolve_type_naming(ret_ty, return_slot)
+                .unwrap_or(Type::Unknown),
             None => Type::Void,
         };
+        if let Some(ret_ty) = &func.return_type {
+            self.refuse_unbound_return_names(&param_types, &return_type, ret_ty.span());
+        }
 
         self.check_main_signature(func, &param_types, &return_type);
 
@@ -257,11 +277,20 @@ impl TypeChecker {
             .map(|(param, _)| param.name.name.clone())
             .collect();
 
+        // The dynamic names the signature writes are in scope for the whole body, before
+        // the parameters that might shadow them are defined.
+        for param_ty in param_types {
+            for name in self.dynamic_names_of(param_ty, func.name.span) {
+                self.introduce_dynamic_name(&name, None, func.name.span);
+            }
+        }
+
         // Define parameters in function scope (parameters are immutable by default).
         // A parameter whose type failed to resolve is still bound, at `Unknown`: the
         // error is already reported, and leaving the name undefined turns every use of
         // it in the body into a second, misleading "undefined variable" report.
         for (param, param_ty) in func.params.iter().zip(param_types.iter()) {
+            self.refuse_value_named_dynamic(&param.name.name, param.name.span);
             if let Err(duplicate_name) = self.symbols.define(
                 param.name.name.clone(),
                 param_ty.clone(),
@@ -395,4 +424,11 @@ impl TypeChecker {
         let sig = self.generic_funcs.get(&func.name.name)?;
         Some((sig.params.clone(), sig.ret.clone()))
     }
+}
+
+/// Whether a `@grad` or `@gpu` attribute compiles the function against static shapes.
+fn has_compiled_attribute(attributes: &[Attribute]) -> bool {
+    attributes
+        .iter()
+        .any(|attr| matches!(attr.name.name.as_str(), "grad" | "gpu"))
 }

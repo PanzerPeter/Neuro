@@ -48,8 +48,10 @@ pub enum ArrayLen {
     Fixed(usize),
     /// A `const` generic parameter used as the length, identified by name.
     Param(std::string::String),
-    /// A tensor axis written `?`: its extent is not known until run time.
-    Dynamic,
+    /// A tensor axis written `?` (`None`) or `?B` (`Some("B")`): its extent is not known
+    /// until run time. Every `?B` in one scope is the same run-time value, a `?` is equal to
+    /// nothing else.
+    Dynamic(Option<std::string::String>),
     /// A shape parameter spliced into a tensor shape, the `..S` in `[..S, N]`. It stands
     /// for any number of axes, so a shape holding one has no rank until monomorphization
     /// substitutes it, and only a tensor shape reaches it.
@@ -64,14 +66,28 @@ impl ArrayLen {
     /// Whether an extent found at an axis satisfies the one expected there.
     ///
     /// Widening only: an expected `?` accepts any extent, which is the compile-time check
-    /// a dynamic axis opts out of. The reverse is NOT accepted: a `?` found where a
-    /// literal is expected would let the consumer index at strides the run-time shape may
-    /// not have, and the run-time check that would catch it does not exist yet.
+    /// a dynamic axis opts out of. An expected `?B` accepts only the same name, and a
+    /// literal, parameter or expression accepts only an equal extent. The reverse is NOT
+    /// accepted: a dynamic extent found where a static one is expected would let the
+    /// consumer index at strides the run-time shape may not have. Binding sites, where a
+    /// name is bound or checked at run time, do not use this rule.
     pub(crate) fn satisfies(&self, expected: &ArrayLen) -> bool {
         match (self, expected) {
-            (_, ArrayLen::Dynamic) => true,
+            (_, ArrayLen::Dynamic(None)) => true,
             (found, expected) => found == expected,
         }
+    }
+
+    /// Whether two axes an operator aligns combine without a run-time check. A dynamic
+    /// axis combines only with the same name on the other side: an anonymous `?` equals
+    /// nothing, not even another `?`, because the two are unrelated run-time values.
+    pub(crate) fn aligns_with(&self, other: &ArrayLen) -> bool {
+        self == other && *self != ArrayLen::Dynamic(None)
+    }
+
+    /// Whether the extent is a run-time one, `?` or `?B`.
+    pub(crate) fn is_dynamic(&self) -> bool {
+        matches!(self, ArrayLen::Dynamic(_))
     }
 }
 
@@ -84,7 +100,7 @@ impl ArrayLen {
             ArrayLen::Param(name) => Some(ExtentExpr::param(name)),
             ArrayLen::Splice(name) => Some(ExtentExpr::count(name)),
             ArrayLen::Expr(expr) => Some(expr.clone()),
-            ArrayLen::Dynamic => None,
+            ArrayLen::Dynamic(_) => None,
         }
     }
 
@@ -122,7 +138,8 @@ impl fmt::Display for ArrayLen {
         match self {
             ArrayLen::Fixed(n) => write!(f, "{}", n),
             ArrayLen::Param(name) => write!(f, "{}", name),
-            ArrayLen::Dynamic => write!(f, "?"),
+            ArrayLen::Dynamic(None) => write!(f, "?"),
+            ArrayLen::Dynamic(Some(name)) => write!(f, "?{}", name),
             ArrayLen::Splice(name) => write!(f, "..{}", name),
             ArrayLen::Expr(expr) => write!(f, "{}", expr),
         }
@@ -1153,5 +1170,35 @@ mod tests {
         assert!(!Type::String.is_bool());
         assert!(!Type::String.is_signed_int());
         assert!(!Type::String.is_unsigned_int());
+    }
+
+    #[test]
+    fn an_anonymous_extent_accepts_any_extent_and_a_name_only_its_own() {
+        let anonymous = ArrayLen::Dynamic(None);
+        let named = ArrayLen::Dynamic(Some("B".to_string()));
+        assert!(ArrayLen::Fixed(3).satisfies(&anonymous));
+        assert!(named.satisfies(&anonymous));
+        assert!(named.satisfies(&named));
+        assert!(!anonymous.satisfies(&named));
+        assert!(!ArrayLen::Fixed(3).satisfies(&named));
+        assert!(!named.satisfies(&ArrayLen::Fixed(3)));
+        assert!(!anonymous.satisfies(&ArrayLen::Fixed(3)));
+    }
+
+    #[test]
+    fn a_dynamic_axis_aligns_only_with_the_same_name() {
+        let anonymous = ArrayLen::Dynamic(None);
+        let named = ArrayLen::Dynamic(Some("B".to_string()));
+        assert!(named.aligns_with(&named));
+        assert!(!anonymous.aligns_with(&anonymous));
+        assert!(!named.aligns_with(&ArrayLen::Dynamic(Some("C".to_string()))));
+        assert!(!named.aligns_with(&ArrayLen::Fixed(1)));
+        assert!(ArrayLen::Fixed(4).aligns_with(&ArrayLen::Fixed(4)));
+    }
+
+    #[test]
+    fn a_dynamic_extent_displays_as_its_written_name() {
+        assert_eq!(ArrayLen::Dynamic(None).to_string(), "?");
+        assert_eq!(ArrayLen::Dynamic(Some("B".to_string())).to_string(), "?B");
     }
 }

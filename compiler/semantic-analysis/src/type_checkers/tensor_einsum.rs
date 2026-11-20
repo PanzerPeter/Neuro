@@ -297,18 +297,13 @@ impl TypeChecker {
         if self.reject_splice(shape, "`einsum`", &operand, span) {
             return false;
         }
-        if let Some(axis) = front.iter().find(|a| a.extent == ArrayLen::Dynamic) {
-            self.record_error(TypeError::EinsumSymbolicExtent {
-                position,
-                name: axis.extent.to_string(),
-                span,
-            });
-            return false;
-        }
         if written {
             let same = |bound: &[TensorAxis]| {
                 bound.len() == front.len()
-                    && bound.iter().zip(front).all(|(b, f)| b.extent == f.extent)
+                    && bound
+                        .iter()
+                        .zip(front)
+                        .all(|(b, f)| b.extent.aligns_with(&f.extent))
             };
             match leading.as_deref() {
                 None => *leading = Some(front.to_vec()),
@@ -351,19 +346,11 @@ impl TypeChecker {
 
         // A letter binds an extent parameter as it binds a number, so a shape-generic
         // contraction types once and each instance supplies the lengths. Two different
-        // parameters are two extents, as they are to `@`. A `?` axis has no length
-        // until run time, which the dynamic-extent rules own.
+        // parameters are two extents, as they are to `@`. A dynamic axis joins only the
+        // same name, so an anonymous `?` on either side of a letter is refused.
         for (letter, axis) in letters.iter().zip(shape.iter()) {
-            if axis.extent == ArrayLen::Dynamic {
-                self.record_error(TypeError::EinsumSymbolicExtent {
-                    position,
-                    name: axis.extent.to_string(),
-                    span,
-                });
-                return false;
-            }
             match extents.get(letter) {
-                Some(bound) if *bound != axis.extent => {
+                Some(bound) if !bound.aligns_with(&axis.extent) => {
                     self.record_error(TypeError::EinsumExtentConflict {
                         letter: *letter,
                         first: bound.to_string(),

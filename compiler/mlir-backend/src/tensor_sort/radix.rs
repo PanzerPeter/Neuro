@@ -40,26 +40,30 @@ pub(super) fn radix_order<'c, 'a>(
     location: Location<'c>,
     block: &'a Block<'c>,
     runs: &Runs<'c, 'a, '_>,
+    extents: &[usize],
     bits: u32,
 ) -> Result<Value<'c, 'a>, MlirError> {
     let index = Type::index(context);
-    let shape: Vec<i64> = runs.extents.iter().map(|&extent| extent as i64).collect();
+    let shape: Vec<i64> = extents.iter().map(|&extent| extent as i64).collect();
+    let length = extents[runs.axis];
+    let order_shape: Vec<Option<usize>> = extents.iter().map(|&extent| Some(extent)).collect();
     let buffer_type = MemRefType::new(index, &shape, None, None);
     let counts_type = MemRefType::new(index, &[RADIX_BUCKETS as i64], None, None);
     let allocate = |ty| append(block, memref::alloc(context, ty, &[], &[], None, location));
     let orders = [allocate(buffer_type)?, allocate(buffer_type)?];
     let counts = allocate(counts_type)?;
     let passes = (bits / DIGIT_BITS) as usize;
-    let run_count = runs.extents.iter().product::<usize>() / runs.length();
+    let run_count = extents.iter().product::<usize>() / length;
 
     let body = Block::new(&[(index, location)]);
     {
         let run: Value = body.argument(0)?.into();
-        let at = run_coordinates(context, location, &body, runs, run)?;
+        let at = run_coordinates(context, location, &body, runs, extents, run)?;
         let radix = Radix {
             context,
             location,
             runs,
+            length,
             at: &at,
             counts,
             bits,
@@ -83,7 +87,7 @@ pub(super) fn radix_order<'c, 'a>(
                 Identifier::new(context, "restrict"),
                 Attribute::unit(context),
             )])
-            .add_results(&[order_type(context, runs.extents)])
+            .add_results(&[order_type(context, &order_shape)])
             .build()?,
     )
 }
@@ -94,6 +98,8 @@ struct Radix<'c, 'v, 'r> {
     context: &'c Context,
     location: Location<'c>,
     runs: &'r Runs<'c, 'v, 'r>,
+    /// The length of one run, which every pass counts its positions by.
+    length: usize,
     at: &'r [Value<'c, 'v>],
     counts: Value<'c, 'v>,
     bits: u32,
@@ -134,7 +140,7 @@ impl<'c> Radix<'c, '_, '_> {
             step.append_operation(memref::store(count, self.counts, &[digit], location));
             scf_yield(&step, location, &[])?;
         }
-        radix_loop(self.context, location, block, self.runs.length(), &[], step)?;
+        radix_loop(self.context, location, block, self.length, &[], step)?;
         Ok(())
     }
 
@@ -180,7 +186,7 @@ impl<'c> Radix<'c, '_, '_> {
             step.append_operation(memref::store(next, self.counts, &[digit], location));
             scf_yield(&step, location, &[])?;
         }
-        radix_loop(self.context, location, block, self.runs.length(), &[], step)?;
+        radix_loop(self.context, location, block, self.length, &[], step)?;
         Ok(())
     }
 
@@ -276,12 +282,13 @@ fn run_coordinates<'c, 'a>(
     location: Location<'c>,
     block: &'a Block<'c>,
     runs: &Runs<'c, '_, '_>,
+    extents: &[usize],
     run: Value<'c, 'a>,
 ) -> Result<Vec<Value<'c, 'a>>, MlirError> {
     let constant = |value| index_constant(context, location, block, value);
-    let mut stride: usize = runs.extents.iter().product::<usize>() / runs.length();
-    let mut at = Vec::with_capacity(runs.extents.len());
-    for (axis, &extent) in runs.extents.iter().enumerate() {
+    let mut stride: usize = extents.iter().product::<usize>() / extents[runs.axis];
+    let mut at = Vec::with_capacity(extents.len());
+    for (axis, &extent) in extents.iter().enumerate() {
         if axis == runs.axis {
             at.push(constant(0)?);
             continue;

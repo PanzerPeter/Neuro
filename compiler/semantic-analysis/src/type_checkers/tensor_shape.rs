@@ -1,5 +1,5 @@
 // The shape-manipulation methods on a tensor: `.t()`, `.reshape([...])`,
-// `.permute([...])`, and `.flatten()` / `.flatten([...])`.
+// `.permute([...])`, and `.flatten()` / `.flatten([...])`, and the narrowing `.as_shape::<[...]>()`.
 //
 // Reached from the builtin-method arm of `check_call_expr`. What these four have in
 // common is that their arguments are read at compile time and never as values: a
@@ -11,7 +11,7 @@
 use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::{ArrayLen, ExtentExpr, TensorAxis, Type, shape_count};
-use ast_types::{BinaryOp, Expr, UnaryOp};
+use ast_types::{BinaryOp, Expr, GenericArg, TensorExtent, UnaryOp};
 use shared_types::{Literal, Span};
 
 /// The rank-2 transpose `matrix.t()`.
@@ -22,6 +22,8 @@ pub(crate) const RESHAPE_METHOD: &str = "reshape";
 pub(crate) const PERMUTE_METHOD: &str = "permute";
 /// `tensor.flatten()` / `tensor.flatten(dims: [...])`.
 pub(crate) const FLATTEN_METHOD: &str = "flatten";
+/// `tensor.as_shape::<[...]>()`, the run-time narrowing to a written shape.
+pub(crate) const AS_SHAPE_METHOD: &str = "as_shape";
 
 /// The `-1` an extent may be written as to have it inferred from the others.
 const INFERRED_EXTENT: i128 = -1;
@@ -35,6 +37,80 @@ pub(crate) fn is_shape_method(method: &str) -> bool {
 }
 
 impl TypeChecker {
+    /// Type-check `.as_shape::<[...]>()` on a tensor, returning `Option<Tensor<T, [...]>>`.
+    ///
+    /// The receiver is consumed, so it must be an owned tensor. The written shape has the
+    /// receiver's rank, and each axis is a literal, an extent parameter, `?`, or `?B`. A
+    /// name not in scope is fresh: it takes the receiver's extent at its axis and is in
+    /// scope after the expression, whatever the narrowing answers. Every other axis is
+    /// compared with the receiver's extent at run time, and the answer is `None` when one
+    /// disagrees.
+    pub(crate) fn check_as_shape(
+        &mut self,
+        object: &Expr,
+        recv: &Type,
+        type_args: &[GenericArg],
+        args: &[Expr],
+        call_span: Span,
+    ) -> Type {
+        self.check_call_args(args, &[], call_span);
+        let Type::Tensor { element, shape } = recv.referent() else {
+            return Type::Unknown;
+        };
+        if matches!(recv, Type::Reference { .. }) {
+            self.record_error(TypeError::TensorAsShapeBorrowed {
+                ty: recv.clone(),
+                span: call_span,
+            });
+            return Type::Unknown;
+        }
+        let [GenericArg::Shape { dims, .. }] = type_args else {
+            self.record_error(TypeError::TurbofishCountMismatch {
+                name: AS_SHAPE_METHOD.to_string(),
+                expected: 1,
+                found: type_args.len(),
+                span: call_span,
+            });
+            return Type::Unknown;
+        };
+        if dims
+            .iter()
+            .any(|dim| matches!(dim.extent, TensorExtent::Splice(_) | TensorExtent::Expr(_)))
+        {
+            self.record_error(TypeError::TensorAsShapeEntry { span: call_span });
+            return Type::Unknown;
+        }
+        let Some(written) = self.resolve_tensor_shape_in(dims, true) else {
+            return Type::Unknown;
+        };
+        if written.len() != shape.len() {
+            self.record_error(TypeError::TensorAsShapeRank {
+                expected: shape.len(),
+                found: written.len(),
+                span: call_span,
+            });
+            return Type::Unknown;
+        }
+
+        // A name the narrowing introduces is bound to the receiver's extent at its axis, the
+        // first occurrence doing the binding and any later one checking at run time.
+        for (axis, source) in written.iter().zip(shape.iter()) {
+            let ArrayLen::Dynamic(Some(name)) = &axis.extent else {
+                continue;
+            };
+            if !self.dynamic_name_in_scope(name) {
+                self.introduce_dynamic_name(name, Some(&source.extent), call_span);
+            }
+        }
+        self.record_move(object);
+        let result = Type::Tensor {
+            element: element.clone(),
+            shape: written,
+        };
+        let result = self.canonicalize_dynamic(&result, call_span);
+        self.option_of(result, call_span)
+    }
+
     /// Type-check one of the four shape-manipulation methods and return the tensor type
     /// it produces. The receiver is consumed: the one buffer moves into the result.
     pub(crate) fn check_tensor_shape_method(
@@ -100,7 +176,10 @@ impl TypeChecker {
     ///
     /// Over extent parameters the counts are compared here only when they are equal or
     /// both concrete: `[N, 2]` into `[N, 3]` holds at `N = 0`, so whether it holds at all
-    /// is a question for each instance, which lowering answers.
+    /// is a question for each instance, which lowering answers. A dynamic axis of the
+    /// receiver, or an entry naming a dynamic extent in scope, leaves the count to the
+    /// run-time check: such an entry is the result's axis of that name, and a `-1` that
+    /// cannot be divided out here is an anonymous `?`.
     fn resolve_reshape(
         &mut self,
         shape: &[TensorAxis],
@@ -108,11 +187,17 @@ impl TypeChecker {
         call_span: Span,
     ) -> Option<Vec<TensorAxis>> {
         let entries = self.shape_arg_entries(args, RESHAPE_METHOD, "-1", call_span)?;
-        let total = self.element_count(shape, RESHAPE_METHOD, call_span)?;
+        let total = shape_count(shape);
 
-        let mut extents: Vec<Option<ExtentExpr>> = Vec::with_capacity(entries.len());
+        let mut parts: Vec<ReshapePart> = Vec::with_capacity(entries.len());
         let mut inferred_at: Option<usize> = None;
         for entry in entries {
+            if let Expr::Identifier(ident) = entry
+                && self.dynamic_name_in_scope(&ident.name)
+            {
+                parts.push(ReshapePart::Named(self.canonical_dynamic_name(&ident.name)));
+                continue;
+            }
             let extent = self.reshape_extent(entry, CONST_FOLD_DEPTH);
             let value = extent.as_ref().and_then(ExtentExpr::as_constant);
             if value == Some(INFERRED_EXTENT) {
@@ -122,20 +207,32 @@ impl TypeChecker {
                     });
                     return None;
                 }
-                inferred_at = Some(extents.len());
-                extents.push(None);
+                inferred_at = Some(parts.len());
+                parts.push(ReshapePart::Inferred);
                 continue;
             }
             let Some(extent) = extent.filter(|_| value.is_none_or(|value| value >= 0)) else {
                 self.record_error(TypeError::TensorReshapeExtentNotConstant { span: entry.span() });
                 return None;
             };
-            extents.push(Some(extent));
+            parts.push(ReshapePart::Known(extent));
         }
 
-        let known = extents
+        let runtime_count = total.is_none()
+            || parts
+                .iter()
+                .any(|part| matches!(part, ReshapePart::Named(_)));
+        if runtime_count {
+            return Self::reshape_axes(parts, None);
+        }
+        let total = total?;
+
+        let known = parts
             .iter()
-            .flatten()
+            .filter_map(|part| match part {
+                ReshapePart::Known(extent) => Some(extent),
+                ReshapePart::Named(_) | ReshapePart::Inferred => None,
+            })
             .try_fold(ExtentExpr::constant(1), |product, extent| {
                 product.checked_mul(extent)
             });
@@ -144,7 +241,7 @@ impl TypeChecker {
             return None;
         };
         let concrete = known.as_constant().zip(total.as_constant());
-        if let Some(position) = inferred_at {
+        if inferred_at.is_some() {
             // A zero-extent axis beside a `-1` leaves nothing to divide by.
             let divides = concrete.is_none_or(|(known, total)| known != 0 && total % known == 0);
             let inferred = total.quot(&known).ok().filter(|_| divides);
@@ -156,7 +253,7 @@ impl TypeChecker {
                 });
                 return None;
             };
-            extents[position] = Some(inferred);
+            return Self::reshape_axes(parts, Some(inferred));
         } else if let Some((known, total)) = concrete
             && known != total
         {
@@ -167,15 +264,28 @@ impl TypeChecker {
             });
             return None;
         }
+        Self::reshape_axes(parts, None)
+    }
 
-        extents
+    /// The result axes of a reshape whose counts were settled: the inferred `-1`, when the
+    /// counts divided it out, is `inferred`, and a `-1` they could not is `?`.
+    fn reshape_axes(
+        parts: Vec<ReshapePart>,
+        inferred: Option<ExtentExpr>,
+    ) -> Option<Vec<TensorAxis>> {
+        let mut inferred = inferred;
+        parts
             .into_iter()
-            .flatten()
-            .map(|extent| {
-                Some(TensorAxis {
-                    name: None,
-                    extent: ArrayLen::from_extent(extent)?,
-                })
+            .map(|part| {
+                let extent = match part {
+                    ReshapePart::Known(extent) => ArrayLen::from_extent(extent)?,
+                    ReshapePart::Named(name) => ArrayLen::Dynamic(Some(name)),
+                    ReshapePart::Inferred => match inferred.take() {
+                        Some(extent) => ArrayLen::from_extent(extent)?,
+                        None => ArrayLen::Dynamic(None),
+                    },
+                };
+                Some(TensorAxis { name: None, extent })
             })
             .collect()
     }
@@ -205,7 +315,8 @@ impl TypeChecker {
     ///
     /// A merged axis loses its name: it is no longer the axis either name documented.
     /// The run has to be adjacent, because merging non-neighbouring axes would move
-    /// elements, and flattening is specified as a re-description of the same order.
+    /// elements, and flattening is specified as a re-description of the same order. A run
+    /// holding a dynamic axis has a run-time count, so the merged axis is an anonymous `?`.
     fn resolve_flatten(
         &mut self,
         shape: &[TensorAxis],
@@ -213,10 +324,9 @@ impl TypeChecker {
         call_span: Span,
     ) -> Option<Vec<TensorAxis>> {
         if args.is_empty() {
-            let total = self.element_count(shape, FLATTEN_METHOD, call_span)?;
             return Some(vec![TensorAxis {
                 name: None,
-                extent: ArrayLen::from_extent(total)?,
+                extent: Self::merged_extent(shape),
             }]);
         }
 
@@ -237,15 +347,21 @@ impl TypeChecker {
         }
 
         let run: Vec<TensorAxis> = axes.iter().map(|axis| shape[*axis].clone()).collect();
-        let merged = self.element_count(&run, FLATTEN_METHOD, call_span)?;
-
         let mut result: Vec<TensorAxis> = shape[..first].to_vec();
         result.push(TensorAxis {
             name: None,
-            extent: ArrayLen::from_extent(merged)?,
+            extent: Self::merged_extent(&run),
         });
         result.extend_from_slice(&shape[first + axes.len()..]);
         Some(result)
+    }
+
+    /// The extent a run of axes merges into: its element count as a number, or `?` when
+    /// one of its axes is dynamic and the count is only known at run time.
+    fn merged_extent(run: &[TensorAxis]) -> ArrayLen {
+        shape_count(run)
+            .and_then(ArrayLen::from_extent)
+            .unwrap_or(ArrayLen::Dynamic(None))
     }
 
     /// Turn each entry of an axis list into a receiver axis index, reporting an unknown
@@ -353,25 +469,6 @@ impl TypeChecker {
         false
     }
 
-    /// The receiver's element count, symbolic over extent parameters and splices. A `?`
-    /// axis has none until run time, which the dynamic-extent rules own.
-    fn element_count(
-        &mut self,
-        shape: &[TensorAxis],
-        method: &str,
-        call_span: Span,
-    ) -> Option<ExtentExpr> {
-        let count = shape_count(shape);
-        if count.is_none() {
-            self.record_error(TypeError::TensorShapeCastSymbolicExtent {
-                method: method.to_string(),
-                name: ArrayLen::Dynamic.to_string(),
-                span: call_span,
-            });
-        }
-        count
-    }
-
     /// A `.reshape` extent's value. The spec calls the list "a constant-expression
     /// array", so beyond a literal an extent may name a `const` or an extent parameter in
     /// scope, or combine them with arithmetic. A local binding shadows both and is a
@@ -420,6 +517,14 @@ impl TypeChecker {
             _ => None,
         }
     }
+}
+
+/// One entry of a `.reshape` list, once read: a count folded here, a dynamic name in scope,
+/// or the `-1` the others are divided into.
+enum ReshapePart {
+    Known(ExtentExpr),
+    Named(String),
+    Inferred,
 }
 
 /// How many constants deep an extent folds. A constant naming itself through a cycle

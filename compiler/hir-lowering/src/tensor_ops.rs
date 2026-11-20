@@ -14,8 +14,9 @@
 
 use ast_types::{BinaryOp, UnaryOp};
 use neuro_hir::{
-    AxisNames, HirCapture, HirExpr, HirExprKind, HirFunction, HirInterpPart, HirItem, HirParam,
-    HirPlace, HirStmt, HirTarget, HirTensorApply, HirTensorAxis, HirType,
+    AxisNames, HirCapture, HirExpr, HirExprKind, HirExtent, HirFunction, HirInterpPart, HirItem,
+    HirParam, HirPlace, HirReduceOp, HirSortKind, HirStmt, HirTarget, HirTensorApply,
+    HirTensorAxis, HirType,
 };
 use shared_types::{Literal, Span};
 
@@ -26,6 +27,9 @@ const OUTLINED_PREFIX: &str = "__tensor_op_";
 /// An outlined function's parameters are named with this and their position. The `__`
 /// prefix keeps them apart from a closure capture, which is passed under its own name.
 const OPERAND_PREFIX: &str = "__operand";
+
+/// The binding an index over a temporary object is read through, so its checks see the same tensor.
+const TEMPORARY_PREFIX: &str = "__index_source_";
 
 /// The parameter a traversal's function value is passed through, after every other one.
 const CALLEE_PARAMETER: &str = "__callee";
@@ -50,9 +54,10 @@ fn index_literal(value: usize, span: Span) -> HirExpr {
 /// The local a slice position is bound to while the call site checks it.
 const POSITION_LOCAL: &str = "__position";
 
-/// What an out-of-range slice position reports: the host's own words for it, so a device
-/// slice and a host one fail alike.
-const INDEX_OUT_OF_BOUNDS: &str = "tensor index out of bounds";
+use crate::extents::{
+    INDEX_OUT_OF_BOUNDS, binary, borrow, extent_read, guard, panic_text, u64_value,
+};
+use crate::tensor_index::dynamic_axis_check;
 
 /// Outline every tensor operation in the program's host code into a function of `target`,
 /// appended to `items`: `FollowsOperands` in a program that moves a tensor to a device,
@@ -61,6 +66,7 @@ pub(crate) fn outline(items: &mut Vec<HirItem>, target: HirTarget) {
     let mut outliner = Outliner {
         functions: Vec::new(),
         target,
+        temporaries: 0,
     };
     for item in items.iter_mut() {
         match item {
@@ -84,16 +90,16 @@ pub(crate) fn outline(items: &mut Vec<HirItem>, target: HirTarget) {
 struct Outliner {
     functions: Vec<HirFunction>,
     target: HirTarget,
+    /// Counts the temporaries bound for a checked index's object, so each has its own name.
+    temporaries: usize,
 }
 
 /// Whether an outlined body computes over a tensor of type `ty`: an element with arithmetic
-/// (a half-precision one computes in `f32`) and a static shape.
+/// (a half-precision one computes in `f32`). A dynamic axis is computed too: the body reads
+/// its extent from the operand at run time, and the call site sizes the result from
+/// [`HirFunction::result_extents`].
 fn computed_tensor(ty: &HirType) -> bool {
-    matches!(
-        ty.referent(),
-        HirType::Tensor { element, shape, .. }
-            if arithmetic(element) && shape.iter().all(Option::is_some)
-    )
+    matches!(ty.referent(), HirType::Tensor { element, .. } if arithmetic(element))
 }
 
 /// An element the language gives arithmetic: a number, or a half-precision float.
@@ -123,11 +129,18 @@ fn scalar(ty: &HirType) -> bool {
 
 /// Whether a traversal walks a tensor of type `ty`: a static shape of scalars.
 fn walked_tensor(ty: &HirType) -> bool {
-    matches!(
-        ty.referent(),
-        HirType::Tensor { element, shape, .. }
-            if scalar(element) && shape.iter().all(Option::is_some)
-    )
+    matches!(ty.referent(), HirType::Tensor { element, .. } if scalar(element))
+}
+
+/// Whether an index over `object_ty` checks a run-time extent: a position or a constant range
+/// on a dynamic axis. Such an index names its object as a place, so the check can borrow it.
+fn index_is_checked(object_ty: &HirType, axes: &[HirTensorAxis]) -> bool {
+    let HirType::Tensor { shape, .. } = object_ty.referent() else {
+        return false;
+    };
+    axes.iter()
+        .zip(shape)
+        .any(|(axis, extent)| extent.is_none() && !matches!(axis, HirTensorAxis::Whole))
 }
 
 /// A node of an outlinable operator tree: an operation producing a tensor out of tensors the
@@ -144,6 +157,14 @@ fn operator_node(expr: &HirExpr) -> bool {
         } | HirExprKind::TensorIndex { .. }
     );
     if !computed_tensor(&expr.ty) && !(layout && walked_tensor(&expr.ty)) {
+        return false;
+    }
+    // A checked index borrows its object for the check, which only a place can be read
+    // twice; any other object is bound by `outline_operation` first.
+    if let HirExprKind::TensorIndex { object, axes } = &expr.kind
+        && index_is_checked(&object.ty, axes)
+        && !is_place(object)
+    {
         return false;
     }
     match &expr.kind {
@@ -196,6 +217,12 @@ impl Outliner {
     /// and report whether it did. Its operands are rewritten first, so an operation nested
     /// in one (a reduction's receiver) is outlined on its own.
     fn outline_operation(&mut self, expr: &mut HirExpr) -> bool {
+        if let HirExprKind::TensorIndex { object, axes } = &expr.kind
+            && index_is_checked(&object.ty, axes)
+            && !is_place(object)
+        {
+            return self.outline_temporary_index(expr);
+        }
         if operator_node(expr) {
             let mut operands = Vec::new();
             let body = self.take_tree(placeholder(expr), &mut operands);
@@ -212,14 +239,40 @@ impl Outliner {
                 self.rewrite(receiver);
                 let span = expr.span;
                 let mut sort = placeholder(expr);
-                let HirExprKind::TensorSort { receiver, .. } = &mut sort.kind else {
+                let HirExprKind::TensorSort {
+                    receiver,
+                    kind,
+                    axis,
+                    ..
+                } = &mut sort.kind
+                else {
                     return false;
                 };
-                let operand = lend_out(receiver, 0, span);
+                let axis = *axis;
+                let top = match kind {
+                    HirSortKind::TopK(k) => Some(*k),
+                    _ => None,
+                };
+                let mut operand = lend_out(receiver, 0, span);
+                // `.topk(k)` past a dynamic axis's run-time extent is refused at the call.
+                if let Some(k) = top
+                    && is_dynamic_axis(&operand.ty, axis)
+                {
+                    operand = guarded_operand(operand, span, |tensor| {
+                        let within = binary(
+                            BinaryOp::LessEqual,
+                            u64_value(k as u64, span),
+                            extent_read(borrow(tensor), axis, span),
+                            HirType::Bool,
+                            span,
+                        );
+                        vec![guard(within, panic_text(INDEX_OUT_OF_BOUNDS, span), span)]
+                    });
+                }
                 *expr = self.call(sort, vec![operand], &[], None, span);
                 true
             }
-            HirExprKind::TensorReduce { receiver, axis, .. } => {
+            HirExprKind::TensorReduce { receiver, axis, op } => {
                 if !computed_tensor(&receiver.ty) || (axis.is_some() && !computed_tensor(&expr.ty))
                 {
                     return false;
@@ -227,11 +280,40 @@ impl Outliner {
                 self.rewrite(receiver);
                 let whole = axis.is_none();
                 let span = expr.span;
+                let method = reduce_method(*op);
+                // The run a reduction folds is every axis, or the one it names. A static empty
+                // run was refused before lowering; a dynamic one is refused here, at run time.
+                let run: Vec<usize> = match axis {
+                    Some(axis) => vec![*axis],
+                    None => (0..tensor_rank(&receiver.ty)).collect(),
+                };
                 let mut reduce = placeholder(expr);
                 let HirExprKind::TensorReduce { receiver, .. } = &mut reduce.kind else {
                     return false;
                 };
-                let operand = lend_out(receiver, 0, span);
+                let mut operand = lend_out(receiver, 0, span);
+                let dynamic: Vec<usize> = run
+                    .into_iter()
+                    .filter(|&axis| is_dynamic_axis(&operand.ty, axis))
+                    .collect();
+                if !dynamic.is_empty() {
+                    operand = guarded_operand(operand, span, |tensor| {
+                        dynamic
+                            .iter()
+                            .map(|&axis| {
+                                let filled = binary(
+                                    BinaryOp::Greater,
+                                    extent_read(borrow(tensor.clone()), axis, span),
+                                    u64_value(0, span),
+                                    HirType::Bool,
+                                    span,
+                                );
+                                let message = format!("`.{method}()` reduces over no elements");
+                                guard(filled, panic_text(&message, span), span)
+                            })
+                            .collect()
+                    });
+                }
                 *expr = match whole {
                     true => self.boxed_call(reduce, vec![operand], &[], None, span),
                     false => self.call(reduce, vec![operand], &[], None, span),
@@ -368,12 +450,11 @@ impl Outliner {
         let receiver = lend(std::mem::replace(receiver.as_mut(), unit(span)));
         let seed = std::mem::replace(seed.as_mut(), unit(span));
         let callee = std::mem::replace(callee.as_mut(), unit(span));
-        let extents = match receiver.ty.referent() {
-            HirType::Tensor { shape, .. } => {
-                shape.iter().map(|extent| extent.unwrap_or(0)).collect()
-            }
+        let extents: Vec<Option<usize>> = match receiver.ty.referent() {
+            HirType::Tensor { shape, .. } => shape.clone(),
             _ => Vec::new(),
         };
+        let receiver_local = receiver.ty.clone();
         let element = element(&receiver.ty).cloned().unwrap_or(HirType::Void);
         let local = |name: &str, ty: &HirType| {
             HirExpr::new(HirExprKind::Variable(name.to_string()), ty.clone(), span)
@@ -413,12 +494,18 @@ impl Outliner {
             span,
         }];
         for (axis, extent) in extents.iter().enumerate().rev() {
+            // A dynamic axis runs to the receiver's run-time extent, read from the local the
+            // receiver is declared as.
+            let end = match extent {
+                Some(value) => index_literal(*value, span),
+                None => extent_read(borrow(local(FOLD_RECEIVER, &receiver_local)), axis, span),
+            };
             body = vec![HirStmt::ForRange {
                 label: None,
                 index: None,
                 iterator: position_name(axis),
                 start: index_literal(0, span),
-                end: index_literal(*extent, span),
+                end,
                 inclusive: false,
                 reversed: false,
                 step: None,
@@ -513,12 +600,35 @@ impl Outliner {
                     HirType::Tensor { shape, .. } => shape.clone(),
                     _ => Vec::new(),
                 };
+                // Only a place reaches here as a checked object (see `operator_node`), so the
+                // checks can borrow it where the call evaluates them.
+                let source = (**object).clone();
+                let before = operands.len();
                 **object = self.take_read(std::mem::replace(object, unit(span)), operands);
-                for (axis, extent) in axes.iter_mut().zip(extents) {
+                // A constant range over a dynamic axis is checked before the object is lent.
+                let mut range_checks = Vec::new();
+                for (index, (axis, extent)) in axes.iter().zip(extents.iter()).enumerate() {
+                    if let (HirTensorAxis::Range { .. }, None) = (axis, extent)
+                        && let Some(check) = dynamic_axis_check(axis, &source, index, span)
+                    {
+                        range_checks.push(check);
+                    }
+                }
+                if !range_checks.is_empty() && operands.len() == before + 1 {
+                    let lent = operands.pop().unwrap_or_else(|| unit(span));
+                    let mut stmts = range_checks;
+                    stmts.push(HirStmt::Expr(lent.clone()));
+                    operands.push(HirExpr::new(HirExprKind::Block { stmts }, lent.ty, span));
+                }
+                for (index, (axis, extent)) in axes.iter_mut().zip(extents).enumerate() {
                     if let HirTensorAxis::Position(position) = axis {
                         self.rewrite(position);
+                        let bound = match extent {
+                            Some(value) => index_literal(value, span),
+                            None => extent_read(borrow(source.clone()), index, span),
+                        };
                         let checked =
-                            checked_position(std::mem::replace(position, unit(span)), extent, span);
+                            checked_position(std::mem::replace(position, unit(span)), bound, span);
                         *position = parameter(operands.len(), &checked);
                         operands.push(checked);
                     }
@@ -560,13 +670,56 @@ impl Outliner {
         span: Span,
     ) -> HirExpr {
         let ret = body.ty.clone();
-        self.define(
+        let extents = result_extents(&body);
+        let call = self.define(
             vec![HirStmt::Expr(body)],
             ret,
             operands,
             (captures, callee),
             span,
-        )
+        );
+        if let Some(function) = self.functions.last_mut() {
+            function.result_extents = extents;
+        }
+        call
+    }
+
+    /// A checked index whose object is a temporary: the temporary is bound first, so the
+    /// checks and the read see one tensor. The object is outlined on its own, and the index
+    /// over the binding is then outlined as any place's would be.
+    fn outline_temporary_index(&mut self, expr: &mut HirExpr) -> bool {
+        let span = expr.span;
+        let ty = expr.ty.clone();
+        let HirExprKind::TensorIndex { object, .. } = &mut expr.kind else {
+            return false;
+        };
+        self.rewrite(object);
+        let temp = format!("{TEMPORARY_PREFIX}{}", self.temporaries);
+        self.temporaries += 1;
+        let object_ty = object.ty.clone();
+        let taken = std::mem::replace(
+            object.as_mut(),
+            HirExpr::new(HirExprKind::Variable(temp.clone()), object_ty.clone(), span),
+        );
+        let mut index = std::mem::replace(expr, unit(span));
+        self.outline_operation(&mut index);
+        *expr = HirExpr::new(
+            HirExprKind::Block {
+                stmts: vec![
+                    HirStmt::VarDecl {
+                        name: temp,
+                        ty: object_ty,
+                        init: Some(taken),
+                        mutable: false,
+                        span,
+                    },
+                    HirStmt::Expr(index),
+                ],
+            },
+            ty,
+            span,
+        );
+        true
     }
 
     /// [`Self::call`] for a body yielding a scalar, which a GPU body cannot return: its
@@ -656,6 +809,7 @@ impl Outliner {
             span,
         );
         self.functions.push(HirFunction {
+            result_extents: Vec::new(),
             name,
             params,
             return_type: ret.clone(),
@@ -807,9 +961,10 @@ impl Outliner {
             | HirExprKind::Variable(_)
             | HirExprKind::Path { .. }
             | HirExprKind::GridPosition { .. }
-            | HirExprKind::TensorIdentity
             | HirExprKind::CollectionNew { capacity: None }
             | HirExprKind::Closure { .. } => {}
+            HirExprKind::TensorIdentity { dims } => self.rewrite_all(dims),
+            HirExprKind::TensorExtent { tensor, .. } => self.rewrite(tensor),
             HirExprKind::CollectionNew {
                 capacity: Some(capacity),
             } => self.rewrite(capacity),
@@ -831,7 +986,6 @@ impl Outliner {
             | HirExprKind::DynCoerce { value: operand }
             | HirExprKind::SliceCoerce { value: operand }
             | HirExprKind::NewtypeConstruct { value: operand, .. }
-            | HirExprKind::TensorFill { value: operand }
             | HirExprKind::ArrayRest { array: operand, .. }
             | HirExprKind::TensorShapeCast {
                 receiver: operand, ..
@@ -877,9 +1031,14 @@ impl Outliner {
             | HirExprKind::TensorEinsum {
                 operands: elements, ..
             } => self.rewrite_all(elements),
-            HirExprKind::TensorRandomNormal { mean, std } => {
+            HirExprKind::TensorRandomNormal { mean, std, dims } => {
                 self.rewrite(mean);
                 self.rewrite(std);
+                self.rewrite_all(dims);
+            }
+            HirExprKind::TensorFill { value, dims } => {
+                self.rewrite(value);
+                self.rewrite_all(dims);
             }
             HirExprKind::Index { object, index } => {
                 self.rewrite(object);
@@ -938,6 +1097,193 @@ fn element(ty: &HirType) -> Option<&HirType> {
         HirType::Tensor { element, .. } => Some(element),
         _ => None,
     }
+}
+
+/// Whether axis `axis` of the tensor type `ty` has a run-time extent.
+fn tensor_rank(ty: &HirType) -> usize {
+    match ty.referent() {
+        HirType::Tensor { shape, .. } => shape.len(),
+        _ => 0,
+    }
+}
+
+/// The method a reduction was written as, for its run-time diagnostic.
+fn reduce_method(op: HirReduceOp) -> &'static str {
+    match op {
+        HirReduceOp::Sum => "sum",
+        HirReduceOp::Mean => "mean",
+        HirReduceOp::Max => "max",
+        HirReduceOp::Min => "min",
+    }
+}
+
+fn is_dynamic_axis(ty: &HirType, axis: usize) -> bool {
+    matches!(
+        ty.referent(),
+        HirType::Tensor { shape, .. } if shape.get(axis).is_some_and(Option::is_none)
+    )
+}
+
+/// `operand` bound to a local for the length of `checks`, which read that local, and then
+/// handed on as the operand itself: the checks run where the call evaluates its operands.
+fn guarded_operand(
+    operand: HirExpr,
+    span: Span,
+    checks: impl FnOnce(HirExpr) -> Vec<HirStmt>,
+) -> HirExpr {
+    let ty = operand.ty.clone();
+    let local = format!("{TEMPORARY_PREFIX}operand");
+    let read = HirExpr::new(HirExprKind::Variable(local.clone()), ty.clone(), span);
+    let mut stmts = vec![HirStmt::VarDecl {
+        name: local,
+        ty: ty.clone(),
+        init: Some(operand),
+        mutable: false,
+        span,
+    }];
+    stmts.extend(checks(read.clone()));
+    stmts.push(HirStmt::Expr(read));
+    HirExpr::new(HirExprKind::Block { stmts }, ty, span)
+}
+
+/// The run-time extent of each dynamic axis of an outlined body's result, in the order the
+/// result type lists them (a tuple result's parts in order). Every such axis is walked by
+/// some operand, so [`extent_of`] finds it.
+fn result_extents(body: &HirExpr) -> Vec<HirExtent> {
+    let parts: Vec<&HirType> = match &body.ty {
+        HirType::Tuple(parts) => parts.iter().collect(),
+        other => vec![other],
+    };
+    let mut extents = Vec::new();
+    for part in parts {
+        let HirType::Tensor { shape, .. } = part.referent() else {
+            continue;
+        };
+        for (axis, extent) in shape.iter().enumerate() {
+            if extent.is_none()
+                && let Some(found) = extent_of(body, axis)
+            {
+                extents.push(found);
+            }
+        }
+    }
+    extents
+}
+
+/// The run-time extent of axis `axis` of the tensor `expr` computes, as a function of the
+/// operands the outlined body names (`__operandN`). An element-wise operation takes the
+/// extent of an operand that walks the axis itself, counted from the trailing axis, so a
+/// dynamic axis is never stretched.
+fn extent_of(expr: &HirExpr, axis: usize) -> Option<HirExtent> {
+    match &expr.kind {
+        HirExprKind::Variable(name) => {
+            let operand = name.strip_prefix(OPERAND_PREFIX)?.parse::<usize>().ok()?;
+            Some(HirExtent::Axis { operand, axis })
+        }
+        HirExprKind::Binary {
+            op: BinaryOp::MatMul,
+            left,
+            right,
+        } => {
+            let rank = rank_of(&expr.ty)?;
+            if axis + 2 == rank {
+                return extent_of(left, rank_of(&left.ty)?.checked_sub(2)?);
+            }
+            if axis + 1 == rank {
+                return extent_of(right, rank_of(&right.ty)?.checked_sub(1)?);
+            }
+            // A batch axis is walked by whichever operand has it, counted from the trailing one.
+            aligned_extent(&[&**left, &**right], rank, axis, 2)
+        }
+        HirExprKind::Binary { left, right, .. } => {
+            let rank = rank_of(&expr.ty)?;
+            aligned_extent(&[&**left, &**right], rank, axis, 0)
+        }
+        HirExprKind::TensorShapeCast {
+            receiver,
+            permutation: Some(order),
+            ..
+        } => extent_of(receiver, *order.get(axis)?),
+        HirExprKind::TensorIndex { object, axes } => {
+            let mut survivor = 0;
+            for (position, index) in axes.iter().enumerate() {
+                if matches!(index, HirTensorAxis::Position(_)) {
+                    continue;
+                }
+                if survivor == axis {
+                    return match index {
+                        HirTensorAxis::Whole => extent_of(object, position),
+                        _ => None,
+                    };
+                }
+                survivor += 1;
+            }
+            None
+        }
+        HirExprKind::Math { operand, .. } => extent_of(operand, axis),
+        HirExprKind::TensorEinsum {
+            operands,
+            inputs,
+            output,
+            ..
+        } => {
+            let letter = *output.get(axis)?;
+            for (operand, subscript) in operands.iter().zip(inputs) {
+                if let Some(position) = subscript.iter().position(|index| *index == letter) {
+                    return extent_of(operand, position);
+                }
+            }
+            None
+        }
+        HirExprKind::TensorReduce {
+            receiver,
+            axis: Some(reduced),
+            ..
+        } => extent_of(receiver, if axis < *reduced { axis } else { axis + 1 }),
+        HirExprKind::TensorSort { receiver, .. } | HirExprKind::TensorApply { receiver, .. } => {
+            extent_of(receiver, axis)
+        }
+        _ => None,
+    }
+}
+
+/// The rank of a tensor type, or of a tensor a tuple part names.
+fn rank_of(ty: &HirType) -> Option<usize> {
+    match ty.referent() {
+        HirType::Tensor { shape, .. } => Some(shape.len()),
+        _ => None,
+    }
+}
+
+/// The extent of result axis `axis` (of a result of rank `rank`) from the first operand
+/// that walks it: operand axes align on their trailing edge, and an operand walks an axis
+/// only when it has one there. `keep` leaves that many trailing axes of each operand out
+/// (a matrix product's two matrix axes, which are not batch axes).
+fn aligned_extent(
+    operands: &[&HirExpr],
+    rank: usize,
+    axis: usize,
+    keep: usize,
+) -> Option<HirExtent> {
+    for operand in operands {
+        let HirType::Tensor { shape, .. } = operand.ty.referent() else {
+            continue;
+        };
+        let depth = shape.len();
+        let Some(offset) = rank.checked_sub(depth) else {
+            continue;
+        };
+        let Some(position) = axis.checked_sub(offset) else {
+            continue;
+        };
+        if position + keep >= depth {
+            continue;
+        }
+        if shape[position].is_none() {
+            return extent_of(operand, position);
+        }
+    }
+    None
 }
 
 /// The argument a reduction or a sort passes for its receiver. Both read the receiver and
@@ -1003,7 +1349,7 @@ fn mutable_borrow(place: &HirPlace, ty: &HirType, span: Span) -> HirExpr {
 /// A GPU body cannot stop the program, so a position reaches one only once it is known to
 /// be in range. A signed position widens with its sign, so a negative one fails the same
 /// unsigned test, as on the host.
-fn checked_position(position: HirExpr, extent: Option<usize>, span: Span) -> HirExpr {
+fn checked_position(position: HirExpr, bound: HirExpr, span: Span) -> HirExpr {
     let ty = position.ty.clone();
     let local = HirExpr::new(
         HirExprKind::Variable(POSITION_LOCAL.to_string()),
@@ -1020,20 +1366,7 @@ fn checked_position(position: HirExpr, extent: Option<usize>, span: Span) -> Hir
             position.span,
         ),
     };
-    let bound = HirExpr::new(
-        HirExprKind::Literal(Literal::Integer(extent.unwrap_or(0) as i128, None)),
-        HirType::U64,
-        span,
-    );
-    let inside = HirExpr::new(
-        HirExprKind::Binary {
-            op: BinaryOp::Less,
-            left: Box::new(widened),
-            right: Box::new(bound),
-        },
-        HirType::Bool,
-        span,
-    );
+    let inside = binary(BinaryOp::Less, widened, bound, HirType::Bool, span);
     let outside = HirExpr::new(
         HirExprKind::Unary {
             op: UnaryOp::Not,
@@ -1042,26 +1375,7 @@ fn checked_position(position: HirExpr, extent: Option<usize>, span: Span) -> Hir
         HirType::Bool,
         span,
     );
-    let message = HirExpr::new(
-        HirExprKind::Literal(Literal::String(INDEX_OUT_OF_BOUNDS.to_string())),
-        HirType::String,
-        span,
-    );
-    let panic = HirExpr::new(
-        HirExprKind::Call {
-            callee: Box::new(HirExpr::new(
-                HirExprKind::Variable("panic".to_string()),
-                HirType::Function {
-                    params: vec![HirType::String],
-                    ret: Box::new(HirType::Void),
-                },
-                span,
-            )),
-            args: vec![message],
-        },
-        HirType::Void,
-        span,
-    );
+    let panic = panic_text(INDEX_OUT_OF_BOUNDS, span);
     let block_span = position.span;
     HirExpr::new(
         HirExprKind::Block {

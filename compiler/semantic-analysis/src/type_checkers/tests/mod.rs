@@ -8,6 +8,7 @@ mod decl_tests;
 mod derivable_tests;
 mod derive_tests;
 mod drop_tests;
+mod dynamic_name_tests;
 mod elementwise_math_tests;
 mod enum_expr_tests;
 mod enum_tests;

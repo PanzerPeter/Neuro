@@ -185,8 +185,10 @@ impl Lowerer {
         out: &mut Vec<HirStmt>,
     ) -> Result<(), LoweringError> {
         let Some((name, span)) = self.backward_statement(stmt) else {
-            out.push(self.lower_stmt(stmt)?);
-            return Ok(());
+            return self.in_extent_statement(out, |lo, out| {
+                out.push(lo.lower_stmt(stmt)?);
+                Ok(())
+            });
         };
         self.lower_backward(name, span, out)
     }

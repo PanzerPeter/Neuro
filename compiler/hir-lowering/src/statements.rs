@@ -1,8 +1,9 @@
 //! Statement lowering.
 
 use ast_types::{Expr, Place, Stmt};
-use neuro_hir::{HirExprKind, HirPlace, HirStmt, HirType};
+use neuro_hir::{HirExprKind, HirPlace, HirStmt, HirTensorAxis, HirType};
 
+use crate::extents::variable;
 use crate::iteration::{
     LoopPosition, char_indices_receiver, map_entry_types, map_loop_item, map_view_receiver,
 };
@@ -50,6 +51,9 @@ impl Lowerer {
                         });
                     }
                 };
+                if let Some(annotation) = ty {
+                    self.bind_annotation_extents(&name.name, annotation, &final_ty, *span);
+                }
                 self.define(name.name.clone(), final_ty.clone());
                 Ok(HirStmt::VarDecl {
                     name: name.name.clone(),
@@ -579,7 +583,7 @@ impl Lowerer {
                     });
                 };
                 let ty = (**element).clone();
-                let extents = crate::static_extents(shape)?;
+                let extents = shape.clone();
                 if indices.len() != extents.len() {
                     return Err(LoweringError::Malformed {
                         detail: format!(
@@ -590,8 +594,36 @@ impl Lowerer {
                     });
                 }
                 let mut axes = Vec::with_capacity(indices.len());
-                for (index, extent) in indices.iter().zip(extents.iter()) {
-                    axes.push(self.lower_tensor_axis(index, *extent)?);
+                for (position, (index, extent)) in indices.iter().zip(extents.iter()).enumerate() {
+                    let axis = match (index, extent) {
+                        // A dynamic position is bound before the write, so the check and the
+                        // element it writes agree (R9).
+                        (ast_types::TensorIndexArg::Position(expr), None) => {
+                            let value = self.lower_expr(expr, None)?;
+                            let ty = value.ty.clone();
+                            let temp = self.fresh_extent_temp();
+                            self.extent_statement.before.push(HirStmt::VarDecl {
+                                name: temp.clone(),
+                                ty: ty.clone(),
+                                init: Some(value),
+                                mutable: false,
+                                span: expr.span(),
+                            });
+                            HirTensorAxis::Position(variable(&temp, ty, expr.span()))
+                        }
+                        _ => self.lower_tensor_axis(index, *extent)?,
+                    };
+                    if extent.is_none()
+                        && let Some(check) = crate::tensor_index::dynamic_axis_check(
+                            &axis,
+                            &object,
+                            position,
+                            object.span,
+                        )
+                    {
+                        self.extent_statement.before.push(check);
+                    }
+                    axes.push(axis);
                 }
                 Ok(HirPlace::TensorIndex {
                     object: Box::new(object),

@@ -19,13 +19,21 @@
 //
 // An integer run on the host at least `RADIX_BUCKETS` long sorts by LSD radix instead
 // (`radix.rs`).
+//
+// A run whose length is dynamic has no static pass count, so its merge passes are a loop: the
+// `ceil(log2(n))` passes run two at a time over two buffers, which the loop names statically
+// (no buffer is carried through the loop, since bufferization would copy the swapped ones on
+// every iteration). The width of pass `k` is `2^k` and its search takes `k + 1` steps. An odd
+// count copies the answer back into the first buffer. Radix needs static extents and so is not
+// taken for a dynamic run, which is no change to the order: every stable sort gives the same one.
 
 use crate::{
     errors::MlirError,
     guards::{Element, Lowering, Side},
-    lower::map_type,
+    lower::{dynamic_extent, map_type},
     tensor_arithmetic::{
-        Generic, build_expression, empty_tensor, indexing_maps, iterator_types, tensor_parts,
+        Extent, Generic, OperandAxes, build_expression, dynamic_sizes, empty_tensor, indexing_maps,
+        iterator_types, result_extents, shape_type, tensor_parts,
     },
     tensor_layout::linalg_index,
     tensor_reduce::{append, apply, index_constant, yield_value},
@@ -33,12 +41,16 @@ use crate::{
 
 use melior::{
     Context,
-    dialect::arith::{self, CmpfPredicate, CmpiPredicate},
+    dialect::{
+        arith::{self, CmpfPredicate, CmpiPredicate},
+        memref, scf,
+    },
     ir::{
-        Block, BlockLike, Location, Region, RegionLike, Type, Value, ValueLike,
-        attribute::IntegerAttribute,
+        Attribute, Block, BlockLike, Identifier, Location, Region, RegionLike, Type, TypeLike,
+        Value, ValueLike,
+        attribute::{DenseI32ArrayAttribute, IntegerAttribute},
         operation::OperationBuilder,
-        r#type::{IntegerType, RankedTensorType},
+        r#type::{IntegerType, MemRefType},
     },
 };
 use neuro_hir::{HirExpr, HirExprKind, HirSortKind, HirType};
@@ -58,19 +70,27 @@ enum Picked {
     Position,
 }
 
-/// The runs a sort orders: the source, along `axis` of its static `extents`.
+/// The runs a sort orders: the source, along `axis`.
 struct Runs<'c, 'a, 'e> {
     source: Value<'c, 'a>,
     element: Type<'c>,
     kind: Element,
     descending: bool,
-    extents: &'e [usize],
+    /// The source's extents, `None` where one is dynamic.
+    shape: &'e [Option<usize>],
+    /// Each axis's run-time extent: the static one, or a dynamic one read off the source.
+    dims: Vec<Extent<'c, 'a>>,
     axis: usize,
 }
 
-impl Runs<'_, '_, '_> {
-    fn length(&self) -> usize {
-        self.extents[self.axis]
+impl<'c, 'a> Runs<'c, 'a, '_> {
+    /// The number of elements in one run.
+    fn length(&self) -> Extent<'c, 'a> {
+        self.dims[self.axis]
+    }
+
+    fn rank(&self) -> usize {
+        self.dims.len()
     }
 }
 
@@ -96,13 +116,10 @@ pub(crate) fn build_sort<'c, 'a>(
     let Some((element, shape)) = tensor_parts(&receiver.ty) else {
         return Ok(None);
     };
-    let Some(extents) = shape.iter().copied().collect::<Option<Vec<usize>>>() else {
-        return Ok(None);
-    };
     let Some(compared) = Element::computed(element) else {
         return Ok(None);
     };
-    if *axis >= extents.len() {
+    if *axis >= shape.len() {
         return Ok(None);
     }
     let outputs: Vec<(Picked, &HirType)> = match (kind, &sort.ty) {
@@ -119,19 +136,25 @@ pub(crate) fn build_sort<'c, 'a>(
         return Ok(None);
     };
 
+    let dims = source_extents(context, location, block, source, shape)?;
     let runs = Runs {
         source,
         element: map_type(context, element)?,
         kind: compared,
         descending: *descending,
-        extents: &extents,
+        shape,
+        dims,
         axis: *axis,
     };
-    let order = match compared {
-        Element::Signed(bits) | Element::Unsigned(bits)
-            if lowering.side == Side::Host && runs.length() >= RADIX_BUCKETS =>
+    // The radix sort's loops need every extent static. The merge sort takes any run.
+    let static_extents = shape.iter().copied().collect::<Option<Vec<usize>>>();
+    let order = match (compared, static_extents) {
+        (Element::Signed(bits) | Element::Unsigned(bits), Some(extents))
+            if lowering.side == Side::Host && extents[*axis] >= RADIX_BUCKETS =>
         {
-            Some(radix::radix_order(context, location, block, &runs, bits)?)
+            Some(radix::radix_order(
+                context, location, block, &runs, &extents, bits,
+            )?)
         }
         _ => merge_order(context, location, block, &runs)?,
     };
@@ -146,9 +169,22 @@ pub(crate) fn build_sort<'c, 'a>(
 }
 
 /// A tensor of run positions shaped like the source.
-fn order_type<'c>(context: &'c Context, extents: &[usize]) -> Type<'c> {
-    let shape: Vec<u64> = extents.iter().map(|&extent| extent as u64).collect();
-    RankedTensorType::new(&shape, Type::index(context), None).into()
+fn order_type<'c>(context: &'c Context, shape: &[Option<usize>]) -> Type<'c> {
+    shape_type(Type::index(context), shape)
+}
+
+/// The run-time extents of `source`, of shape `shape`: a static one as it is, a dynamic one
+/// read off `source` itself.
+fn source_extents<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    source: Value<'c, 'a>,
+    shape: &[Option<usize>],
+) -> Result<Vec<Extent<'c, 'a>>, MlirError> {
+    let own: OperandAxes = Some((0..shape.len()).map(Some).collect());
+    result_extents(context, location, block, shape, &[(source, &own)])?
+        .ok_or(MlirError::ModuleVerificationFailed)
 }
 
 /// One output of the sort, of type `result`: at each of its positions, what `picked` takes
@@ -169,7 +205,16 @@ fn gather<'c, 'a>(
     let rank = shape.len();
     let tensor_type = map_type(context, result)?;
     let element_type = map_type(context, element)?;
-    let empty = append(block, empty_tensor(location, tensor_type, &[])?)?;
+    // A sort keeps every axis of its source, so a dynamic axis of the result is the source's.
+    let extents: Vec<Extent> = shape
+        .iter()
+        .zip(&runs.dims)
+        .map(|(extent, dim)| extent.map_or(*dim, Extent::Static))
+        .collect();
+    let empty = append(
+        block,
+        empty_tensor(location, tensor_type, &dynamic_sizes(&extents))?,
+    )?;
 
     let body = Block::new(&[(element_type, location)]);
     let at = position(context, location, &body, rank)?;
@@ -212,49 +257,270 @@ fn merge_order<'c, 'a>(
     block: &'a Block<'c>,
     runs: &Runs<'c, 'a, '_>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
-    let order_type = order_type(context, runs.extents);
-    let mut order = None;
-    let mut width = 1;
-    while width < runs.length() {
-        let empty = append(block, empty_tensor(location, order_type, &[])?)?;
-        let body = merge_pass(context, location, runs, order, width)?;
-        order = Some(all_parallel(
-            context,
-            location,
-            block,
-            empty,
-            order_type,
-            runs.extents.len(),
-            body,
-        )?);
-        width *= 2;
+    let order_type = order_type(context, runs.shape);
+    let sizes = dynamic_sizes(&runs.dims);
+    let index = Type::index(context);
+    match runs.length() {
+        Extent::Static(length) => {
+            let mut order = None;
+            let mut width = 1;
+            while width < length {
+                let empty = append(block, empty_tensor(location, order_type, &sizes)?)?;
+                let width_value = index_constant(context, location, block, width)?;
+                let steps = index_constant(
+                    context,
+                    location,
+                    block,
+                    (usize::BITS - width.leading_zeros()) as usize,
+                )?;
+                let body = merge_pass(context, location, runs, order, width_value, steps)?;
+                order = Some(all_parallel(
+                    context,
+                    location,
+                    block,
+                    empty,
+                    order_type,
+                    runs.rank(),
+                    body,
+                )?);
+                width *= 2;
+            }
+            Ok(order)
+        }
+        Extent::Dynamic(length) => {
+            // A run of `n` takes `ceil(log2(n))` doublings, which is the bit length of `n - 1`
+            // (none for a run of one, and a run of zero has none to sort). Counted at run time,
+            // so the passes are loops over two buffers, `first` and `second`. Each loop iteration
+            // runs two passes with the buffers named statically (`first` to `second`, then back),
+            // the second guarded by `scf.if`, and a final copy brings the answer back to `first`
+            // when the count is odd. No buffer is carried through a loop: bufferization would copy
+            // the swapped ones on each iteration.
+            let one = index_constant(context, location, block, 1)?;
+            let shorter = append(block, arith::subi(length, one, location))?;
+            let word = IntegerType::new(context, 64).into();
+            let shorter = append(block, arith::index_cast(shorter, word, location))?;
+            let leading = append(
+                block,
+                OperationBuilder::new("math.ctlz", location)
+                    .add_operands(&[shorter])
+                    .add_results(&[word])
+                    .build()?,
+            )?;
+            let sixty_four = append(
+                block,
+                arith::constant(context, IntegerAttribute::new(word, 64).into(), location),
+            )?;
+            let bits = append(block, arith::subi(sixty_four, leading, location))?;
+            let passes = append(block, arith::index_cast(bits, index, location))?;
+            let zero = index_constant(context, location, block, 0)?;
+            let two = index_constant(context, location, block, 2)?;
+
+            let sizes = dynamic_sizes(&runs.dims);
+            let buffer_type = MemRefType::new(index, &buffer_shape(runs.shape), None, None);
+            let first = append(
+                block,
+                memref::alloc(context, buffer_type, &sizes, &[], None, location),
+            )?;
+            let second = append(
+                block,
+                memref::alloc(context, buffer_type, &sizes, &[], None, location),
+            )?;
+            identity_into(context, location, block, runs, first)?;
+
+            // Pass `k` doubles blocks of width `2^k` and is the bit length `k + 1` steps of the search.
+            // The loop index `p` runs passes `2p` and `2p + 1`, so pass `2p` is always there.
+            let pairs = {
+                let plus_one = append(block, arith::addi(passes, one, location))?;
+                append(block, arith::shrui(plus_one, one, location))?
+            };
+            let body = Block::new(&[(index, location)]);
+            let p: Value = body.argument(0)?.into();
+            let one_in_body = index_constant(context, location, &body, 1)?;
+            let even = append(&body, arith::muli(p, two, location))?;
+            let even_width = append(&body, arith::shli(one_in_body, even, location))?;
+            let even_steps = append(&body, arith::addi(even, one_in_body, location))?;
+            let merged = merge_pass(context, location, runs, Some(first), even_width, even_steps)?;
+            buffer_generic(context, location, &body, second, runs.rank(), merged)?;
+
+            let odd = append(&body, arith::addi(even, one_in_body, location))?;
+            let more = append(
+                &body,
+                arith::cmpi(context, CmpiPredicate::Ult, odd, passes, location),
+            )?;
+            let odd_width = append(&body, arith::shli(one_in_body, odd, location))?;
+            let odd_steps = append(&body, arith::addi(odd, one_in_body, location))?;
+            let guarded = Block::new(&[]);
+            let merged = merge_pass(context, location, runs, Some(second), odd_width, odd_steps)?;
+            buffer_generic(context, location, &guarded, first, runs.rank(), merged)?;
+            scf_yield(&guarded, location, &[])?;
+            let region = Region::new();
+            region.append_block(guarded);
+            body.append_operation(scf::r#if(more, &[], region, Region::new(), location));
+            scf_yield(&body, location, &[])?;
+            for_loop(location, block, (zero, pairs, one), body)?;
+
+            // An odd count leaves the answer in `second`, which is copied back to `first`.
+            let remainder = append(block, arith::andi(passes, one, location))?;
+            let odd_count = append(
+                block,
+                arith::cmpi(context, CmpiPredicate::Ne, remainder, zero, location),
+            )?;
+            let copy = Block::new(&[]);
+            buffer_generic(
+                context,
+                location,
+                &copy,
+                first,
+                runs.rank(),
+                copy_from(context, location, runs, second)?,
+            )?;
+            scf_yield(&copy, location, &[])?;
+            let region = Region::new();
+            region.append_block(copy);
+            block.append_operation(scf::r#if(odd_count, &[], region, Region::new(), location));
+            Ok(Some(to_tensor(
+                context, location, block, first, order_type,
+            )?))
+        }
     }
-    Ok(order)
 }
 
-/// One merge pass's body: the run position that this point holds once the sorted blocks of
-/// `width` around it are merged in pairs.
-fn merge_pass<'c>(
+/// The body that copies `source`, a buffer of run positions, position for position: each point
+/// yields the element `source` holds there.
+fn copy_from<'c>(
     context: &'c Context,
     location: Location<'c>,
     runs: &Runs<'c, '_, '_>,
+    source: Value<'c, '_>,
+) -> Result<Block<'c>, MlirError> {
+    let body = Block::new(&[(Type::index(context), location)]);
+    let at = position(context, location, &body, runs.rank())?;
+    let value = append(&body, memref::load(source, &at, location))?;
+    yield_value(&body, location, value)?;
+    Ok(body)
+}
+
+/// A `scf.for` over `bounds` (lower, upper, step) running `body`, which takes the induction
+/// variable and carries no values.
+fn for_loop<'c>(
+    location: Location<'c>,
+    block: &Block<'c>,
+    (lower, upper, step): (Value<'c, '_>, Value<'c, '_>, Value<'c, '_>),
+    body: Block<'c>,
+) -> Result<(), MlirError> {
+    let region = Region::new();
+    region.append_block(body);
+    block.append_operation(
+        OperationBuilder::new("scf.for", location)
+            .add_operands(&[lower, upper, step])
+            .add_regions([region])
+            .build()?,
+    );
+    Ok(())
+}
+
+/// A buffer of run positions shaped like the source: a dynamic axis is MLIR's dynamic extent.
+fn buffer_shape(shape: &[Option<usize>]) -> Vec<i64> {
+    shape
+        .iter()
+        .map(|extent| extent.map_or(dynamic_extent() as i64, |extent| extent as i64))
+        .collect()
+}
+
+/// The identity order written into `buffer`: every position holds its own run position, which
+/// is the order before any pass merges anything.
+fn identity_into<'c>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &Block<'c>,
+    runs: &Runs<'c, '_, '_>,
+    buffer: Value<'c, '_>,
+) -> Result<(), MlirError> {
+    let body = Block::new(&[(Type::index(context), location)]);
+    let at = position(context, location, &body, runs.rank())?;
+    yield_value(&body, location, at[runs.axis])?;
+    buffer_generic(context, location, block, buffer, runs.rank(), body)
+}
+
+/// One all-parallel `linalg.generic` writing `buffer` in place, its body's yield stored at each
+/// position. Unlike [`all_parallel`] it returns nothing: a buffer is written, not produced.
+fn buffer_generic<'c>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &Block<'c>,
+    buffer: Value<'c, '_>,
+    rank: usize,
+    body: Block<'c>,
+) -> Result<(), MlirError> {
+    let region = Region::new();
+    region.append_block(body);
+    let own: OperandAxes = Some((0..rank).map(Some).collect());
+    block.append_operation(
+        OperationBuilder::new("linalg.generic", location)
+            .add_operands(&[buffer])
+            .add_attributes(&[
+                (
+                    Identifier::new(context, "indexing_maps"),
+                    indexing_maps(context, rank, &[&own])?,
+                ),
+                (
+                    Identifier::new(context, "iterator_types"),
+                    iterator_types(context, rank, 0)?,
+                ),
+                (
+                    Identifier::new(context, "operandSegmentSizes"),
+                    DenseI32ArrayAttribute::new(context, &[0, 1]).into(),
+                ),
+            ])
+            .add_regions([region])
+            .build()?,
+    );
+    Ok(())
+}
+
+/// The tensor a finished order buffer is handed on as.
+fn to_tensor<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    block: &'a Block<'c>,
+    buffer: Value<'c, '_>,
+    tensor: Type<'c>,
+) -> Result<Value<'c, 'a>, MlirError> {
+    append(
+        block,
+        OperationBuilder::new("bufferization.to_tensor", location)
+            .add_operands(&[buffer])
+            .add_attributes(&[(
+                Identifier::new(context, "restrict"),
+                Attribute::unit(context),
+            )])
+            .add_results(&[tensor])
+            .build()?,
+    )
+}
+
+/// One merge pass's body: the run position that this point holds once the sorted blocks of
+/// `width` around it are merged in pairs. `steps` is the bit length of `width`, the count of
+/// halvings its binary search takes.
+fn merge_pass<'c, 'a>(
+    context: &'c Context,
+    location: Location<'c>,
+    runs: &Runs<'c, 'a, '_>,
     order: Option<Value<'c, '_>>,
-    width: usize,
+    width: Value<'c, '_>,
+    steps: Value<'c, '_>,
 ) -> Result<Block<'c>, MlirError> {
     let index = Type::index(context);
     let body = Block::new(&[(index, location)]);
     {
-        let constant = |value| index_constant(context, location, &body, value);
-        let at = position(context, location, &body, runs.extents.len())?;
+        let length = runs.length().index(context, location, &body)?;
+        let at = position(context, location, &body, runs.rank())?;
         let point = at[runs.axis];
-        let width_value = constant(width)?;
-        let offset = append(&body, arith::remui(point, constant(2 * width)?, location))?;
+        let twice = append(&body, arith::addi(width, width, location))?;
+        let offset = append(&body, arith::remui(point, twice, location))?;
         let start = append(&body, arith::subi(point, offset, location))?;
-        let rest = append(
-            &body,
-            arith::subi(constant(runs.length())?, start, location),
-        )?;
-        let left = append(&body, arith::minui(width_value, rest, location))?;
+        let rest = append(&body, arith::subi(length, start, location))?;
+        let left = append(&body, arith::minui(width, rest, location))?;
         let past_left = append(&body, arith::subi(rest, left, location))?;
         let pass = Pass {
             context,
@@ -263,12 +529,12 @@ fn merge_pass<'c>(
             order,
             at: &at,
             start,
-            right_start: append(&body, arith::addi(start, width_value, location))?,
+            right_start: append(&body, arith::addi(start, width, location))?,
             offset,
             left,
-            right: append(&body, arith::minui(width_value, past_left, location))?,
+            right: append(&body, arith::minui(width, past_left, location))?,
         };
-        let taken = pass.search(&body, width)?;
+        let taken = pass.search(&body, steps)?;
         let (from_left, left_held) = pass.left_slot(&body, taken)?;
         let (from_right, right_held) = pass.right_slot(&body, taken)?;
         let right_first = pass.right_first(&body, right_held, left_held)?;
@@ -305,15 +571,18 @@ impl<'c> Pass<'c, '_, '_> {
     /// `taken` left elements all do, which holds exactly while the right element at
     /// `offset - taken`, if there is one, does not strictly precede left element
     /// `taken - 1`. It holds for 0 and cannot hold past `min(offset, left)`, a range of at
-    /// most `width + 1` that `steps` halvings close.
-    fn search<'b>(&self, body: &'b Block<'c>, width: usize) -> Result<Value<'c, 'b>, MlirError> {
+    /// most `width + 1` that `steps`, the bit length of `width`, halvings close.
+    fn search<'b>(
+        &self,
+        body: &'b Block<'c>,
+        steps: Value<'c, '_>,
+    ) -> Result<Value<'c, 'b>, MlirError> {
         let location = self.location;
         let index = Type::index(self.context);
         let one = index_constant(self.context, location, body, 1)?;
         let reach = append(body, arith::minui(self.offset, self.left, location))?;
         let low = index_constant(self.context, location, body, 0)?;
         let high = append(body, arith::addi(reach, one, location))?;
-        let steps = (usize::BITS - width.leading_zeros()) as usize;
 
         let step = Block::new(&[(index, location); 3]);
         let low_value: Value = step.argument(1)?.into();
@@ -339,7 +608,6 @@ impl<'c> Pass<'c, '_, '_> {
             let high_next = append(&step, arith::select(shrink, middle, high_value, location))?;
             scf_yield(&step, location, &[low_next, high_next])?;
         }
-        let steps = index_constant(self.context, location, body, steps)?;
         Ok(repeat(location, body, (low, steps, one), &[low, high], step)?[0])
     }
 
@@ -457,6 +725,8 @@ fn read<'c, 'a>(
     extract(location, block, tensor, &indices, element)
 }
 
+/// The element of `tensor` at `indices`: a `tensor.extract` of a tensor value, or a
+/// `memref.load` of a buffer a dynamic run's passes write.
 fn extract<'c, 'a>(
     location: Location<'c>,
     block: &'a Block<'c>,
@@ -464,6 +734,9 @@ fn extract<'c, 'a>(
     indices: &[Value<'c, '_>],
     element: Type<'c>,
 ) -> Result<Value<'c, 'a>, MlirError> {
+    if tensor.r#type().is_mem_ref() {
+        return append(block, memref::load(tensor, indices, location));
+    }
     append(
         block,
         OperationBuilder::new("tensor.extract", location)
@@ -480,7 +753,7 @@ fn all_parallel<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
-    destination: Value<'c, 'a>,
+    destination: Value<'c, '_>,
     tensor_type: Type<'c>,
     rank: usize,
     body: Block<'c>,
@@ -597,11 +870,19 @@ pub(crate) fn precedes<'c, 'a>(
 #[cfg(test)]
 mod tests {
     use crate::{
-        GpuTarget, context::new_context, guards::Side, lower::build_linkable_module, lower_for_gpu,
-        lower_for_link,
+        GpuTarget,
+        bridge::tests::{
+            assert_host_only_on_gpu, assert_launches_on_gpu, assert_lowered, mlir_of, operand,
+            outlined, tensor_of,
+        },
+        context::new_context,
+        guards::Side,
+        lower::build_linkable_module,
+        lower_for_gpu, lower_for_link,
     };
 
-    use neuro_hir::HirProgram;
+    use neuro_hir::{HirExpr, HirExprKind, HirProgram, HirSortKind, HirType};
+    use shared_types::Span;
 
     /// A program with a transfer, so lowering outlines its operations. The harness binds
     /// no named arguments, so `k` and the axis are positional.
@@ -734,5 +1015,88 @@ mod tests {
         let bodies =
             lower_for_link(&program, crate::Overflow::Checked).expect("the CPU path lowers");
         assert_eq!(bodies.functions.len(), 3, "{:?}", bodies.functions);
+    }
+
+    /// `func f(a: T) -> R { return a.sort(...) }` over a tensor of `element` and `shape`.
+    fn selection(
+        element: HirType,
+        shape: Vec<Option<usize>>,
+        kind: HirSortKind,
+        axis: usize,
+    ) -> HirProgram {
+        let span = Span::new(0, 1);
+        let source = tensor_of(element.clone(), shape.clone());
+        let result = match kind {
+            HirSortKind::Indices => tensor_of(HirType::I32, shape),
+            _ => tensor_of(element, shape),
+        };
+        let sort = HirExpr::new(
+            HirExprKind::TensorSort {
+                receiver: Box::new(operand("a", &source)),
+                kind,
+                axis,
+                descending: false,
+            },
+            result.clone(),
+            span,
+        );
+        outlined(&[("a", source)], sort, result)
+    }
+
+    /// A sort over a dynamic run counts its merge passes at run time: `ceil(log2(n))` of them,
+    /// as the bit length of `n - 1`, in an `scf.for` whose width is `2^pass`.
+    #[test]
+    fn a_dynamic_sort_counts_its_passes_at_run_time() {
+        let program = selection(HirType::F32, vec![None], HirSortKind::Values, 0);
+        let mlir = mlir_of(&program);
+        assert!(
+            mlir.contains("math.ctlz") && mlir.contains("scf.for"),
+            "{mlir}"
+        );
+        // No buffer or tensor is carried through a loop: bufferization would copy the swapped
+        // buffers on every iteration, and on a device those copies run on the host. The search's
+        // indices may still be carried.
+        assert!(
+            !mlir.contains("-> (memref") && !mlir.contains("-> (tensor"),
+            "{mlir}"
+        );
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
+    }
+
+    /// A run of static length keeps the static passes even when another axis is dynamic.
+    #[test]
+    fn a_dynamic_axis_beside_a_static_run_keeps_static_passes() {
+        let program = selection(HirType::F32, vec![None, Some(4)], HirSortKind::Indices, 1);
+        let mlir = mlir_of(&program);
+        assert!(!mlir.contains("math.ctlz"), "{mlir}");
+        assert!(mlir.contains("tensor<?x4xi32>"), "{mlir}");
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
+    }
+
+    /// `.topk` over a dynamic axis gathers its static `k`, which the result takes.
+    #[test]
+    fn a_dynamic_topk_gathers_its_k_positions() {
+        let span = Span::new(0, 1);
+        let source = tensor_of(HirType::F32, vec![None]);
+        let values = tensor_of(HirType::F32, vec![Some(2)]);
+        let indices = tensor_of(HirType::I32, vec![Some(2)]);
+        let pair = HirType::Tuple(vec![values, indices]);
+        let top = HirExpr::new(
+            HirExprKind::TensorSort {
+                receiver: Box::new(operand("a", &source)),
+                kind: HirSortKind::TopK(2),
+                axis: 0,
+                descending: true,
+            },
+            pair.clone(),
+            span,
+        );
+        let program = outlined(&[("a", source)], top, pair);
+        let mlir = mlir_of(&program);
+        assert!(mlir.contains("tensor<2xi32>"), "{mlir}");
+        assert_lowered(&program);
+        assert_launches_on_gpu(&program);
     }
 }

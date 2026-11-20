@@ -129,7 +129,7 @@ pub(super) fn slice_sources(object_ty: &HirType, axes: &[HirTensorAxis]) -> Opti
                     .ok()
                     .filter(|index| index < extent)?,
             ],
-            HirTensorAxis::Position(_) => return None,
+            HirTensorAxis::Position(_) | HirTensorAxis::Whole => return None,
             HirTensorAxis::Range {
                 start,
                 end,

@@ -181,6 +181,11 @@ impl Lowerer {
                 self.type_subst = saved_ty;
                 self.const_subst = saved_c;
                 self.functions.insert(inst_key.clone(), (params, ret));
+                if let Some(sig) =
+                    crate::extents::ExtentSignature::of(&method.params, method.return_type.as_ref())
+                {
+                    self.extent_sigs.insert(inst_key.clone(), sig);
+                }
                 self.impl_methods
                     .entry(mangled.to_string())
                     .or_default()
@@ -748,7 +753,8 @@ impl Lowerer {
         for param in &params {
             self.define(param.name.clone(), param.ty.clone());
         }
-        let body = self.lower_function_body(&template.body, &return_type, target)?;
+        let mut body = self.bind_parameter_extents(&template.params, template.span)?;
+        body.extend(self.lower_function_body(&template.body, &return_type, target)?);
         self.pop_scope();
 
         self.type_subst = saved_ty;
@@ -756,6 +762,7 @@ impl Lowerer {
         self.const_types = saved_ct;
 
         Ok(HirFunction {
+            result_extents: Vec::new(),
             name: instance.mangled.clone(),
             params,
             return_type,
@@ -839,7 +846,9 @@ fn dim_is_open(
         ast_types::TensorExtent::Param(id) => open_const(&id.name),
         ast_types::TensorExtent::Splice(id) => open_type(&id.name),
         ast_types::TensorExtent::Expr(expr) => reads_open(expr, open_type, open_const),
-        ast_types::TensorExtent::Literal(_) | ast_types::TensorExtent::Dynamic(_) => false,
+        ast_types::TensorExtent::Literal(_)
+        | ast_types::TensorExtent::Dynamic(_)
+        | ast_types::TensorExtent::NamedDynamic(_) => false,
     }
 }
 

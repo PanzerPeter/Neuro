@@ -620,7 +620,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Call an overloaded `llvm.*.with.overflow` intrinsic, returning its
     /// `(wrapped result, overflow bit)` pair.
-    fn emit_with_overflow(
+    pub(crate) fn emit_with_overflow(
         &self,
         intrinsic_name: &str,
         lhs: IntValue<'ctx>,

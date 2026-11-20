@@ -3,9 +3,14 @@
 //! Reached from the `lower_expr_uncoerced` dispatch in this module's `mod.rs`.
 //! Every file here adds methods to the same `impl Lowerer` block.
 
-use ast_types::{Expr, FieldInit};
-use neuro_hir::{HirExpr, HirExprKind, HirFieldInit, HirType};
+use ast_types::{BinaryOp, Expr, FieldInit};
+use neuro_hir::{HirExpr, HirExprKind, HirFieldInit, HirStmt, HirType};
 
+use crate::extents::{
+    assign_local, binary, borrow, extent_read, guard, local_declaration, local_name, panic_with,
+    shown, text, variable,
+};
+use crate::items::written_name;
 use crate::{Lowerer, LoweringError};
 
 impl Lowerer {
@@ -55,6 +60,16 @@ impl Lowerer {
             Some(b) => Some(Box::new(self.lower_expr(b, Some(&struct_ty))?)),
             None => None,
         };
+        if let Some(names) = self.struct_extents.get(&name.name).cloned() {
+            return self.named_struct_literal(
+                &name.name,
+                name.name.clone(),
+                lowered_fields,
+                base,
+                &names,
+                span,
+            );
+        }
 
         Ok(HirExpr::new(
             HirExprKind::StructLiteral {
@@ -65,6 +80,84 @@ impl Lowerer {
             struct_ty,
             span,
         ))
+    }
+
+    /// A struct literal whose fields name dynamic extents (R6). Each field value is bound to
+    /// a temporary in the order it is written, so the values are computed as before. The
+    /// struct's names are fresh per literal: the first field naming one binds it, and each
+    /// later field naming it is checked against it, in declaration order. Their locals live
+    /// in the literal's own block, so they end with it.
+    pub(super) fn named_struct_literal(
+        &mut self,
+        display: &str,
+        struct_name: String,
+        fields: Vec<HirFieldInit>,
+        base: Option<Box<HirExpr>>,
+        names: &[crate::extents::FieldExtent],
+        span: shared_types::Span,
+    ) -> Result<HirExpr, LoweringError> {
+        let struct_ty = HirType::Struct(struct_name.clone());
+        let mut stmts = Vec::with_capacity(fields.len() + names.len() * 2 + 1);
+        let mut temps: Vec<(String, String, HirType)> = Vec::with_capacity(fields.len());
+        let mut lowered = Vec::with_capacity(fields.len());
+        for field in fields {
+            let temp = self.fresh_extent_temp();
+            let ty = field.value.ty.clone();
+            stmts.push(HirStmt::VarDecl {
+                name: temp.clone(),
+                ty: ty.clone(),
+                init: Some(*field.value),
+                mutable: false,
+                span: field.span,
+            });
+            lowered.push(HirFieldInit {
+                name: field.name.clone(),
+                value: Box::new(variable(&temp, ty.clone(), field.span)),
+                span: field.span,
+            });
+            temps.push((field.name, temp, ty));
+        }
+
+        let mut bound: Vec<(String, String)> = Vec::new();
+        for entry in names {
+            let Some((_, temp, ty)) = temps.iter().find(|(field, _, _)| *field == entry.field)
+            else {
+                // A field the literal leaves to its base already holds an agreed extent.
+                continue;
+            };
+            let found = extent_read(borrow(variable(temp, ty.clone(), span)), entry.axis, span);
+            if let Some((_, first)) = bound.iter().find(|(seen, _)| *seen == entry.name) {
+                let local = variable(&local_name(&entry.name), HirType::U64, span);
+                let message = vec![
+                    text(format!(
+                        "dynamic extent `{}` of `{}` is ",
+                        entry.name,
+                        written_name(display)
+                    )),
+                    shown(local.clone()),
+                    text(format!(" from `{first}` but ")),
+                    shown(found.clone()),
+                    text(format!(" from `{}`", entry.field)),
+                ];
+                let agreed = binary(BinaryOp::Equal, found, local, HirType::Bool, span);
+                stmts.push(guard(agreed, panic_with(message, span), span));
+            } else {
+                stmts.push(local_declaration(&entry.name, span));
+                stmts.push(assign_local(&entry.name, found, span));
+                bound.push((entry.name.clone(), entry.field.clone()));
+            }
+        }
+
+        stmts.push(HirStmt::Expr(HirExpr::new(
+            HirExprKind::StructLiteral {
+                name: struct_name,
+                fields: lowered,
+                base,
+            },
+            struct_ty.clone(),
+            span,
+        )));
+        Ok(HirExpr::new(HirExprKind::Block { stmts }, struct_ty, span))
     }
 
     /// Lower a generic struct literal: infer the type arguments by unifying the
@@ -198,6 +291,30 @@ impl Lowerer {
             Some(b) => Some(Box::new(self.lower_expr(b, Some(&struct_ty))?)),
             None => None,
         };
+        // Each field naming a dynamic extent agrees with the others when the value is built.
+        let names: Vec<crate::extents::FieldExtent> = template
+            .fields
+            .iter()
+            .flat_map(|field| {
+                crate::extents::tensor_names(&field.ty)
+                    .into_iter()
+                    .map(move |(axis, name)| crate::extents::FieldExtent {
+                        field: field.name.name.clone(),
+                        axis,
+                        name,
+                    })
+            })
+            .collect();
+        if !names.is_empty() {
+            return self.named_struct_literal(
+                &name.name,
+                mangled,
+                lowered_fields,
+                base,
+                &names,
+                span,
+            );
+        }
         Ok(HirExpr::new(
             HirExprKind::StructLiteral {
                 name: mangled,

@@ -1036,3 +1036,38 @@ func main() -> i32 {
         25
     );
 }
+
+/// A borrowing tensor method on a field or element of a temporary (`make().b.sum()`)
+/// takes that tensor out of the temporary, which releases the rest. Nothing released the
+/// tensor itself, so each evaluation leaked its buffer.
+#[test]
+fn regression_a_tensor_read_out_of_a_temporary_is_released() {
+    let source = r#"
+struct Pair {
+    a: Tensor<f32, [4]>,
+    b: Tensor<f32, [4]>,
+}
+
+func make() -> Pair {
+    Pair { a: Tensor::<f32, [4]>::ones(), b: Tensor::<f32, [4]>::ones() }
+}
+
+func pair() -> (Tensor<f32, [4]>, i32) {
+    (Tensor::<f32, [4]>::ones(), 1)
+}
+
+func main() -> i32 {
+    mut total: f32 = 0.0
+    for i in 0..10 {
+        total += make().b.sum() + make().a.map(|x: f32| -> f32 { x * 2.0 }).sum()
+        total += pair().0.max()
+    }
+    total as i32
+}
+"#;
+    // Per round: 4, then 8, then 1.
+    assert_eq!(
+        CompileTest::new().run_leak_checked("tensor_out_of_temporary.nr", source),
+        130
+    );
+}

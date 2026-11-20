@@ -74,6 +74,9 @@ pub enum TensorExtent {
     /// A dynamic extent, the `?` in `Tensor<f32, [?, 784]>`: unknown until run time,
     /// so the axis opts out of compile-time shape checking while its siblings keep it.
     Dynamic(Span),
+    /// A named dynamic extent, the `?B` in `Tensor<f32, [?B, 784]>`: unknown until run
+    /// time like `?`, but every `?B` in one signature or body is the same value.
+    NamedDynamic(Identifier),
     /// An integer constant expression over literals, extent parameters and constants,
     /// the `D / H` in `Tensor<f32, [B, H, D / H]>`. Only `+ - * / %` and parentheses
     /// reach here; a lone literal or name is `Literal` or `Param` instead.

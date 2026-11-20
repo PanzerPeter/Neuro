@@ -1252,8 +1252,10 @@ func main() -> i32 {
     );
 }
 
+/// A literal is sized by its own elements, so it never has a dynamic shape; a constructor
+/// takes the run-time extent of each open axis from `dims:`, so a bare call is refused.
 #[test]
-fn a_dynamic_extent_cannot_be_constructed_or_written_as_a_literal() {
+fn a_literal_has_no_dynamic_shape_and_a_constructor_needs_its_dims() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
@@ -1263,18 +1265,25 @@ func main() -> i32 {
 }
 "#,
     );
-    let reported = errors
-        .iter()
-        .filter(|e| matches!(e, TypeError::TensorDynamicExtent { .. }))
-        .count();
-    assert_eq!(
-        reported, 2,
-        "neither a constructor nor a literal has a size; got {errors:?}"
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [
+                TypeError::TensorDimsCount {
+                    expected: 1,
+                    found: 0,
+                    ..
+                },
+                TypeError::TensorDynamicExtent { .. },
+            ]
+        ),
+        "a constructor without `dims:`, and a literal, each refused; got {errors:?}"
     );
 }
 
+/// Every single-operand operation reads a dynamic axis at run time, names included.
 #[test]
-fn a_dynamic_extent_is_refused_by_every_operation_that_needs_its_value() {
+fn every_single_operand_operation_reads_a_dynamic_axis() {
     let errors = semantic_errors(
         r#"
 func flexible(x: Tensor<f32, [?, 4]>) -> i32 {
@@ -1289,14 +1298,7 @@ func main() -> i32 {
 }
 "#,
     );
-    let reported = errors
-        .iter()
-        .filter(|e| matches!(e, TypeError::TensorDynamicExtent { .. }))
-        .count();
-    assert_eq!(
-        reported, 3,
-        "a copy, an index and a shape cast each need an extent; got {errors:?}"
-    );
+    assert!(errors.is_empty(), "got {errors:?}");
 }
 
 #[test]
@@ -1554,9 +1556,10 @@ func main() -> i32 {
     );
 }
 
-/// The result is a fresh buffer, so its element count has to be a number here.
+/// An anonymous `?` joins no axis, not even another `?`: the two are unrelated run-time
+/// values, so the naming rule refuses the pair and names the narrowing.
 #[test]
-fn a_dynamic_extent_has_no_by_value_operator() {
+fn an_anonymous_dynamic_axis_joins_no_other_axis() {
     let errors = semantic_errors(
         r#"
 func widen(t: Tensor<i32, [4]>) -> Tensor<i32, [?]> {
@@ -1572,10 +1575,11 @@ func main() -> i32 {
 "#,
     );
     assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::TensorDynamicExtent { .. })),
-        "a `?` extent sizes no buffer; got {errors:?}"
+        matches!(
+            errors.as_slice(),
+            [TypeError::TensorDynamicAxisMismatch { .. }]
+        ),
+        "two anonymous `?` axes do not join; got {errors:?}"
     );
 }
 
@@ -1743,10 +1747,10 @@ func main() -> i32 {
     );
 }
 
-/// All three of M, K and N must be countable: K bounds the contraction, M x N sizes the
-/// fresh result's buffer.
+/// A dynamic row count is free in a product, and a dynamic contracted axis joins only
+/// the same name on the other operand.
 #[test]
-fn a_matrix_product_rejects_a_dynamic_extent() {
+fn a_matrix_product_contracts_a_dynamic_axis_only_with_its_own_name() {
     let errors = semantic_errors(
         r#"
 func widen(t: Tensor<i32, [2, 2]>) -> Tensor<i32, [?, 2]> {
@@ -1761,12 +1765,7 @@ func main() -> i32 {
 }
 "#,
     );
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::TensorDynamicExtent { .. })),
-        "a `?` extent counts nothing; got {errors:?}"
-    );
+    assert!(errors.is_empty(), "a dynamic row count; got {errors:?}");
 }
 
 /// `impl MatMul for T` is the user-type half of the operator-to-trait mapping. The

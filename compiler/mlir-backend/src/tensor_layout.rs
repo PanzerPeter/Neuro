@@ -7,15 +7,18 @@
 // reversed), and a position axis reads one fixed index. A position is either a literal in
 // range, or, in a function outlined to follow its operands, a parameter the call site has
 // already checked against its extent with the host's own guard; a GPU body cannot stop the
-// program, so it never reads a position nothing checked.
+// program, so it never reads a position nothing checked. A dynamic axis is read at run time: a
+// whole one survives at the source's extent, a constant range keeps its static extent (its end
+// is checked by the call site), and a literal position on a dynamic axis is left to the caller
+// since nothing here can check it.
 
 use crate::{
     errors::MlirError,
     guards::Lowering,
     lower::map_type,
     tensor_arithmetic::{
-        Generic, OperandAxes, build_expression, empty_tensor, fill_block, indexing_maps,
-        iterator_types, tensor_parts,
+        Generic, OperandAxes, build_expression, dynamic_sizes, empty_tensor, fill_block,
+        indexing_maps, iterator_types, result_extents, tensor_parts,
     },
     tensor_reduce::{append, apply, yield_value},
 };
@@ -63,9 +66,7 @@ pub(crate) fn build_slice<'c, 'a>(
     else {
         return Ok(None);
     };
-    if axes.len() != source_shape.len()
-        || result_shape.iter().chain(source_shape).any(Option::is_none)
-    {
+    if axes.len() != source_shape.len() {
         return Ok(None);
     }
     let Some(source) = build_expression(context, location, block, object, scope, lowering)? else {
@@ -74,9 +75,20 @@ pub(crate) fn build_slice<'c, 'a>(
 
     let index = Type::index(context);
     let mut reads = Vec::with_capacity(axes.len());
+    // Each source axis's result dimension, or `None` where a position drops it.
+    let mut walked: Vec<Option<usize>> = Vec::with_capacity(axes.len());
     let mut dimension = 0;
-    for (axis, extent) in axes.iter().zip(source_shape.iter().flatten()) {
+    for (axis, extent) in axes.iter().zip(source_shape) {
         let read = match axis {
+            HirTensorAxis::Whole => {
+                walked.push(Some(dimension));
+                dimension += 1;
+                Read::Walk {
+                    dimension: dimension - 1,
+                    first: 0,
+                    stride: 1,
+                }
+            }
             HirTensorAxis::Range {
                 start,
                 end,
@@ -90,6 +102,7 @@ pub(crate) fn build_slice<'c, 'a>(
                 ) else {
                     return Ok(None);
                 };
+                walked.push(Some(dimension));
                 dimension += 1;
                 match reversed {
                     true => Read::Walk {
@@ -105,6 +118,7 @@ pub(crate) fn build_slice<'c, 'a>(
                 }
             }
             HirTensorAxis::Position(position) => {
+                walked.push(None);
                 let Some(at) =
                     position_index(context, location, block, position, *extent, scope, lowering)?
                 else {
@@ -123,7 +137,23 @@ pub(crate) fn build_slice<'c, 'a>(
     let element_type = map_type(context, element)?;
     let rank = result_shape.len();
     let own: OperandAxes = Some((0..rank).map(Some).collect());
-    let empty = append(block, empty_tensor(location, tensor_type, &[])?)?;
+    // A surviving whole axis is dynamic in the result exactly when it is in the source, and its
+    // extent is the source's.
+    let walked_axes: OperandAxes = Some(walked);
+    let Some(extents) = result_extents(
+        context,
+        location,
+        block,
+        result_shape,
+        &[(source, &walked_axes)],
+    )?
+    else {
+        return Ok(None);
+    };
+    let empty = append(
+        block,
+        empty_tensor(location, tensor_type, &dynamic_sizes(&extents))?,
+    )?;
 
     let body = Block::new(&[(element_type, location)]);
     let mut indices = Vec::with_capacity(reads.len());
@@ -171,14 +201,17 @@ fn position_index<'c, 'a>(
     location: Location<'c>,
     block: &'a Block<'c>,
     position: &HirExpr,
-    extent: usize,
+    extent: Option<usize>,
     scope: &[(String, Value<'c, 'a>)],
     lowering: &Lowering<'c, 'a>,
 ) -> Result<Option<Value<'c, 'a>>, MlirError> {
     let index = Type::index(context);
     match &position.kind {
+        // A literal is checked against a static extent only. On a dynamic one nothing can
+        // check it here, so it is left to the caller, as a `@gpu` body's position is.
         HirExprKind::Literal(Literal::Integer(value, _))
-            if usize::try_from(*value).is_ok_and(|value| value < extent) =>
+            if usize::try_from(*value)
+                .is_ok_and(|value| extent.is_some_and(|extent| value < extent)) =>
         {
             Ok(Some(append(
                 block,
@@ -270,6 +303,7 @@ pub(crate) fn build_permute<'c, 'a>(
     let HirExprKind::TensorShapeCast {
         receiver,
         permutation: Some(permutation),
+        ..
     } = &cast.kind
     else {
         return Ok(None);
@@ -280,10 +314,7 @@ pub(crate) fn build_permute<'c, 'a>(
         return Ok(None);
     };
     let rank = result_shape.len();
-    if permutation.len() != rank
-        || source_shape.len() != rank
-        || result_shape.iter().any(Option::is_none)
-    {
+    if permutation.len() != rank || source_shape.len() != rank {
         return Ok(None);
     }
     let mut walked = vec![None; rank];
@@ -305,7 +336,15 @@ pub(crate) fn build_permute<'c, 'a>(
     let element_type = map_type(context, element)?;
     let own: OperandAxes = Some((0..rank).map(Some).collect());
     let read: OperandAxes = Some(walked);
-    let empty = append(block, empty_tensor(location, tensor_type, &[])?)?;
+    // Result axis `d` walks the receiver axis it came from, which is where its extent is read.
+    let Some(extents) = result_extents(context, location, block, result_shape, &[(source, &read)])?
+    else {
+        return Ok(None);
+    };
+    let empty = append(
+        block,
+        empty_tensor(location, tensor_type, &dynamic_sizes(&extents))?,
+    )?;
     Ok(Some(apply(
         context,
         location,
@@ -323,9 +362,16 @@ pub(crate) fn build_permute<'c, 'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{GpuTarget, MlirError, lower_for_gpu};
+    use crate::{
+        GpuTarget, MlirError,
+        bridge::tests::{
+            assert_host_only_on_gpu, assert_lowered, mlir_of, operand, outlined, tensor_of,
+        },
+        lower_for_gpu,
+    };
 
-    use neuro_hir::HirProgram;
+    use neuro_hir::{HirExpr, HirExprKind, HirExtent, HirProgram, HirTensorAxis, HirType};
+    use shared_types::Span;
 
     fn parse(source: &str) -> HirProgram {
         let ast = syntax_parsing::parse(source).expect("the program parses");
@@ -403,5 +449,64 @@ mod tests {
             matches!(refused, Err(MlirError::GpuBodiesNotLowered(_))),
             "nothing checks a `@gpu` body's position: {refused:?}"
         );
+    }
+
+    /// `.t()` of a tensor whose rows are dynamic: the result's columns are, and each reads its
+    /// own receiver axis.
+    #[test]
+    fn a_dynamic_transpose_reads_its_extent_off_the_receiver() {
+        let span = Span::new(0, 1);
+        let source = tensor_of(HirType::F32, vec![None, Some(3)]);
+        let result = tensor_of(HirType::F32, vec![Some(3), None]);
+        let transpose = HirExpr::new(
+            HirExprKind::TensorShapeCast {
+                receiver: Box::new(operand("a", &source)),
+                permutation: Some(vec![1, 0]),
+                dims: vec![HirExtent::Axis {
+                    operand: 0,
+                    axis: 0,
+                }],
+            },
+            result.clone(),
+            span,
+        );
+        let program = outlined(&[("a", source)], transpose, result);
+        let mlir = mlir_of(&program);
+        assert!(mlir.contains("tensor.dim"), "{mlir}");
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
+    }
+
+    /// `a[.., 1..3]` over a dynamic row axis: the whole axis survives at its run-time extent, and
+    /// the constant range keeps its static two columns.
+    #[test]
+    fn a_whole_dynamic_axis_and_a_constant_range_slice_lower() {
+        let span = Span::new(0, 1);
+        let source = tensor_of(HirType::F32, vec![None, Some(4)]);
+        let result = tensor_of(HirType::F32, vec![None, Some(2)]);
+        let slice = HirExpr::new(
+            HirExprKind::TensorIndex {
+                object: Box::new(operand("a", &source)),
+                axes: vec![
+                    HirTensorAxis::Whole,
+                    HirTensorAxis::Range {
+                        start: 1,
+                        end: 3,
+                        reversed: false,
+                        step: 1,
+                    },
+                ],
+            },
+            result.clone(),
+            span,
+        );
+        let program = outlined(&[("a", source)], slice, result);
+        let mlir = mlir_of(&program);
+        assert!(
+            mlir.contains("tensor.dim") && mlir.contains("tensor<?x2xf32>"),
+            "{mlir}"
+        );
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
     }
 }

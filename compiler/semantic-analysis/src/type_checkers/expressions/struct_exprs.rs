@@ -257,8 +257,11 @@ impl TypeChecker {
 
             if let Some(ref expected_ty) = expected_field_ty {
                 self.reject_private_field(&name.name, &fname.name, *fspan);
-                if let Some(actual_ty) = self.check_expr(value, Some(expected_ty))
-                    && !self.assignable(&actual_ty, expected_ty)
+                // Each literal binds the struct's dynamic names afresh, so a field takes any
+                // extent at its axis: the run-time check that the names agree is the value's.
+                let anonymous = self.anonymize_dynamic(expected_ty, value.span());
+                if let Some(actual_ty) = self.check_expr(value, Some(&anonymous))
+                    && !self.assignable(&actual_ty, &anonymous)
                 {
                     self.record_error(TypeError::Mismatch {
                         expected: expected_ty.clone(),
@@ -363,7 +366,9 @@ impl TypeChecker {
         if let Some(def) = def {
             if let Some((_, field_ty)) = def.iter().find(|(n, _)| n == &field.name) {
                 self.reject_private_field(&struct_name, &field.name, field.span);
-                Some(field_ty.clone())
+                // The extent belongs to the value, not the struct type: a read sees the
+                // field at any extent its name had, and the name itself is not in scope here.
+                Some(self.anonymize_dynamic(field_ty, *span))
             } else {
                 self.record_error(TypeError::UnknownField {
                     struct_name,

@@ -54,18 +54,9 @@ impl TypeChecker {
             return Type::Unknown;
         }
 
-        // A `?` axis has no run length until run time, which the dynamic-extent rules own.
-        // An extent parameter or a splice has one at each instance: whether that run is
-        // empty is checked there, by lowering, and only a concrete one here.
-        if shape.iter().any(|axis| axis.extent == ArrayLen::Dynamic) {
-            self.record_error(TypeError::TensorShapeCastSymbolicExtent {
-                method: method.to_string(),
-                name: ArrayLen::Dynamic.to_string(),
-                span: call_span,
-            });
-            return Type::Unknown;
-        }
-
+        // A run whose length is a number here is checked for emptiness. An extent parameter,
+        // a splice or a dynamic axis has none here: whether that run is empty is answered
+        // at its instance or at run time, so only a concrete one is refused now.
         if args.is_empty() {
             let count = shape_count(shape).and_then(|count| count.as_constant());
             if !self.reduced_run_is_populated(count, method, call_span) {

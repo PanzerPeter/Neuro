@@ -14,8 +14,8 @@ use crate::{
     guards::{Lowering, Side},
     lower::map_type,
     tensor_arithmetic::{
-        Generic, OperandAxes, build_expression, cast_elements, empty_tensor, half_precision,
-        indexing_maps, iterator_types, tensor_parts, with_element,
+        Generic, OperandAxes, build_expression, cast_elements, dynamic_sizes, empty_tensor,
+        half_precision, indexing_maps, iterator_types, result_extents, tensor_parts, with_element,
     },
     tensor_reduce::{append, apply, yield_value},
 };
@@ -56,8 +56,7 @@ pub(crate) fn build_math<'c, 'a>(
     if !matches!(
         element,
         HirType::F16 | HirType::BF16 | HirType::F32 | HirType::F64
-    ) || shape.iter().any(Option::is_none)
-        || (*op == HirMathOp::Pow) != exponent.is_some()
+    ) || (*op == HirMathOp::Pow) != exponent.is_some()
     {
         return Ok(None);
     }
@@ -103,7 +102,14 @@ pub(crate) fn build_math<'c, 'a>(
         maps.push(&scalar);
     }
     maps.push(&own);
-    let empty = append(block, empty_tensor(location, tensor_type, &[])?)?;
+    // The operand has the result's shape, so its own dimensions size the destination.
+    let Some(extents) = result_extents(context, location, block, shape, &[(source, &own)])? else {
+        return Ok(None);
+    };
+    let empty = append(
+        block,
+        empty_tensor(location, tensor_type, &dynamic_sizes(&extents))?,
+    )?;
     let value = apply(
         context,
         location,
@@ -248,7 +254,12 @@ mod tests {
         lower_for_gpu,
     };
 
-    use neuro_hir::{HirProgram, HirTarget};
+    use crate::bridge::tests::{
+        assert_host_only_on_gpu, assert_lowered, mlir_of, operand, outlined, tensor_of,
+    };
+
+    use neuro_hir::{HirExpr, HirExprKind, HirMathOp, HirProgram, HirTarget, HirType};
+    use shared_types::Span;
 
     fn program(body: &str) -> HirProgram {
         let source = format!(
@@ -314,5 +325,30 @@ mod tests {
         )
         .expect("no library is no error for an outlined body");
         assert_eq!(bodies.functions.is_empty(), !available);
+    }
+
+    /// `a.exp()` over a dynamic axis: the result is sized from the operand, and the element
+    /// function is the `math` op of its name.
+    #[test]
+    fn a_dynamic_math_function_sizes_its_result_from_the_operand() {
+        let span = Span::new(0, 1);
+        let source = tensor_of(HirType::F32, vec![None]);
+        let exp = HirExpr::new(
+            HirExprKind::Math {
+                op: HirMathOp::Exp,
+                operand: Box::new(operand("a", &source)),
+                exponent: None,
+            },
+            source.clone(),
+            span,
+        );
+        let program = outlined(&[("a", source.clone())], exp, source);
+        let mlir = mlir_of(&program);
+        assert!(
+            mlir.contains("math.exp") && mlir.contains("tensor.dim"),
+            "{mlir}"
+        );
+        assert_lowered(&program);
+        assert_host_only_on_gpu(&program);
     }
 }

@@ -107,6 +107,7 @@ fn replay(em: &mut Emitter, entry: &Entry) -> Result<HirExpr, LoweringError> {
             HirExprKind::TensorShapeCast {
                 receiver: Box::new(emit::operand_owned(&copy, span)),
                 permutation: permutation.clone(),
+                dims: Vec::new(),
             }
         }
         Op::Convert(operand) => HirExprKind::Cast {
@@ -133,7 +134,7 @@ fn replay(em: &mut Emitter, entry: &Entry) -> Result<HirExpr, LoweringError> {
                 .collect(),
             inputs: inputs.clone(),
             output: output.clone(),
-            extents: extents.clone(),
+            extents: extents.iter().copied().map(Some).collect(),
         },
         Op::Constant(expr) => return Ok(expr.clone()),
     };

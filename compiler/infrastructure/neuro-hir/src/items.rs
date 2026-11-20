@@ -113,6 +113,11 @@ pub struct HirFunction {
     pub body: Vec<HirStmt>,
     pub target: HirTarget,
     pub span: Span,
+    /// For a function outlined from a tensor operation: the run-time extent of each
+    /// dynamic (`None`) axis of its result, in axis order, a tuple result's parts in
+    /// order. A backend that allocates the result sizes it from these. Empty for every
+    /// other function and for a static result.
+    pub result_extents: Vec<crate::HirExtent>,
 }
 
 /// Where a function's body must execute.

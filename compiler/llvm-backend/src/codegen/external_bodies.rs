@@ -21,6 +21,7 @@ use super::device_memory::{
     DEVICE_TENSOR_ALLOC_FN, DEVICE_TENSOR_FREE_FN, DEVICE_UPLOAD_FN, GPU_FALLBACK_GLOBAL,
     GPU_LAUNCHER_GLOBAL, GPU_PANIC_FN,
 };
+use super::extents::ExtentOperand;
 
 /// The GPU runtime ABI a device body calls, over CUDA and over HIP, one of them linked in
 /// with the first set of device bodies. See `gpu_runtime.c`, the provenance of both.
@@ -169,6 +170,25 @@ impl<'ctx> CodegenContext<'ctx> {
             };
             operands.push((value, ty, handle));
         }
+        // Every operand's run-time value for the extents the results are sized from: a tensor
+        // reads its own extents from its handle, an integer is its own extent.
+        let extent_operands: Vec<ExtentOperand<'ctx>> = operands
+            .iter()
+            .map(|(value, ty, handle)| match (handle, value) {
+                (Some(handle), _) => ExtentOperand::Tensor {
+                    handle: *handle,
+                    shape: tensor_shape_of(ty.referent()),
+                },
+                (None, BasicValueEnum::IntValue(value)) if ty.is_int_like() => {
+                    ExtentOperand::Integer {
+                        value: *value,
+                        signed: !ty.is_unsigned_like(),
+                    }
+                }
+                _ => ExtentOperand::Other,
+            })
+            .collect();
+
         let mut staging = match memory {
             BodyMemory::Host => None,
             BodyMemory::Device => {
@@ -190,13 +210,16 @@ impl<'ctx> CodegenContext<'ctx> {
                 Some(staging) if matches!(ty, Type::Reference { mutable: true, .. }) => {
                     let output = self.stage_output(staging, tensor_ty, handle)?;
                     let written = output.written;
-                    written_back.push((tensor_ty.clone(), output));
+                    written_back.push(output);
                     written
                 }
                 Some(staging) => self.stage_operand(staging, tensor_ty, handle)?,
                 None => self.load_host_data(handle, func_def.span.start)?,
             };
-            self.push_memref_descriptor(tensor_ty, data, &mut arg_types, &mut args)?;
+            // The descriptor's extents and strides are the handle's own, which describe a
+            // dynamic operand's run-time shape and a static one's constants alike.
+            let (extents, strides) = self.handle_axes(handle, &tensor_shape_of(tensor_ty))?;
+            self.push_memref_descriptor(&extents, &strides, data, &mut arg_types, &mut args)?;
         }
 
         // A checked body reports a failed check through a status word, which it takes
@@ -220,12 +243,14 @@ impl<'ctx> CodegenContext<'ctx> {
                     Some(staging) => {
                         let staged = self.stage_status(staging, slot, &status_ty)?;
                         let written = staged.written;
-                        written_back.push((status_ty.clone(), staged));
+                        written_back.push(staged);
                         written
                     }
                     None => slot,
                 };
-                self.push_memref_descriptor(&status_ty, data, &mut arg_types, &mut args)?;
+                let extents = self.axis_extents(&tensor_shape_of(&status_ty), &[])?;
+                let strides = self.row_major_values(&extents)?;
+                self.push_memref_descriptor(&extents, &strides, data, &mut arg_types, &mut args)?;
                 Some(slot)
             }
         };
@@ -239,20 +264,39 @@ impl<'ctx> CodegenContext<'ctx> {
             single => vec![single.clone()],
         };
         let mut results = Vec::with_capacity(parts.len());
+        let mut next_extent = 0;
         for part in &parts {
+            let shape = tensor_shape_of(part);
+            let open = shape.iter().filter(|extent| extent.is_none()).count();
+            let dims = func_def
+                .result_extents
+                .get(next_extent..next_extent + open)
+                .ok_or_else(|| {
+                    CodegenError::InternalError(format!(
+                        "`{}` sizes its result from fewer extents than its dynamic axes need",
+                        func_def.name
+                    ))
+                })?
+                .iter()
+                .map(|extent| self.eval_extent(extent, &extent_operands))
+                .collect::<CodegenResult<Vec<_>>>()?;
+            next_extent += open;
+            let extents = self.axis_extents(&shape, &dims)?;
+            let strides = self.row_major_values(&extents)?;
+            let bytes = self.element_run(part, &dims, func_def.span.start)?.bytes;
             let (handle, written) = match staging.as_mut() {
                 Some(staging) => {
-                    let staged = self.stage_result(staging, part)?;
+                    let staged = self.stage_result(staging, part, &dims, bytes)?;
                     let (handle, written) = (staged.handle, staged.written);
-                    written_back.push((part.clone(), staged));
+                    written_back.push(staged);
                     (handle, written)
                 }
                 None => {
-                    let result = self.alloc_dlpack_tensor(part, "external.result")?;
+                    let result = self.alloc_dlpack_tensor(part, "external.result", &dims, bytes)?;
                     (result, self.load_dlpack_data(result)?)
                 }
             };
-            self.push_memref_descriptor(part, written, &mut arg_types, &mut args)?;
+            self.push_memref_descriptor(&extents, &strides, written, &mut arg_types, &mut args)?;
             results.push(handle);
         }
 
@@ -459,41 +503,40 @@ impl<'ctx> CodegenContext<'ctx> {
         copy
     }
 
-    /// Append the `memref` descriptor for a `tensor_ty` buffer at `data`: the buffer as
-    /// both the allocated and the aligned pointer (the callee frees neither), a zero
-    /// offset, then the extents and the row-major element strides.
+    /// Append the `memref` descriptor for a tensor buffer at `data`: the buffer as both the
+    /// allocated and the aligned pointer (the callee frees neither), a zero offset, then the
+    /// extents and the row-major element strides, all `i64`s that are constants for a static
+    /// tensor.
     fn push_memref_descriptor(
         &self,
-        tensor_ty: &Type,
+        extents: &[IntValue<'ctx>],
+        strides: &[IntValue<'ctx>],
         data: PointerValue<'ctx>,
         arg_types: &mut Vec<BasicMetadataTypeEnum<'ctx>>,
         args: &mut Vec<BasicMetadataValueEnum<'ctx>>,
     ) -> CodegenResult<()> {
-        let Type::Tensor { shape, .. } = tensor_ty else {
-            return Err(CodegenError::InternalError(
-                "a memref descriptor is only built for a tensor".to_string(),
-            ));
-        };
-        let extents = crate::types::static_extents(shape)?;
         let i64_type = self.context.i64_type();
-
-        let mut strides = vec![1u64; extents.len()];
-        for axis in (0..extents.len().saturating_sub(1)).rev() {
-            strides[axis] = strides[axis + 1] * extents[axis + 1] as u64;
-        }
-
         for pointer in [data, data] {
             arg_types.push(pointer.get_type().into());
             args.push(pointer.into());
         }
-        let integers = std::iter::once(0)
-            .chain(extents.iter().map(|&extent| extent as u64))
-            .chain(strides);
+        let integers = std::iter::once(i64_type.const_zero())
+            .chain(extents.iter().copied())
+            .chain(strides.iter().copied());
         for integer in integers {
             arg_types.push(i64_type.into());
-            args.push(i64_type.const_int(integer, false).into());
+            args.push(integer.into());
         }
         Ok(())
+    }
+}
+
+/// The shape of a tensor type, or no axes for anything else. A call only asks this of a
+/// parameter or result it has already typed as a tensor.
+fn tensor_shape_of(ty: &Type) -> Vec<Option<usize>> {
+    match ty {
+        Type::Tensor { shape, .. } => shape.clone(),
+        _ => Vec::new(),
     }
 }
 

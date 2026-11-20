@@ -194,6 +194,9 @@ impl TypeChecker {
                         return None;
                     }
                     Some(ty)
+                } else if self.dynamic_name_in_scope(&ident.name) {
+                    // A dynamic name is also the run-time extent it stands for, a `u64`.
+                    Some(Type::U64)
                 } else if let Some(const_ty) = self.constants.get(&ident.name).cloned() {
                     Some(const_ty)
                 } else if let Some(const_param_ty) = self.const_scope.get(&ident.name).cloned() {

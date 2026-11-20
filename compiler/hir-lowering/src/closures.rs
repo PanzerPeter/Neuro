@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 use ast_types::{
     COMPOSE_PARAM, ClosureCapture, ClosureParam, Expr, GenericArg, InterpPart, Place, Stmt,
-    TensorIndexArg,
+    TensorExtent, TensorIndexArg, Type,
 };
 use neuro_hir::{
     HirCapture, HirClosure, HirExpr, HirExprKind, HirItem, HirParam, HirStmt, HirType,
@@ -496,6 +496,17 @@ impl Lowerer {
                 continue;
             }
             let Some(ty) = self.lookup_local(name) else {
+                // A dynamic extent name the body reads is its hidden local, captured by copy
+                // like any scalar the body does not write.
+                if self.extent_in_scope(name) {
+                    let local = crate::extents::local_name(name);
+                    let capture = HirCapture {
+                        name: local,
+                        ty: HirType::U64,
+                        borrowed: false,
+                    };
+                    captures.push((capture, HirType::U64));
+                }
                 continue;
             };
             let name = name.clone();
@@ -652,7 +663,10 @@ impl FreeVars {
 
 fn collect_stmt(stmt: &Stmt, fv: &mut FreeVars) {
     match stmt {
-        Stmt::VarDecl { name, init, .. } => {
+        Stmt::VarDecl { name, ty, init, .. } => {
+            if let Some(ty) = ty {
+                collect_type(ty, fv);
+            }
             if let Some(init) = init {
                 collect_expr(init, fv);
             }
@@ -836,22 +850,71 @@ fn collect_tensor_indices(indices: &[TensorIndexArg], fv: &mut FreeVars) {
     }
 }
 
+/// A dynamic extent name a type spells (`Tensor::<f32, [?B]>::zeros()`) reads the name's
+/// value as surely as `B` written in an expression does.
+fn collect_type(ty: &Type, fv: &mut FreeVars) {
+    match ty {
+        Type::Tensor {
+            element_type,
+            shape,
+            ..
+        } => {
+            collect_type(element_type, fv);
+            for dim in shape {
+                if let TensorExtent::NamedDynamic(id) = &dim.extent {
+                    fv.read(&id.name);
+                }
+            }
+        }
+        Type::Reference { inner, .. } => collect_type(inner, fv),
+        Type::Generic { args, .. } => collect_generic_args(args, fv),
+        _ => {}
+    }
+}
+
+fn collect_generic_args(args: &[GenericArg], fv: &mut FreeVars) {
+    for arg in args {
+        match arg {
+            GenericArg::Type(ty) => collect_type(ty, fv),
+            GenericArg::Shape { dims, .. } => {
+                for dim in dims {
+                    if let TensorExtent::NamedDynamic(id) = &dim.extent {
+                        fv.read(&id.name);
+                    }
+                }
+            }
+            GenericArg::Const { .. } => {}
+        }
+    }
+}
+
 fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
     match expr {
         Expr::Literal(_, _) | Expr::Path { .. } => {}
-        Expr::Instance { callee, .. } => collect_expr(callee, fv),
+        Expr::Instance {
+            callee, type_args, ..
+        } => {
+            collect_expr(callee, fv);
+            collect_generic_args(type_args, fv);
+        }
         Expr::Identifier(ident) => fv.read(&ident.name),
         Expr::Binary { left, right, .. } => {
             collect_expr(left, fv);
             collect_expr(right, fv);
         }
-        Expr::Call { func, args, .. } => {
+        Expr::Call {
+            func,
+            type_args,
+            args,
+            ..
+        } => {
             if let Expr::FieldAccess { object, field, .. } = func.as_ref()
                 && let Some(root) = place_root(object)
             {
                 fv.receive(&root.name, &field.name);
             }
             collect_expr(func, fv);
+            collect_generic_args(type_args, fv);
             for arg in args {
                 collect_expr(arg, fv);
             }
@@ -880,7 +943,12 @@ fn collect_expr(expr: &Expr, fv: &mut FreeVars) {
                 collect_expr(&field.value, fv);
             }
         }
-        Expr::Cast { expr, .. } => collect_expr(expr, fv),
+        Expr::Cast {
+            expr, target_type, ..
+        } => {
+            collect_expr(expr, fv);
+            collect_type(target_type, fv);
+        }
         Expr::If {
             condition,
             then_block,

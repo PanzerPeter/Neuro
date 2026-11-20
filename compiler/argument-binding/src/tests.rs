@@ -317,6 +317,46 @@ fn an_associated_function_binds_by_name() {
     assert_eq!(bound_values(&items), vec![1, 2]);
 }
 
+/// A tensor constructor takes its open axes' extents under `dims:`, and a static one is
+/// still called with nothing.
+#[test]
+fn a_tensor_constructor_binds_dims_by_name() {
+    let constructor = |member: &str| Expr::Path {
+        type_name: ident("Tensor"),
+        member: ident(member),
+        span: span(),
+    };
+    let mut items = vec![func(
+        "main",
+        Vec::new(),
+        vec![
+            Stmt::Expr(call(constructor("zeros"), vec![named("dims", 3)])),
+            Stmt::Expr(call(constructor("ones"), Vec::new())),
+        ],
+    )];
+    bind_arguments(&mut items).expect("binding failed");
+    assert_eq!(bound_values(&items), vec![3]);
+}
+
+/// `dims:` trails `random_normal`'s two labels, and a static call leaves it out.
+#[test]
+fn a_labelled_random_normal_may_leave_dims_out() {
+    let mut items = vec![func(
+        "main",
+        Vec::new(),
+        vec![Stmt::Expr(call(
+            Expr::Path {
+                type_name: ident("Tensor"),
+                member: ident("random_normal"),
+                span: span(),
+            },
+            vec![named("std", 2), named("mean", 1)],
+        ))],
+    )];
+    bind_arguments(&mut items).expect("binding failed");
+    assert_eq!(bound_values(&items), vec![1, 2]);
+}
+
 #[test]
 fn an_instance_method_binds_by_name() {
     let mut items = vec![

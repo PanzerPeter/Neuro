@@ -5,6 +5,7 @@ use crate::symbol_table::pending_key;
 use crate::types::Type;
 
 use super::backward::gradient_view_root;
+use super::resolution::NameSlot;
 use super::val_else::{expr_diverges, stmts_diverge};
 use super::{LoopContext, TypeChecker};
 
@@ -694,8 +695,9 @@ impl TypeChecker {
                 {
                     return Some(());
                 }
+                self.refuse_value_named_dynamic(&name.name, name.span);
                 let declared_ty = if let Some(ty) = ty {
-                    self.resolve_type(ty)
+                    self.resolve_type_naming(ty, NameSlot::Top)
                 } else {
                     None
                 };
@@ -722,6 +724,10 @@ impl TypeChecker {
                     });
                 }
                 let init_errored = self.errors.len() > errors_before;
+                // The annotation is the binding site of the dynamic names it writes that
+                // are not in scope yet: each takes the extent the initializer has there.
+                let declared_ty = declared_ty
+                    .map(|decl| self.bind_annotation_names(&decl, init_ty.as_ref(), *span));
                 // An annotation that failed to resolve was reported already. The
                 // `::new()` it was written to type then has nothing to infer from and
                 // would ask for an annotation the binding visibly has.
@@ -734,7 +740,10 @@ impl TypeChecker {
 
                 let final_ty = match (declared_ty, init_ty) {
                     (Some(decl), Some(init)) => {
-                        if !self.assignable(&init, &decl) {
+                        // A dynamic axis of the annotation takes any extent here: the
+                        // name it binds, or checks at run time, is the value's.
+                        let anonymous = self.anonymize_dynamic(&decl, *span);
+                        if !self.assignable(&init, &anonymous) {
                             self.record_type_mismatch(&decl, init, *span);
                             // Use declared type to avoid cascading errors
                         }
@@ -1026,6 +1035,7 @@ impl TypeChecker {
                 self.hold_adapter_borrows(adapters);
 
                 self.define_loop_index(index);
+                self.refuse_value_named_dynamic(&iterator.name, iterator.span);
                 if let Some(element_ty) = element_ty
                     && let Err(duplicate_name) =
                         self.symbols
@@ -1136,6 +1146,7 @@ impl TypeChecker {
                 self.hold_adapter_borrows(adapters);
 
                 self.define_loop_index(index);
+                self.refuse_value_named_dynamic(&iterator.name, iterator.span);
                 match self
                     .symbols
                     .define(iterator.name.clone(), element_ty.clone(), false)

@@ -233,6 +233,7 @@ impl TypeChecker {
         let Some(index) = index else {
             return;
         };
+        self.refuse_value_named_dynamic(&index.name, index.span);
         if let Err(duplicate_name) = self.symbols.define(index.name.clone(), Type::U64, false) {
             self.record_error(TypeError::VariableAlreadyDefined {
                 name: duplicate_name,

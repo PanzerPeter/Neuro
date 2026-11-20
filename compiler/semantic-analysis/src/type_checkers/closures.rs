@@ -123,6 +123,7 @@ impl TypeChecker {
         self.symbols.clear_transient_borrows();
         // The parameter scope is fresh, so a failed define is a repeated parameter name.
         for (p, ty) in params.iter().zip(param_types.iter()) {
+            self.refuse_value_named_dynamic(&p.name.name, p.name.span);
             if let Err(duplicate) = self.symbols.define(p.name.name.clone(), ty.clone(), false) {
                 self.record_error(TypeError::VariableAlreadyDefined {
                     name: duplicate,

@@ -27,9 +27,9 @@ pub mod statements;
 pub mod types;
 
 pub use expressions::{
-    HirExpr, HirExprKind, HirFieldInit, HirGridIndex, HirInterpPart, HirMatchArm, HirMatchBinding,
-    HirMatchTest, HirMathOp, HirPatternStep, HirReduceOp, HirSortKind, HirTensorApply,
-    HirTensorAxis, REDUCE_LANES,
+    HirExpr, HirExprKind, HirExtent, HirFieldInit, HirGridIndex, HirInterpPart, HirMatchArm,
+    HirMatchBinding, HirMatchTest, HirMathOp, HirPatternStep, HirReduceOp, HirSortKind,
+    HirTensorApply, HirTensorAxis, REDUCE_LANES,
 };
 pub use items::{
     HirCapture, HirClosure, HirConst, HirEnum, HirEnumField, HirEnumVariant, HirField, HirFunction,
@@ -163,6 +163,7 @@ mod tests {
                 body,
                 target: HirTarget::Host,
                 span: span(),
+                result_extents: Vec::new(),
             })],
         };
 

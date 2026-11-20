@@ -2,12 +2,17 @@
 
 use crate::errors::{CodegenError, CodegenResult};
 
+/// Whether a tensor shape has a dynamic `?` axis, whose extent is only known at run time.
+pub(crate) fn is_dynamic(shape: &[Option<usize>]) -> bool {
+    shape.iter().any(Option::is_none)
+}
+
 /// The extents of a tensor shape every one of whose axes is static.
 ///
-/// Semantic analysis refuses a dynamic `?` axis at every operation that consumes
-/// an extent, so one arriving at a buffer size, a stride or an element count is a
-/// compiler bug; it is reported rather than guessed at, since the alternative is a
-/// wrongly sized allocation.
+/// Only a site that needs a compile-time number reaches this, one whose tensor is static by
+/// construction. A dynamic axis is read at run time (see `codegen/extents.rs`), so a `?`
+/// arriving here is a compiler bug; it is reported rather than guessed at, since the
+/// alternative is a wrongly sized allocation.
 pub(crate) fn static_extents(shape: &[Option<usize>]) -> CodegenResult<Vec<usize>> {
     shape
         .iter()

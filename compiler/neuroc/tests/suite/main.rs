@@ -161,6 +161,7 @@ mod system_io;
 mod tail_if_return;
 mod tensor_apply;
 mod tensor_compound_assign;
+mod tensor_dynamic_extents;
 mod tensor_dynamic_shapes;
 mod tensor_einsum;
 mod tensor_indexing;

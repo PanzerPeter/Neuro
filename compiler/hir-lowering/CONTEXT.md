@@ -127,7 +127,9 @@ In a kernel body, `out.partition(closure)` on a `&mut Tensor` lowers to
 over `base: u64` and `slice: &mut [T]` locals with the loop stack cleared, and nothing is lifted.
 `t.flat(i)` on any tensor is `lower_tensor_flat`'s `TensorIndex` over the row-major strides, axis
 `k` reading `(i / stride_k) % extent_k` (no modulo on axis 0, so its bounds check is the whole
-tensor's), with `i` bound once to a `__flat_N` local when the rank is two or more.
+tensor's), with `i` bound once to a `__flat_N` local when the rank is two or more. A dynamic axis
+supplies its extent as a run-time read borrowed from the receiver (a temporary receiver is bound
+first), so the strides and moduli behind it are expressions, not constants.
 
 A `@grad` function with a function-typed parameter is never derived on its own
 (`derive_reverses` skips it): only a call site knows the target. `lower_backward` resolves each
@@ -631,9 +633,9 @@ computes: the LLVM backend has no tensor loops of its own. The function is
 way a device tensor comes to exist, so a backend may give it a device body too, and
 `HirTarget::HostOperation` in any other program, which has a host body only.
 
-An operation is outlined when its tensors have a static shape and an element with arithmetic (a
-number, or `f16` / `bf16`); a slice or a permutation also takes a `bool` tensor, since it moves
-elements without computing them. A maximal tree becomes one function over its leaves:
+An operation is outlined when its tensors have an element with arithmetic (a number, or `f16` /
+`bf16`), static or dynamic shape alike; a slice or a permutation also takes a `bool` tensor, since
+it moves elements without computing them. A maximal tree becomes one function over its leaves:
 `+ - * / % @` and a permuting shape cast take their operands as written, elementwise math, a
 slice and an `einsum` with output letters only read theirs, so each takes another node of the
 tree or a leaf lent as `&leaf`. A reduction, a `.sort()` / `.argsort()` / `.topk()`, a full
@@ -660,6 +662,71 @@ becomes a `Void` call taking `(v, &mut place)` (a `&mut` binding is passed as it
 is the `TensorCompoundAssign` through `*__operand1`, so the update writes the target's own buffer
 wherever it lives. Operands keep their spans inside the body, so a check the body reports still
 names the operation's position.
+
+**Dynamic axes.** A body over a `?` axis reads its extent from the operand at run time, so the
+call site sizes the result from `HirFunction::result_extents`: one `HirExtent` per `None` axis of
+the result (tuple parts in order), over the function's parameters (`extent_of`). An element-wise
+operation or a matrix product takes the operand that walks the axis, counted from the trailing
+axis, so a dynamic axis is never stretched; a matrix product's rows come from the left operand,
+its columns from the right, and its batch axes from whichever has them. A permutation takes
+receiver axis `permutation[d]`, a reduction the receiver axes other than the reduced one, a sort
+or a map the receiver's own, a slice the `Whole` axes of its object, and an `einsum` the operand
+carrying the output letter. Each run-time check is emitted where the call evaluates its operands:
+a position or a constant range on a dynamic axis (`checked_position`, `dynamic_axis_check`), and
+`.topk(k)` past a dynamic axis (`guarded_operand`). The checks borrow the object, so an object that
+is a temporary is bound first (`outline_temporary_index`) and the checks read that binding.
+
+### Dynamic extents (`extents.rs`)
+
+A named extent `?B` is a hidden `u64` local, `__extent_B` (the `__` prefix is reserved). A name is
+in scope from its binding to the end of the block its local was declared in (`extent_names`,
+dropped with the scope). Inside its scope `B` reads that local (`lower_expr_uncoerced`), unless a
+local of the same name shadows it. A closure body that reads `B`, as a value or in a shape it
+writes (a turbofish, an annotation), captures `__extent_B` by copy (`collect_captures`), like any
+scalar it does not write.
+
+- **Signatures** (`bind_parameter_extents`): the body's prologue declares `mut __extent_B = 0`
+  and assigns it from the first parameter axis that spells the name; every later occurrence is a
+  run-time check that panics with the R7 call message naming both parameters.
+- **Annotations** (`bind_annotation_extents`): a fresh name is declared before the `val` / `mut`
+  and assigned from the value after it; a bound name is checked with the R7 annotation message.
+  A reference annotation is read through the reference.
+- **Statements**: a name first written by an expression (a constructor, `.as_shape`) is declared
+  right before the statement that holds the expression, in the block the statement sits in.
+  `in_extent_statement` wraps every statement and block tail for this; `lower_stmt_into`, the
+  body's tail and `lower_block_value_inner` all go through it.
+- **Constructors**: `zeros`, `ones`, `identity` and `random_normal` fill `dims` with one `u64` per
+  `None` axis (`constructor_dims`). A bound name reads its local; a fresh one takes its `dims:`
+  entry; an anonymous axis takes its entry. The entries are bound to temporaries in order, in a
+  block. `identity` over `[?B, ?B]` repeats the value. `random_normal` takes `dims:` as its third
+  argument; `zeros`, `ones` and `identity` take it as their only one. Argument binding puts the
+  `dims:` argument in that position, so it is read positionally here.
+- **`.as_shape::<[...]>()`** (`lower_as_shape`): a block binds the owned receiver, assigns each
+  fresh name from its axis, and yields `Some(tensor)` when every literal, parameter and bound name
+  agrees, else `None`. The `Some` payload carries the written type, so the enum instance is
+  `option_of` that type. A static receiver axis is not compared.
+- **Struct literals** (`named_struct_literal`): a literal whose fields name extents binds each
+  field value to a temporary in written order, then binds the struct's names in declaration order,
+  the first field naming a name binding it and each later one checked (the R7 struct message). The
+  names are local to the literal's block. Generic structs use the template's field types.
+- **Call results** (`instantiate_result`): a call's declared result has each `None` axis the
+  callee's written return type names replaced by the first extent an argument carries for that
+  name. Tensors, tuples and borrows are rebuilt; any other result (an `Option`, say) keeps its
+  declared form, and the checker types it the same way. `ExtentSignature` holds the names of a
+  signature, for free functions, methods, generic impls' instance methods and generic templates (a
+  generic call instantiates the template's written return type).
+- **Reshape on a dynamic receiver** (`dynamic_reshape`): the receiver is bound to a temporary and
+  the product of its extents is compared with the target count, which panics with the R7 reshape
+  message. A `-1` is the count divided by the product of the other entries, and a zero divisor
+  panics first. A reshape that names no dynamic extent casts inline, with each dynamic result axis
+  a count quotient over the receiver's `HirExtent`s. One that names a dynamic extent is outlined
+  into a host function `__reshape_N` taking the receiver and each name's value as a `u64` operand
+  (`Scalar(k)` in its `dims`), because a `HirExtent` cannot read a local. A `.flatten` over a
+  dynamic run is the product of the run's extents and needs no check.
+
+An `einsum` letter bound to a dynamic axis is `None` in `TensorEinsum.extents`, and its result
+axis is sized from the operand axis that letter walks. A `file.tensor` / `out.add` over a dynamic
+shape is refused by the checker; one reaching lowering is `Malformed`.
 
 ### Dynamic dispatch
 A `traits` table (name → methods in declaration order, with their visible parameter and return
@@ -732,9 +799,10 @@ compiler bug, not a diagnostic.
   a dynamic axis as `?`,
   names taking no part (they are checked in the frontend and reach no backend). A symbolic extent with no binding is an
   `UnresolvedType` naming the dimension, which the checker's own diagnostic reaches first.
-  `static_extents` is how every site that needs the extents reads them: the checker has already
-  refused a `?` at each, so one arriving here is a compiler bug and returns `Malformed` rather
-  than panicking.
+  `static_extents` is how a site that needs every extent as a value reads them: a tensor literal,
+  `Tensor::from` / `scalar`, and the static reshape path, all of which the checker keeps static. A
+  `?` there is a compiler bug and returns `Malformed` rather than panicking. A `?B` axis is `None`
+  like `?`; its name lives in `extents.rs`, not in the type.
   Construction lives in `tensors.rs`. An array literal lowered against a
   `HirType::Tensor` expectation becomes `HirExprKind::TensorLiteral` whose `elements` are
   **flattened row-major**: the nesting carried the shape and the shape is on the node's type,
@@ -742,7 +810,8 @@ compiler bug, not a diagnostic.
   single `type_args` entry, or from the expectation when the call was written without one, and
   pick a node: `zeros`/`ones` become `TensorFill` over a literal of the element type,
   `identity` becomes `TensorIdentity`, `random_normal` becomes `TensorRandomNormal`, and
-  `scalar`/`from` become `TensorLiteral`. Shape, rank, arity, and applicability were settled by
+  `scalar`/`from` become `TensorLiteral`. The first four carry `dims` for their open axes (see
+  Dynamic extents). Shape, rank, arity, and applicability were settled by
   the type checker, so a violation here is a `LoweringError::Malformed`, not a diagnostic.
   The two ownership methods lower through `lower_builtin_method`: `.clone()` is nullary and
   takes the referent's tensor type (so a `&Tensor` receiver yields an owned tensor), and
@@ -776,7 +845,11 @@ compiler bug, not a diagnostic.
   resolved against the receiver's `AxisNames`, which is the one reason the HIR carries them;
   the result keeps the names its axes brought with them, and a merged or re-extented axis is
   unnamed. The checker validated all of this, so a shape that does not work out here is a
-  `LoweringError::Malformed`.
+  `LoweringError::Malformed`. A dynamic axis keeps its `None`, and the cast's `dims` gives its
+  run-time extent (`HirExtent` over operand 0, the receiver): a permutation reads receiver axis
+  `permutation[d]`, a flatten the product of its run. A `.reshape` of a dynamic receiver, or into a
+  dynamic name, is a block that binds the receiver, checks the element count (`dynamic_reshape`)
+  and then casts.
   Reductions live in `tensor_reduce.rs`: `.sum()`, `.mean()`, `.max()` and `.min()` are
   intercepted in the same place and for the same reason (an `axis:` argument may be a
   dimension name), and `lower_tensor_reduce` emits `HirExprKind::TensorReduce` carrying the
@@ -811,7 +884,11 @@ compiler bug, not a diagnostic.
   writes it, and the output takes those indices where it writes its own. What it emits is `HirExprKind::TensorEinsum` carrying only those
   indices, so the notation stops existing here and no backend parses a string. The operands
   are left alone rather than moved: a contraction reads them, so borrowed ones lower here too.
-  Slicing and indexing live in `tensor_index.rs`: `lower_tensor_index` folds each range bound to
+  Slicing and indexing live in `tensor_index.rs`: on a dynamic axis `..` is `HirTensorAxis::Whole`
+  (the axis survives at its run-time extent), a position is bound to a temporary and checked against
+  the extent (`dynamic_axis_check`, the same message as the backends'), and a constant range keeps
+  its static extent with `end <= extent` checked. An element write (`place[i, j] = v`) binds and
+  checks its positions before the store. `lower_tensor_index` folds each range bound to
   the constant the checker already proved it to be (`HirTensorAxis::Range { start, end, reversed, step }`, with
   a `..` full axis becoming the whole extent at step 1, an inclusive range stopping one further
   on, and a `.step(n)` stride folded the same way, dividing the surviving extent rounded up),

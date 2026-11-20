@@ -52,13 +52,7 @@ impl<'ctx> CodegenContext<'ctx> {
         )?;
 
         self.builder.position_at_end(ok_bb);
-        // A temporary has no binding left to own what the pattern takes out of it, so the
-        // bindings do, exactly as a `match` arm's would. A place keeps its payload.
-        let ownership = if is_pure_place(scrutinee) {
-            ArmOwnership::Enclosing
-        } else {
-            ArmOwnership::Arm { shares: false }
-        };
+        let ownership = self.taken_ownership(scrutinee, &scrut_sem, !bindings.is_empty())?;
         // Deliberately not restored: these bindings belong to the enclosing block and
         // must stay visible to every statement after this one.
         let _ = self.bind_arm(bindings, scrut_alloca, &scrut_sem, ownership)?;
@@ -82,11 +76,7 @@ impl<'ctx> CodegenContext<'ctx> {
             None => &[],
         };
         let temporary = !is_pure_place(scrutinee);
-        let ownership = if temporary {
-            ArmOwnership::Arm { shares: false }
-        } else {
-            ArmOwnership::Enclosing
-        };
+        let ownership = self.taken_ownership(scrutinee, scrut_sem, else_binding.is_some())?;
 
         self.push_drop_scope();
         let saved = self.bind_arm(bound, scrut_alloca, scrut_sem, ownership)?;
@@ -107,5 +97,30 @@ impl<'ctx> CodegenContext<'ctx> {
 
         self.restore_bindings(saved);
         Ok(())
+    }
+
+    /// Who owns what the bindings on the current path take out of the scrutinee. A
+    /// temporary has no other owner left. A place is moved by the statement, so when
+    /// something is bound it gives up what it holds, as a `match` scrutinee does;
+    /// otherwise its scope still releases the payload once the binding has moved it on.
+    /// A value whose only owners are function values is copied, and the bindings take
+    /// counts of their own.
+    fn taken_ownership(
+        &mut self,
+        scrutinee: &HirExpr,
+        scrut_sem: &Type,
+        binds: bool,
+    ) -> CodegenResult<ArmOwnership> {
+        if !is_pure_place(scrutinee) {
+            return Ok(ArmOwnership::Arm { shares: false });
+        }
+        let disowned = if binds && !self.shares_on_copy(scrut_sem.referent()) {
+            self.mark_held_moved_for_drop(scrutinee)?
+        } else {
+            Vec::new()
+        };
+        Ok(ArmOwnership::Arm {
+            shares: disowned.is_empty(),
+        })
     }
 }

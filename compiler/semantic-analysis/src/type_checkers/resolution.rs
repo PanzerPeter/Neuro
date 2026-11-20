@@ -37,17 +37,59 @@ pub(super) fn is_tensor_element(ty: &Type) -> bool {
     )
 }
 
+/// Where a written type may name a dynamic extent `?B`. The default, [`NameSlot::Refused`],
+/// is every position the language does not list, so a name there is a compile error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NameSlot {
+    /// No dynamic name: a closure, a type alias, an enum payload, a generic argument, a
+    /// trait declaration, a constant, or the signature of an `@grad`, `@gpu` or `@kernel`
+    /// function.
+    Refused,
+    /// The top level of a tensor type or of a reference to one: a parameter, a `val` or
+    /// `mut` annotation, a struct field, a constructor's shape.
+    Top,
+    /// A return type: a tensor at any depth through references, tuples, arrays, slices,
+    /// collections and the `Option` and `Result` enums.
+    Return,
+}
+
+impl NameSlot {
+    /// The slot a component of a composite type is written in: a return type's components
+    /// keep the freedom, anything else falls back to refused.
+    fn inside(self) -> NameSlot {
+        match self {
+            NameSlot::Return => NameSlot::Return,
+            NameSlot::Refused | NameSlot::Top => NameSlot::Refused,
+        }
+    }
+}
+
 impl TypeChecker {
     /// Convert syntax-parsing type to semantic type.
     /// Returns None if the type is unknown (error is recorded).
     pub(crate) fn resolve_type(&mut self, ty: &ast_types::Type) -> Option<Type> {
-        self.resolve_type_ctx(ty, false)
+        self.resolve_type_ctx(ty, false, NameSlot::Refused)
+    }
+
+    /// [`Self::resolve_type`] for a position `slot` allows dynamic names in.
+    pub(crate) fn resolve_type_naming(
+        &mut self,
+        ty: &ast_types::Type,
+        slot: NameSlot,
+    ) -> Option<Type> {
+        self.resolve_type_ctx(ty, false, slot)
     }
 
     /// Resolve a type annotation, tracking whether it appears directly behind a
     /// reference (`behind_ref`). The flag is consulted by the two unsized types,
-    /// `dyn Trait` and `[T]`, which are valid solely as a reference referent.
-    fn resolve_type_ctx(&mut self, ty: &ast_types::Type, behind_ref: bool) -> Option<Type> {
+    /// `dyn Trait` and `[T]`, which are valid solely as a reference referent. `names` is
+    /// where a dynamic name may be written, which only a tensor's shape reads.
+    fn resolve_type_ctx(
+        &mut self,
+        ty: &ast_types::Type,
+        behind_ref: bool,
+        names: NameSlot,
+    ) -> Option<Type> {
         match ty {
             // Dynamic-dispatch trait object `dyn Trait`: valid only behind a
             // reference, and only for an object-safe, declared trait.
@@ -208,10 +250,11 @@ impl TypeChecker {
                         span: lt.span,
                     });
                 }
-                self.resolve_type_ctx(inner, true).map(|t| Type::Reference {
-                    inner: Box::new(t),
-                    mutable: *mutable,
-                })
+                self.resolve_type_ctx(inner, true, names)
+                    .map(|t| Type::Reference {
+                        inner: Box::new(t),
+                        mutable: *mutable,
+                    })
             }
             // Fixed-size array `[T; N]`. A non-`Copy` element is admissible: the
             // array binding owns the elements, so reading one out moves the array.
@@ -220,7 +263,7 @@ impl TypeChecker {
                 size,
                 span,
             } => {
-                let element_ty = self.resolve_type(element)?;
+                let element_ty = self.resolve_type_ctx(element, false, names.inside())?;
                 let len = self.resolve_array_size(size, *span)?;
                 Some(Type::Array {
                     element: Box::new(element_ty),
@@ -232,7 +275,7 @@ impl TypeChecker {
             // container did not already impose: a slice never owns what it points at,
             // so it cannot be the thing that drops or moves an element.
             ast_types::Type::Slice { element, span } => {
-                let element_ty = self.resolve_type(element)?;
+                let element_ty = self.resolve_type_ctx(element, false, names.inside())?;
                 if !behind_ref {
                     self.record_error(TypeError::SliceNotBehindReference {
                         element: element_ty.to_string(),
@@ -247,7 +290,7 @@ impl TypeChecker {
             ast_types::Type::Tuple { elements, .. } => {
                 let mut resolved = Vec::with_capacity(elements.len());
                 for element in elements {
-                    resolved.push(self.resolve_type(element)?);
+                    resolved.push(self.resolve_type_ctx(element, false, names.inside())?);
                 }
                 Some(Type::Tuple(resolved))
             }
@@ -258,6 +301,16 @@ impl TypeChecker {
                     self.refuse_kernel_out_type(*span);
                     return None;
                 }
+                // The enums and collections a return type may hold a tensor in pass the
+                // freedom on to their arguments; a user generic does not.
+                let carries = names == NameSlot::Return
+                    && (CollectionKind::from_name(&name.name).is_some()
+                        || matches!(name.name.as_str(), "Option" | "Result"));
+                let args_names = if carries {
+                    NameSlot::Return
+                } else {
+                    NameSlot::Refused
+                };
                 let mut resolved = Vec::with_capacity(args.len());
                 for arg in args {
                     match arg {
@@ -290,9 +343,13 @@ impl TypeChecker {
                                 extent: ArrayLen::Param(ident.name.clone()),
                             }]));
                         }
-                        GenericArg::Type(ty) => resolved.push(self.resolve_type(ty)?),
+                        GenericArg::Type(ty) => {
+                            resolved.push(self.resolve_type_ctx(ty, false, args_names)?)
+                        }
                         GenericArg::Shape { dims, .. } => {
-                            resolved.push(shape_argument(self.resolve_tensor_shape(dims)?));
+                            let allowed = args_names != NameSlot::Refused;
+                            resolved
+                                .push(shape_argument(self.resolve_tensor_shape_in(dims, allowed)?));
                         }
                     }
                 }
@@ -358,7 +415,7 @@ impl TypeChecker {
                     });
                     return None;
                 }
-                let axes = self.resolve_tensor_shape(shape)?;
+                let axes = self.resolve_tensor_shape_in(shape, names != NameSlot::Refused)?;
                 // The buffer is an LLVM array, whose element count is 32 bits wide, as an
                 // array's is. Checked, because an overflowing product wraps to a tensor
                 // with no elements.
@@ -384,14 +441,24 @@ impl TypeChecker {
         }
     }
 
-    /// Resolve a written shape, axis by axis.
+    /// Resolve a written shape, axis by axis, refusing a dynamic name in it.
     pub(crate) fn resolve_tensor_shape(
         &mut self,
         shape: &[ast_types::TensorDim],
     ) -> Option<Vec<TensorAxis>> {
+        self.resolve_tensor_shape_in(shape, false)
+    }
+
+    /// Resolve a written shape, axis by axis. `allow_names` is whether a dynamic name may
+    /// be written in it, which the position the shape sits in decides.
+    pub(crate) fn resolve_tensor_shape_in(
+        &mut self,
+        shape: &[ast_types::TensorDim],
+        allow_names: bool,
+    ) -> Option<Vec<TensorAxis>> {
         let mut axes: Vec<TensorAxis> = Vec::with_capacity(shape.len());
         for dim in shape {
-            let extent = self.resolve_tensor_dim(dim)?;
+            let extent = self.resolve_tensor_dim_in(dim, allow_names)?;
             // Dimension names are the tensor type's own namespace, and `permute`-style
             // operations resolve an identifier against it, so a repeated name would
             // denote two axes at once.
@@ -414,10 +481,20 @@ impl TypeChecker {
         Some(axes)
     }
 
+    /// Resolve one axis's extent with no dynamic name allowed.
+    fn resolve_tensor_dim(&mut self, dim: &ast_types::TensorDim) -> Option<ArrayLen> {
+        self.resolve_tensor_dim_in(dim, false)
+    }
+
     /// Resolve one axis's extent. A literal is taken as written; a name is accepted
     /// only when it is an in-scope extent parameter, which the parser has already
-    /// re-kinded from a bare name; `?` is a dynamic extent.
-    fn resolve_tensor_dim(&mut self, dim: &ast_types::TensorDim) -> Option<ArrayLen> {
+    /// re-kinded from a bare name; `?` is a dynamic extent, and `?B` a named one where
+    /// `allow_names` says a name may be written.
+    fn resolve_tensor_dim_in(
+        &mut self,
+        dim: &ast_types::TensorDim,
+        allow_names: bool,
+    ) -> Option<ArrayLen> {
         match &dim.extent {
             ast_types::TensorExtent::Literal(extent) => Some(ArrayLen::Fixed(*extent)),
             ast_types::TensorExtent::Expr(expr) => {
@@ -432,7 +509,21 @@ impl TypeChecker {
                 }
                 resolved
             }
-            ast_types::TensorExtent::Dynamic(_) => Some(ArrayLen::Dynamic),
+            ast_types::TensorExtent::Dynamic(_) => Some(ArrayLen::Dynamic(None)),
+            ast_types::TensorExtent::NamedDynamic(ident) => {
+                // A name written where it is not allowed is reported, and the axis kept
+                // dynamic so the rest of the type still checks.
+                if !allow_names {
+                    self.record_error(TypeError::DynamicNameNotAllowed {
+                        name: ident.name.clone(),
+                        span: ident.span,
+                    });
+                    return Some(ArrayLen::Dynamic(None));
+                }
+                Some(ArrayLen::Dynamic(Some(
+                    self.canonical_dynamic_name(&ident.name),
+                )))
+            }
             ast_types::TensorExtent::Param(ident) => {
                 if self.value_consts.contains(&ident.name) {
                     self.record_error(TypeError::ConstParamSizes {

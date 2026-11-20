@@ -108,7 +108,8 @@ fn collect_shape_names(shape: &[TensorDim], out: &mut Vec<(String, bool)>) {
             TensorExtent::Param(name) => out.push((name.name.clone(), false)),
             TensorExtent::Splice(name) => out.push((name.name.clone(), true)),
             TensorExtent::Expr(expr) => collect_extent_expr_names(expr, out),
-            TensorExtent::Literal(_) | TensorExtent::Dynamic(_) => {}
+            TensorExtent::Literal(_) | TensorExtent::Dynamic(_) | TensorExtent::NamedDynamic(_) => {
+            }
         }
     }
 }

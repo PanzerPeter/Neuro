@@ -94,25 +94,22 @@ func main() -> i32 {
     );
 }
 
-/// Everything that computes a buffer size, a stride or an element count is refused,
-/// because a `?` has no value to compute it from.
+/// An operation that needs the extent reads it from the handle at run time: the clone
+/// copies as many elements as the widened tensor really holds.
 #[test]
-fn an_operation_needing_the_extent_is_refused() {
+fn an_operation_needing_the_extent_reads_it_at_run_time() {
     let source = r#"
-func flexible(x: Tensor<f32, [?, 4]>) -> i32 {
+func flexible(x: Tensor<f32, [?, 4]>) -> f32 {
     val copied = x.clone()
-    return 0
+    copied.sum() + x.sum()
 }
 
 func main() -> i32 {
-    return 0
+    val t = Tensor::<f32, [3, 4]>::ones()
+    return flexible(t) as i32
 }
 "#;
-    let errors = rejected("dynamic_clone.nr", source);
-    assert!(
-        errors.contains("an axis is `?`"),
-        "the diagnostic names the dynamic axis: {errors}"
-    );
+    assert_eq!(run("dynamic_clone.nr", source), 24);
 }
 
 /// A `?` axis carries a dimension name like any other, and the name rule is unchanged:
