@@ -10,6 +10,14 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.57.2] - 2026-11-20
+
+### Fixed
+
+- The test for a dynamic tensor's shape block expected the over-aligned allocator's POSIX argument
+  order on every platform. Windows' `_aligned_malloc` takes size before alignment, so Windows CI
+  failed. The compiler was already correct.
+
 ## [5.57.1] - 2026-11-20
 
 ### Fixed

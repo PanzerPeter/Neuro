@@ -449,11 +449,13 @@ mod tests {
         position(body, "store i64 4, ptr %dlpack.shape.slot");
         position(body, "store i64 1, ptr %dlpack.shape.slot");
         // The element run is multiplied out at run time, and the padded length is what the
-        // over-aligned allocator is given.
-        position(
-            body,
-            &format!("call ptr @{ALIGNED_ALLOC_FN}(i64 64, i64 %tensor.padded"),
-        );
+        // over-aligned allocator is given, in its platform's argument order.
+        let allocation = if cfg!(target_os = "windows") {
+            "call ptr @_aligned_malloc(i64 %tensor.padded, i64 64)"
+        } else {
+            "call ptr @aligned_alloc(i64 64, i64 %tensor.padded"
+        };
+        position(body, allocation);
 
         // The deleter frees the block, after the buffer and before the structure.
         let deleter = definition(&ir, "__neuro_dlpack_deleter");
