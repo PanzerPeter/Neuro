@@ -112,7 +112,11 @@ Reads `.nr` files from disk; writes nothing.
   one, which is what lets `@no_prelude` take it away. A path or an alias to it
   (`std::prelude::Tensor<f32, [2]>`, `T<f32, [2]>`) parses as `Type::Generic` with a shape
   argument, and the walk rebuilds it as `Type::Tensor` once its name resolves to the
-  prelude's.
+  prelude's. A shape the parser could not tell from a type is read there too: a bare name
+  (`T<f32, S>`) as the splice `[..S]`, a one-name slice (`T<f32, [N]>`) as the extent `[N]`.
+  The driver's `kind_passed_sizes` then re-kinds those names to sizes. The constructor spelling through the path (`std::prelude::Tensor::<f32, [2]>::zeros()`,
+  `T::<f32, [2]>::zeros()`) names `Tensor` in its callee, so the walk resolves that and skips the synthetic name for the
+  turbofish's tensor type.
 - **`std::prelude`'s names stay bare, so a root declaration of one takes a path.** The checker,
   lowering and backends know `Option`, `Result`, `Range` and the adapters by name, so
   `canonical` leaves the prelude's declarations unprefixed. The root's are bare too, so a root
@@ -146,7 +150,16 @@ Reads `.nr` files from disk; writes nothing.
   within one file's top level; a trait and an impl in different modules, or inside blocks,
   meet only once names are canonical, so `defaults.rs` copies each default body into every
   `impl Trait for Type` that omits it after the rename. The body was resolved in the trait's
-  module, so the copy names what that module meant.
+  module, so the copy names what that module meant. A default whose own type parameters share a
+  name with the impl's (`func f<T>` into `impl<T>`) reaches only this pass, and `rename.rs`
+  renames those parameters in the copy, binders and uses alike, to a spelling no source can write
+  (`T'`), so neither meaning captures the other.
+- **A subtrait impl inherits its supertraits' associated types here** too
+  (`inherit_assoc_types`): `impl Sub for C` gets, in `ImplDef.inherited_assoc`, each
+  associated type a supertrait declares as `C`'s impl of that supertrait binds it, wherever in
+  the program that impl is. The same rule as the checker's `visible_assoc` decides which names
+  are inherited. An impl matches by type name and type arguments position by position; with
+  none, or more than one, nothing is inherited and the checker reports the missing impl.
 - **The qualifier rides inside `Identifier::name`.** The parser folds `a::b::c` into a
   qualifier `a::b` plus a member `c` rather than growing an AST node, and does the same for a
   qualified trait name, impl header and enum pattern. A cross-module struct literal

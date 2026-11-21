@@ -116,6 +116,77 @@ func main() -> i32 {
 }
 
 #[test]
+fn a_sort_over_extent_parameters_and_splices_compiles() {
+    let source = r#"
+func sorted<N>(t: &Tensor<f32, [N]>) -> Tensor<f32, [N]> { t.sort() }
+func order<N>(t: &Tensor<f32, [N]>) -> Tensor<i32, [N]> { t.argsort(descending: true) }
+func top<S, N>(x: &Tensor<f32, [..S, N]>) -> Tensor<f32, [..S, 2]> {
+    val (v, i) = x.topk(k: 2, axis: -1)
+    v
+}
+func rows<N, K>(t: &Tensor<f32, [N, K]>) -> Tensor<f32, [N, K]> { t.sort(axis: 0) }
+func main() -> i32 {
+    val v: Tensor<f32, [4]> = [3.0, 1.0, 4.0, 2.0]
+    val m: Tensor<f32, [2, 3]> = [[1.0, 5.0, 2.0], [7.0, 3.0, 4.0]]
+    val s = sorted(&v)
+    val o = order(&v)
+    println("{s[0]} {s[3]} {o[0]} {top(&m).sum()} {rows(&m)[0, 1]}")
+    return 0
+}
+"#;
+    assert_eq!(stdout_of("sort.nr", source), "1.0 4.0 2 18.0 3.0\n");
+}
+
+#[test]
+fn a_sort_short_of_its_axis_is_reported_per_instance() {
+    let text = rejected(
+        "topk.nr",
+        r#"
+func top<N>(x: &Tensor<f32, [N]>) -> f32 {
+    val (v, i) = x.topk(k: 3)
+    v.sum()
+}
+func main() -> i32 {
+    println("{top(&Tensor::<f32, [2]>::ones())}")
+    return 0
+}
+"#,
+    );
+    assert!(text.contains("at this instance (2)"), "{text}");
+    assert!(text.contains("`top` with N = 2"), "{text}");
+    let text = rejected(
+        "sort_empty.nr",
+        r#"
+func s<N>(x: &Tensor<f32, [N]>) -> f32 { x.sort().sum() }
+func main() -> i32 {
+    println("{s(&Tensor::<f32, [0]>::zeros())}")
+    return 0
+}
+"#,
+    );
+    assert!(
+        text.contains("orders an empty axis at this instance"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_sort_along_an_axis_a_splice_moves_is_refused() {
+    assert_check_error(
+        "sort_axis.nr",
+        "func f<S, N>(x: &Tensor<f32, [..S, N]>) -> f32 { x.sort(axis: 0).sum() }\n\
+         func main() -> i32 { 0 }\n",
+        "`.sort` along axis 0 needs the rank",
+    );
+    assert_check_error(
+        "sort_last.nr",
+        "func f<S>(x: &Tensor<f32, S>) -> f32 { x.sort().sum() }\n\
+         func main() -> i32 { 0 }\n",
+        "`.sort` along axis -1 needs the rank",
+    );
+}
+
+#[test]
 fn a_traversal_and_a_contraction_take_a_shape_generic_tensor() {
     let source = r#"
 func doubled<N>(t: &Tensor<i32, [N]>) -> Tensor<i32, [N]> {
@@ -230,6 +301,31 @@ func main() -> i32 {
         "{text}"
     );
     assert!(text.contains("`peak` with N = 0"), "{text}");
+}
+
+#[test]
+fn every_failing_instance_is_reported_in_one_run() {
+    // Three instances fail three different checks; each is reported, in source order of
+    // the calls that supplied the extents, rather than the first one alone.
+    let text = rejected(
+        "several.nr",
+        r#"
+func peak<N>(t: &Tensor<f32, [N]>) -> f32 { t.max() }
+func top<N>(x: &Tensor<f32, [N]>) -> f32 {
+    val (v, i) = x.topk(k: 3)
+    v.sum()
+}
+func flat<N>(t: Tensor<f32, [N]>) -> Tensor<f32, [2, 3]> { t.reshape([2, 3]) }
+func main() -> i32 {
+    println("{peak(&Tensor::<f32, [0]>::zeros())} {top(&Tensor::<f32, [2]>::ones())} {flat(Tensor::<f32, [5]>::ones()).sum()}")
+    return 0
+}
+"#,
+    );
+    let peak = text.find("`peak` with N = 0").expect(&text);
+    let top = text.find("`top` with N = 2").expect(&text);
+    let flat = text.find("`flat` with N = 5").expect(&text);
+    assert!(peak < top && top < flat, "{text}");
 }
 
 #[test]

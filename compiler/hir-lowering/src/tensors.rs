@@ -140,9 +140,18 @@ impl Lowerer {
         };
         let element = (**element).clone();
         let open_shape = shape.clone();
-        let annotation = match type_args {
-            [GenericArg::Type(annotation)] => Some(annotation),
-            _ => None,
+        // A turbofish names the axes it writes. A written type the constructor takes from
+        // its site names them too, but only a name already bound is read from it: a fresh
+        // one is bound by the site itself, from the value.
+        let written = match type_args {
+            [GenericArg::Type(annotation)] => axis_names(annotation, shape.len()),
+            _ => match self.written_types.get(&span) {
+                Some(site) => axis_names(site, shape.len())
+                    .into_iter()
+                    .map(|name| name.filter(|name| self.extent_in_scope(name)))
+                    .collect(),
+                None => vec![None; shape.len()],
+            },
         };
 
         // The open axes of a constructor take their extents from `dims:`, the last argument
@@ -154,7 +163,7 @@ impl Lowerer {
                     _ => 0.0,
                 };
                 let (stmts, dims) =
-                    self.constructor_dims(annotation, &open_shape, dims_argument(args, 0), span)?;
+                    self.constructor_dims(&written, &open_shape, dims_argument(args, 0), span)?;
                 let node = match ctor {
                     CTOR_IDENTITY => HirExprKind::TensorIdentity { dims },
                     _ => HirExprKind::TensorFill {
@@ -174,7 +183,7 @@ impl Lowerer {
                 let mean = self.lower_expr(mean, Some(&element))?;
                 let std = self.lower_expr(std, Some(&element))?;
                 let (stmts, dims) =
-                    self.constructor_dims(annotation, &open_shape, dims_argument(args, 2), span)?;
+                    self.constructor_dims(&written, &open_shape, dims_argument(args, 2), span)?;
                 let node = HirExpr::new(
                     HirExprKind::TensorRandomNormal {
                         mean: Box::new(mean),
@@ -239,5 +248,16 @@ impl Lowerer {
             element.clone(),
             span,
         ))
+    }
+}
+
+/// The dynamic name each axis of a written tensor type carries: `None` where an axis
+/// carries none, and for every axis when the type is not a tensor of `rank` axes.
+fn axis_names(ty: &ast_types::Type, rank: usize) -> Vec<Option<String>> {
+    match ty {
+        ast_types::Type::Tensor { shape, .. } if shape.len() == rank => {
+            crate::extents::written_names(shape)
+        }
+        _ => vec![None; rank],
     }
 }

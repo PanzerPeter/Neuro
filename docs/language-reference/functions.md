@@ -367,7 +367,7 @@ func tenths_add_up() {
 }
 ```
 
-`neuroc test file.nr` builds the program with a generated entry point and runs each test in its own process. A failing `assert` aborts only that test's process, so the rest still run. Tests are found in every module the program reaches, but not in the standard library. A test file needs no `main`. If it has one, a test may call it. `neuroc compile`, `run` and `check` treat a test as an ordinary function. The [CLI guide](../guides/cli-usage.md#test) shows the output.
+`neuroc test file.nr` builds the program with a generated entry point and runs each test in its own process. A failing `assert` aborts only that test's process, so the rest still run. Tests are found in every module the program reaches, but not in the standard library, whose own tests `neuroc test --std` runs. A test file needs no `main`. If it has one, a test may call it. `neuroc compile`, `run` and `check` treat a test as an ordinary function. The [CLI guide](../guides/cli-usage.md#test) shows the output.
 
 `std::testing` compares floats:
 
@@ -569,7 +569,7 @@ func main() -> i32 {
 }
 ```
 
-A function's own name is a value of its function type too, so `apply(5, double)` passes `func double(x: i32) -> i32` directly, and `val f = double` binds it. An associated function is one through its path, `val s = Point::scale`, and so is an enum's tuple variant, its constructor: `val wrap = Error::Io`. A generic enum's variant needs a function type from its context to name its instance (`o.map(Option::Some)`, `val f: (i32) -> Option<i32> = Option::Some`). A generic function has no single type until its type arguments are named, so its bare name is refused. Name the instance with a turbofish instead: `val f = identity::<i32>`.
+A function's own name is a value of its function type too, so `apply(5, double)` passes `func double(x: i32) -> i32` directly, and `val f = double` binds it. An associated function is one through its path, `val s = Point::scale`, and so is an enum's tuple variant, its constructor: `val wrap = Error::Io`. A generic enum's variant needs a function type from its context to name its instance (`o.map(Option::Some)`, `val f: (i32) -> Option<i32> = Option::Some`). A generic function has no single type until its type arguments are named, so its bare name is refused. Name the instance with a turbofish instead: `val f = identity::<i32>`. A generic associated function is named the same way, a generic type's parameters first and then the function's own: `val make = Cell::new::<i32>`, `val pair = Cell::pair::<i32, bool>`.
 
 A higher-order function may be generic. The closure passed to it takes part in inferring its type parameters: it is typed after the call's other arguments, so it sees what they bound, and its result binds the rest:
 
@@ -662,20 +662,18 @@ func main() -> i32 {
 
 - It cannot be stored in a binding that outlives its borrowee, and a value holding it cannot leave a block, an arm or a closure body that declares the borrowee. Both report `'s' does not live long enough`.
 - It cannot be returned while it borrows a local or a by-value parameter. A closure that borrows a reference parameter or `self` points at that binding's slot, so it stays in the function too.
-- A `break` value cannot hold a function value that borrows.
+- A `break` value hands what it borrows to the binding that holds the loop's value, so `val f = loop { break |x: i32| s.len() }` freezes `s` while `f` lives, and a closure over a binding the loop declares cannot leave it.
 
 A `mut` function parameter is lent exclusively, and a closure holding a reference that came in through a parameter stays in the call as well. Either may be bound, passed to a function-typed parameter or called, and nothing else:
 
 ```text
-error: this function value stays in the call that made it (a `mut` function-typed parameter, a closure over one, a closure holding a reference that came in through a parameter, or a closure literal that writes through a borrow given to a built-in such as `.map`): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored; bind a closure that writes with `mut` before handing it to a built-in
+error: this function value stays in the call that made it (a `mut` function-typed parameter, a closure over one, or a closure holding a reference that came in through a parameter): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored
 ```
 
 ### Not yet supported
 
 - Storing a closure over a reference parameter, or returning one (`func len_of(s: &string) -> () -> u64 { || s.len() }`).
 - A function value in a collection (`Vec<(i32) -> i32>`).
-- A closure literal that writes through a borrow, written as the argument of a built-in method (`.map`, `.filter`, `.zip`, `.reduce`). Bind it with `mut` first, so the borrow rules see it beside what the method walks. A literal that only reads what it borrows goes there directly, and a `for` head's literal keeps its borrows until the loop ends.
-- An instantiated associated function or generic method as a value on its own (`val f = Cell::new::<i32>`). It works as a `|>` target and as a later `>>` stage.
 
 ## See also
 

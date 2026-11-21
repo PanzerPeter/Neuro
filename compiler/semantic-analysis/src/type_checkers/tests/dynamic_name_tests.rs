@@ -743,24 +743,17 @@ func index(x: Tensor<f32, [?B, 4]>) -> i32 {
 }
 
 #[test]
-fn a_reversed_or_stepped_range_on_a_dynamic_axis_is_refused() {
+fn a_reversed_or_stepped_range_on_a_dynamic_axis_takes_its_static_extent() {
     let errors = semantic_errors(
         r#"
 func index(x: Tensor<f32, [?B, 4]>) -> i32 {
-    val reversed = x[(0..2).rev(), ..]
-    val stepped = x[(0..4).step(2), ..]
+    val reversed: Tensor<f32, [2, 4]> = x[(0..2).rev(), ..]
+    val stepped: Tensor<f32, [2, 4]> = x[(0..4).step(2), ..]
     return 0
 }
 "#,
     );
-    assert_eq!(
-        count(&errors, |e| matches!(
-            e,
-            TypeError::TensorDynamicExtent { .. }
-        )),
-        2,
-        "got {errors:?}"
-    );
+    assert!(errors.is_empty(), "got {errors:?}");
 }
 
 #[test]
@@ -1216,12 +1209,19 @@ func clash(x: Tensor<f32, [?B]>) -> i32 {
 
 #[test]
 fn an_inferred_constructor_over_a_bound_name_is_refused() {
+    // A written type lowering also keeps types the constructor: the annotation and the
+    // annotated binding assigned to. An unannotated binding's type is the value's, which
+    // lowering has with its names erased, so a bound name there needs the turbofish.
     let errors = semantic_errors(
         r#"
 func g(x: &Tensor<f32, [?B]>) -> f32 {
     val t: Tensor<f32, [?B, 2]> = Tensor::ones()
     val fresh: Tensor<f32, [?C]> = Tensor::ones(dims: [4])
-    t.sum() + fresh.sum()
+    mut kept: Tensor<f32, [?B]> = x.clone()
+    kept = Tensor::ones()
+    mut v = x.clone()
+    v = Tensor::ones()
+    t.sum() + fresh.sum() + kept.sum() + v.sum()
 }
 "#,
     );
@@ -1230,6 +1230,6 @@ func g(x: &Tensor<f32, [?B]>) -> f32 {
             errors.as_slice(),
             [TypeError::TensorCtorBoundNameInferred { name, .. }] if name == "B"
         ),
-        "a bound name needs the turbofish, a fresh one does not; got {errors:?}"
+        "only the unannotated binding's assignment needs the turbofish; got {errors:?}"
     );
 }

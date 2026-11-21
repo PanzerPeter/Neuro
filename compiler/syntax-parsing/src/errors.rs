@@ -53,6 +53,9 @@ pub enum ParseError {
     )]
     UndeclaredLifetime { name: String, span: Span },
 
+    #[error("a lifetime argument goes ahead of the type arguments, as in `Pick<'a, i32>`")]
+    LifetimeAfterTypeArgument { span: Span },
+
     #[error(
         "a loop label is written with a leading quote, like a lifetime: `'{name}:`, and named as `break '{name}`"
     )]
@@ -119,6 +122,11 @@ pub enum ParseError {
     TensorTypeArity { span: Span },
 
     #[error(
+        "`{name}::<...>::` puts type arguments on a type, which only a tensor constructor does; write them after the function name, as in `{name}::new::<i32>()`"
+    )]
+    TypeTurbofish { name: String, span: Span },
+
+    #[error(
         "the left of `{op}` must be a place: a variable, a field, an element (`v[i]`, `pair.0`), or `*reference`"
     )]
     NotAPlace { op: String, span: Span },
@@ -162,6 +170,7 @@ impl ParseError {
             | ParseError::DynamicNameInAlias { span, .. }
             | ParseError::CyclicTypeAlias { span, .. }
             | ParseError::UndeclaredLifetime { span, .. }
+            | ParseError::LifetimeAfterTypeArgument { span }
             | ParseError::UnquotedLoopLabel { span, .. }
             | ParseError::OneElementTuple { span }
             | ParseError::MissingInitializer { span, .. }
@@ -177,6 +186,7 @@ impl ParseError {
             | ParseError::LoopAdapterArity { span, .. }
             | ParseError::StepArity { span }
             | ParseError::TensorTypeArity { span }
+            | ParseError::TypeTurbofish { span, .. }
             | ParseError::NotAPlace { span, .. }
             | ParseError::NotAPipelineTarget { span }
             | ParseError::NotAComposeOperand { span }

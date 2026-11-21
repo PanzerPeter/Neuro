@@ -215,7 +215,9 @@ impl TypeChecker {
     pub(crate) fn resolve_kernel_param(&mut self, ty: &ast_types::Type) -> Option<Type> {
         let (written, mutable) = match ty {
             ast_types::Type::Tensor { .. } => (ty, false),
-            ast_types::Type::Generic { name, args, span } if self.is_kernel_out(&name.name) => {
+            ast_types::Type::Generic {
+                name, args, span, ..
+            } if self.is_kernel_out(&name.name) => {
                 let [GenericArg::Type(inner @ ast_types::Type::Tensor { .. })] = args.as_slice()
                 else {
                     self.kernel_error(

@@ -145,6 +145,19 @@ pub enum TypeError {
     #[error("type argument list applied to non-generic type '{name}'")]
     NotAGenericType { name: String, span: Span },
 
+    #[error(
+        "`{name}` declares {declared} lifetime parameter(s), but {written} lifetime argument(s) are written; name every one of them or none"
+    )]
+    LifetimeArgumentCount {
+        name: String,
+        declared: usize,
+        written: usize,
+        span: Span,
+    },
+
+    #[error("`{name}` declares no lifetime parameter, so it takes no lifetime argument")]
+    LifetimeArgumentsUndeclared { name: String, span: Span },
+
     #[error("variable '{name}' already defined in this scope")]
     VariableAlreadyDefined { name: String, span: Span },
 
@@ -597,7 +610,7 @@ pub enum TypeError {
     TensorDimsWithoutOpenAxis { ctor: String, span: Span },
 
     #[error(
-        "`Tensor::{ctor}` takes its shape from the expected type {expected} here, which names the bound extent `?{name}`; a constructor reads a bound name only from a shape written on the call, so write it there: `{turbofish}::{ctor}()`"
+        "`Tensor::{ctor}` takes its shape from the expected type {expected} here, which names the bound extent `?{name}`; a constructor reads a bound name from a shape written on the call, a `val` annotation, the function's return type or an annotated binding it is assigned to, so write it on the call: `{turbofish}::{ctor}()`"
     )]
     TensorCtorBoundNameInferred {
         ctor: String,
@@ -643,11 +656,6 @@ pub enum TypeError {
         element: Type,
         span: Span,
     },
-
-    #[error(
-        "`.mean()` averages {element} elements, which has no rounding rule; sum with `.sum()` and divide, or build the tensor at `f32`/`f64`"
-    )]
-    TensorReduceMeanNotFloat { element: Type, span: Span },
 
     #[error(
         "`.{method}()` reduces over no elements, so it has no value to produce; reduce a tensor whose reduced axis is non-empty"
@@ -859,7 +867,9 @@ pub enum TypeError {
         span: Span,
     },
 
-    #[error("`impl Trait` is only allowed in a function parameter or return type")]
+    #[error(
+        "`impl Trait` is only allowed in a function parameter, a function's return type, or the return type of a method in an inherent `impl` that is not generic"
+    )]
     ImplTraitNotAllowedHere { span: Span },
 
     #[error(
@@ -1028,7 +1038,7 @@ pub enum TypeError {
     ComposeParamUntyped { span: Span },
 
     #[error(
-        "only a generic function's instance `f::<T>` is a value on its own; an instantiated associated function or method is a `|>` target or a later `>>` stage, where it is called"
+        "an instantiated method `x.m::<T>` is a bound method, a value only as a `|>` target or a `>>` stage; an instantiated function or associated function (`f::<T>`, `Cell::new::<T>`) is a value on its own"
     )]
     InstanceNotAValue { span: Span },
 
@@ -1292,11 +1302,6 @@ pub enum TypeError {
         "'{place}' does not live long enough: this value holds a borrow of it and leaves the scope that declares it; move '{place}' out of the block, or take it by value with `move`"
     )]
     BorrowLeavesScope { place: String, span: Span },
-
-    #[error(
-        "a `break` cannot carry a function value that borrows, because the loop's value would not hold the borrow: assign the value to a binding declared before the loop and `break` without one"
-    )]
-    BorrowingClosureInBreak { span: Span },
 
     #[error(
         "cannot store a borrow of '{name}' through a reference: '{name}' is local to this function and does not outlive the call, while the reference's target does; store a borrow derived from a parameter instead"
@@ -1606,7 +1611,7 @@ pub enum TypeError {
     OnceFunctionPerElement { method: String, span: Span },
 
     #[error(
-        "this function value stays in the call that made it (a `mut` function-typed parameter, a closure over one, a closure holding a reference that came in through a parameter, or a closure literal that writes through a borrow given to a built-in such as `.map`): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored; bind a closure that writes with `mut` before handing it to a built-in"
+        "this function value stays in the call that made it (a `mut` function-typed parameter, a closure over one, or a closure holding a reference that came in through a parameter): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored"
     )]
     ScopeBoundClosureStored { span: Span },
 
@@ -1771,6 +1776,8 @@ impl TypeError {
             | Self::GenericEnumNotInferable { span, .. }
             | Self::GenericArgCountMismatch { span, .. }
             | Self::NotAGenericType { span, .. }
+            | Self::LifetimeArgumentCount { span, .. }
+            | Self::LifetimeArgumentsUndeclared { span, .. }
             | Self::VariableAlreadyDefined { span, .. }
             | Self::FunctionAlreadyDefined { span, .. }
             | Self::ArgumentCountMismatch { span, .. }
@@ -1846,7 +1853,6 @@ impl TypeError {
             | Self::TensorAsShapeEntry { span, .. }
             | Self::TensorShapeCastSymbolicExtent { span, .. }
             | Self::TensorReduceElementType { span, .. }
-            | Self::TensorReduceMeanNotFloat { span, .. }
             | Self::TensorReduceEmpty { span, .. }
             | Self::TensorSortElementType { span, .. }
             | Self::TensorItemRank { span, .. }
@@ -1952,7 +1958,6 @@ impl TypeError {
             | Self::ReturnsReferenceToLocal { span, .. }
             | Self::BorrowOutlivesPlace { span, .. }
             | Self::BorrowLeavesScope { span, .. }
-            | Self::BorrowingClosureInBreak { span }
             | Self::StoresReferenceToLocal { span, .. }
             | Self::RangeNotAllowed { span, .. }
             | Self::RevOnNonRange { span }

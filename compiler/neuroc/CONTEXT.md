@@ -91,7 +91,8 @@ with no `main` is legitimate.
 ### `neuroc test`
 `test_file` runs the same front half and backend as `compile`, with `compile_file`'s
 `Entry::Tests`: no `main` is required, `test_functions` lists the `@test` functions in item order
-(the standard library's are skipped, by their `std::` names and `PRELUDE_MODULE`), and
+(the standard library's are skipped, by their `std::` names and `PRELUDE_MODULE`; `--std` is
+`Entry::LibraryTests`, which lists only those, under an empty root file), and
 `llvm_backend::compile_tests` builds an executable whose entry runs the test its first argument
 indexes. The executable is linked into a temporary directory and run once per test, one at a
 time, so a panic, which aborts, fails only its own test. A test passes when its process exits 0.
@@ -233,9 +234,10 @@ an `Argument errors found in` header.
 
 `report_lowering_error` renders a lowering failure. `LoweringError::NotDifferentiable`, the
 derivative transform's refusal of a construct in a `@grad` body, carries a span and goes through
-`render_diagnostic` like a type error, in both `check` and `compile`. `InstanceShape`, a shape
+`render_diagnostic` like a type error, in both `check` and `compile`. `InstanceCheck`, a shape
 check that fails at one instance of a generic, is rendered at its origin (the call that
-supplied the extents, else the operation) with a `note` at the operation naming the instance.
+supplied the extents, else the operation) with a `note` at the operation naming the instance;
+`InstanceChecks` renders each of the instances that failed in one run.
 Every other variant is a checker escape with no location and keeps the plain
 `HIR lowering error:` line.
 

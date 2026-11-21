@@ -862,6 +862,7 @@ impl ModuleGraph {
             }
         }
         crate::defaults::inject_trait_defaults(&mut items);
+        crate::defaults::inherit_assoc_types(&mut items);
         crate::ResolvedProgram { items, modules }
     }
 

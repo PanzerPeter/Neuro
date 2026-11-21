@@ -369,3 +369,48 @@ fn a_program_cannot_declare_an_intrinsic() {
         "{error}"
     );
 }
+
+/// An alias of `Tensor` reads every shape the bare word does: a shape parameter (`T<i32, S>`), a
+/// one-name extent (`[N]`), an extent expression (`[N + 1]`, `[S.count()]`), and the constructor
+/// spelling `T::<...>::ones()`, in a struct field and with the prelude opted out.
+#[test]
+fn an_alias_of_tensor_reads_every_shape() {
+    let source = r#"
+@no_prelude
+import std::prelude::{Tensor as T}
+
+func total<N>(x: &T<i32, [N]>) -> i32 { x.sum() }
+func whole<S>(x: &T<i32, S>) -> i32 { x.sum() }
+func grow<N>(x: &T<i32, [N]>) -> T<i32, [N + 1]> { T::<i32, [N + 1]>::ones() }
+func count<S>(x: &T<i32, S>) -> T<i32, [S.count()]> { x.clone().flatten() }
+struct Holder<N> { t: T<i32, [N]> }
+func main() -> i32 {
+    val a = T::<i32, [2, 3]>::ones()
+    val b: T<i32, [4]> = T::ones()
+    val g = grow(&b)
+    val c = count(&a)
+    val h = Holder { t: b.clone() }
+    // 4 + 6 + 5 + 6 + 4 * 10
+    return total(&b) + whole(&a) + g.sum() + c.sum() + h.t.sum() * 10
+}
+"#;
+    assert_exit("tensor_alias_shapes.nr", source, 61);
+}
+
+/// Only a tensor constructor takes a turbofish after its type; anywhere else it goes after the
+/// function name, and the diagnostic says so.
+#[test]
+fn a_turbofish_after_a_type_name_points_to_the_function() {
+    let source = r#"
+struct Point<X> { x: X }
+impl<X> Point<X> {
+    func new(x: X) -> Point<X> { Point { x: x } }
+}
+func main() -> i32 {
+    val p = Point::<i32>::new(3)
+    p.x
+}
+"#;
+    let errors = rejected("type_turbofish.nr", source);
+    assert!(errors.contains("`Point::new::<i32>()`"), "{errors}");
+}

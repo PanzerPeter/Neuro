@@ -180,11 +180,7 @@ impl TypeChecker {
                 return Some(BoundMethod::Plain(sig.params.clone(), sig.ret.clone()));
             }
             if generic {
-                let assoc_types = self
-                    .traits
-                    .get(&bound.trait_name)
-                    .map(|info| info.assoc_types.clone())
-                    .unwrap_or_default();
+                let assoc_types = self.visible_assoc(&bound.trait_name);
                 let mut open = self.open_trait_signature(&sig.decl, &assoc_types);
                 open.fixed = bound
                     .assoc
@@ -492,6 +488,51 @@ impl TypeChecker {
         }
     }
 
+    /// The generic signature of `type_name`'s associated function `mangled`, declared over
+    /// `params` and `ret`. `Cell::new(42)` on a generic type is generic over the type's
+    /// parameters, which a call infers like a generic function's, since lowering builds it
+    /// on one instance of the type; the function's own parameters, if it declares any,
+    /// follow the type's in the one turbofish a call or an instance can write. `None` for a
+    /// function that is generic over nothing.
+    pub(crate) fn assoc_generic_signature(
+        &self,
+        type_name: &str,
+        mangled: &str,
+        params: Vec<Type>,
+        ret: Type,
+    ) -> Option<GenericFnSig> {
+        let method_generics = self.generic_methods.get(mangled).cloned();
+        let Some((_, type_params)) = self.instance_parts(type_name) else {
+            return method_generics.map(|own| own.signature(params, ret));
+        };
+        let mut sig = GenericFnSig {
+            param_names: type_params.iter().map(|g| g.to_string()).collect(),
+            const_types: HashMap::new(),
+            params,
+            ret,
+            where_predicates: Vec::new(),
+            bounds: HashMap::new(),
+            fixed: HashMap::new(),
+        };
+        if let Some(own) = method_generics {
+            sig.param_names.extend(own.param_names);
+            sig.const_types = own.const_types;
+            sig.where_predicates = own.where_predicates;
+            sig.bounds = own.bounds;
+        }
+        // The impl's own bounds name the type's parameters, which are inferred alongside
+        // the function's.
+        if let Some(impl_bounds) = self.impl_bounds.get(mangled) {
+            for (param, bounds) in impl_bounds {
+                sig.bounds
+                    .entry(param.clone())
+                    .or_default()
+                    .extend(bounds.iter().cloned());
+            }
+        }
+        Some(sig)
+    }
+
     /// Type `T::member(args)`, an associated function one of `T`'s bounds declares. Each
     /// instance calls its type argument's own function, so the bound's signature is all a
     /// body checked once can rely on. A method with a receiver is not reached this way.
@@ -589,30 +630,74 @@ impl TypeChecker {
             || self.traits.contains_key(trait_name)
     }
 
+    /// Bind each type parameter a bound's `<Assoc = V>` names to what the bounded parameter's
+    /// type argument binds `Assoc` to, until nothing more binds: `V` may itself be bounded by
+    /// another parameter's binding.
+    fn infer_from_bound_bindings(
+        &mut self,
+        bounds: &HashMap<String, Vec<BoundInfo>>,
+        subst: &mut HashMap<String, Type>,
+        span: Span,
+    ) {
+        loop {
+            let before = subst.len();
+            for (param, param_bounds) in bounds {
+                let Some(concrete) = subst.get(param).cloned() else {
+                    continue;
+                };
+                for bound in param_bounds {
+                    for (assoc, written) in &bound.assoc {
+                        if let Some(found) =
+                            self.bound_assoc_type(&bound.trait_name, &concrete, assoc, span)
+                        {
+                            // A mismatch is reported by the bound check that follows.
+                            let _ = self.unify_generic(written, &found, subst);
+                        }
+                    }
+                }
+            }
+            if subst.len() == before {
+                return;
+            }
+        }
+    }
+
+    /// What `concrete`'s implementation of `trait_name` binds `assoc` to. A type parameter
+    /// passed through from an enclosing generic has no impl to read, so its own bound answers.
+    fn bound_assoc_type(
+        &mut self,
+        trait_name: &str,
+        concrete: &Type,
+        assoc: &str,
+        span: Span,
+    ) -> Option<Type> {
+        match concrete {
+            Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) => self
+                .impl_assoc
+                .get(&(trait_name.to_string(), name.clone()))
+                .and_then(|b| b.get(assoc))
+                .cloned(),
+            Type::Generic(name) => self
+                .param_bounds(name, span)
+                .iter()
+                .find(|o| o.trait_name == trait_name)
+                .and_then(|outer| {
+                    outer
+                        .assoc
+                        .iter()
+                        .find(|(n, _)| n == assoc)
+                        .map(|(_, ty)| ty.clone())
+                }),
+            _ => None,
+        }
+    }
+
     /// Verify a `Trait<Assoc = T>` bound against what the concrete type argument's impl
     /// bound that associated type to. A type parameter passed through from an enclosing
     /// generic has no impl to read, so its own bound is what must answer.
     pub(crate) fn check_assoc_bindings(&mut self, bound: &BoundInfo, concrete: &Type, span: Span) {
         for (assoc, expected) in &bound.assoc {
-            let found = match concrete {
-                Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) => self
-                    .impl_assoc
-                    .get(&(bound.trait_name.clone(), name.clone()))
-                    .and_then(|b| b.get(assoc))
-                    .cloned(),
-                Type::Generic(name) => self
-                    .param_bounds(name, span)
-                    .iter()
-                    .find(|o| o.trait_name == bound.trait_name)
-                    .and_then(|outer| {
-                        outer
-                            .assoc
-                            .iter()
-                            .find(|(n, _)| n == assoc)
-                            .map(|(_, ty)| ty.clone())
-                    }),
-                _ => None,
-            };
+            let found = self.bound_assoc_type(&bound.trait_name, concrete, assoc, span);
             if found
                 .as_ref()
                 .is_some_and(|f| f.is_compatible_with(expected))
@@ -735,14 +820,28 @@ impl TypeChecker {
             if matches!(param, Type::Function { .. }) {
                 self.function_value_slot = function_value_position(arg);
             }
+            // A parameter whose every type parameter the turbofish or an earlier argument has
+            // bound is a concrete type, so its argument coerces to it as a non-generic call's
+            // does: `twice::<&dyn Named>(&thing)`, `first::<&[i32]>(&array)`.
+            let open: Vec<String> = sig
+                .param_names
+                .iter()
+                .filter(|name| !subst.contains_key(*name))
+                .cloned()
+                .collect();
+            let bound_param = (!self.names_any(param, &open))
+                .then(|| self.substitute_generic(param, &subst, arg.span()));
             self.temporary_borrow_slot = temporary_borrow_position(arg);
             let checked = self.check_expr(arg, expected.as_ref());
             self.function_value_slot = None;
             self.temporary_borrow_slot = None;
             let arg_ty = shared_reborrow(checked.unwrap_or(Type::Unknown), param);
             bind_dynamic_names(param, &arg_ty, &mut dynamic_bound);
-            let unified =
-                matches!(arg_ty, Type::Unknown) || self.unify_generic(param, &arg_ty, &mut subst);
+            let unified = matches!(arg_ty, Type::Unknown)
+                || self.unify_generic(param, &arg_ty, &mut subst)
+                || bound_param
+                    .as_ref()
+                    .is_some_and(|bound| self.assignable(&arg_ty, bound));
             if unified && declarations::writes_extent_expr(param) {
                 recheck.push((param, arg_ty.clone(), arg.span()));
             }
@@ -786,6 +885,10 @@ impl TypeChecker {
             .map(|param| self.substitute_generic(param, &subst, span))
             .collect();
         self.hold_argument_stores(receiver, args, &instance_params, span);
+
+        // A parameter named only in another's bound (`V` in `T: Src<Item = V>`) is what the
+        // type argument's impl binds that associated type to.
+        self.infer_from_bound_bindings(&sig.bounds, &mut subst, span);
 
         // Every parameter must be bound, by inference or turbofish. A type argument is
         // unconstrained: the body was move-checked against an abstract `T` that is
@@ -1365,11 +1468,10 @@ impl TypeChecker {
                 // `Tensor::<f32, [3, 3]>::zeros()` and the five other construction helpers,
                 // unless the program declares its own `Tensor`.
                 if type_name.name == TENSOR_TYPE_NAME && self.tensor_name_is_free() {
-                    return Some(
-                        self.check_tensor_construction(
-                            member, type_args, args, expected, *path_span,
-                        ),
-                    );
+                    let written = self.written_type_sites.contains(span);
+                    return Some(self.check_tensor_construction(
+                        member, type_args, args, expected, written, *path_span,
+                    ));
                 }
                 // `Vec::new()` and friends: a compiler-known constructor, unless
                 // the program declares its own type of that name.
@@ -1445,39 +1547,12 @@ impl TypeChecker {
                 // Its own parameters, if it declares any, follow the type's in the one
                 // turbofish the call can write.
                 let callee = format!("{}::{}", type_name.name, member.name);
-                let method_generics = self.generic_methods.get(&mangled).cloned();
-                if let Some((_, type_params)) = self.instance_parts(&type_name.name) {
-                    let mut sig = GenericFnSig {
-                        param_names: type_params.iter().map(|g| g.to_string()).collect(),
-                        const_types: HashMap::new(),
-                        params: param_types,
-                        ret: return_type,
-                        where_predicates: Vec::new(),
-                        bounds: HashMap::new(),
-                        fixed: HashMap::new(),
-                    };
-                    if let Some(own) = method_generics {
-                        sig.param_names.extend(own.param_names);
-                        sig.const_types = own.const_types;
-                        sig.where_predicates = own.where_predicates;
-                        sig.bounds = own.bounds;
-                    }
-                    // The impl's own bounds name the type's parameters, which this call
-                    // infers alongside the function's.
-                    if let Some(impl_bounds) = self.impl_bounds.get(&mangled) {
-                        for (param, bounds) in impl_bounds {
-                            sig.bounds
-                                .entry(param.clone())
-                                .or_default()
-                                .extend(bounds.iter().cloned());
-                        }
-                    }
-                    return Some(
-                        self.check_generic_call_with(&callee, &sig, type_args, args, None, *span),
-                    );
-                }
-                if let Some(own) = method_generics {
-                    let sig = own.signature(param_types, return_type);
+                if let Some(sig) = self.assoc_generic_signature(
+                    &type_name.name,
+                    &mangled,
+                    param_types.clone(),
+                    return_type.clone(),
+                ) {
                     return Some(
                         self.check_generic_call_with(&callee, &sig, type_args, args, None, *span),
                     );

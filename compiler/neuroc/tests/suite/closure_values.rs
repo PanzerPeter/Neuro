@@ -428,19 +428,81 @@ func main() -> i32 {
     assert!(err.contains("does not live long enough"), "{err}");
 }
 
+/// A `break` carries a borrowing closure out of its loop, labelled or not, and the loop's
+/// binding holds what it borrows: the borrowee is frozen while it lives, a closure that
+/// writes keeps writing the outer binding, and one over a binding the loop declares or a
+/// local returned through it is refused.
 #[test]
-fn a_break_cannot_carry_a_function_value_that_borrows() {
-    let err = rejected(
-        "break.nr",
+fn a_break_carries_a_function_value_that_borrows() {
+    let source = r#"
+func main() -> i32 {
+    val s = "abcd".clone()
+    val f = loop {
+        break |x: i32| s.len() as i32 + x
+    }
+    val g = 'outer: loop {
+        loop {
+            break 'outer |x: i32| s.len() as i32 * x
+        }
+    }
+    mut count = 0
+    mut h = loop {
+        break |x: i32| {
+            count += x
+            count
+        }
+    }
+    h(2)
+    println("{f(1)} {g(2)} {h(3)}")
+    0
+}
+"#;
+    assert_eq!(stdout_of("break_closure.nr", source), "5 8 5\n");
+    let frozen = rejected(
+        "break_closure_frozen.nr",
         r#"
 func main() -> i32 {
-    val s = "a" + "b"
+    mut s = "abc".clone()
     val f = loop {
-        break |x: i32| s.len()
+        break |x: i32| s.len() as i32 + x
     }
-    0
+    s = "z".clone()
+    f(1)
 }
 "#,
     );
-    assert!(err.contains("a `break` cannot carry"), "{err}");
+    assert!(
+        frozen.contains("cannot assign to 's' while it is borrowed"),
+        "{frozen}"
+    );
+    let inner = rejected(
+        "break_closure_inner.nr",
+        r#"
+func main() -> i32 {
+    val f = loop {
+        val s = "abc".clone()
+        break |x: i32| s.len() as i32 + x
+    }
+    f(1)
+}
+"#,
+    );
+    assert!(inner.contains("'s' does not live long enough"), "{inner}");
+    let returned = rejected(
+        "break_closure_return.nr",
+        r#"
+func make() -> (i32) -> i32 {
+    val s = "abc".clone()
+    val f = loop {
+        break |x: i32| s.len() as i32 + x
+    }
+    f
+}
+func main() -> i32 { 0 }
+"#,
+    );
+    assert!(
+        returned.contains("cannot return a reference to 's'"),
+        "{returned}"
+    );
 }

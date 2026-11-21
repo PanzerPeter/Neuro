@@ -512,6 +512,28 @@ impl<'ctx> CodegenContext<'ctx> {
             };
         }
 
+        // A string orders by its bytes, as an ordered map's key does: `a > b` is `b < a`, and
+        // `a <= b` is `!(b < a)`. Normalized and released as equality's operands are.
+        if matches!(
+            op,
+            BinaryOp::Less | BinaryOp::Greater | BinaryOp::LessEqual | BinaryOp::GreaterEqual
+        ) && matches!(left_ty.referent(), Type::String)
+        {
+            let lhs_str = self.load_string_fatptr(lhs)?;
+            let rhs_str = self.load_string_fatptr(rhs)?;
+            let (first, second) = match op {
+                BinaryOp::Less | BinaryOp::GreaterEqual => (lhs_str, rhs_str),
+                _ => (rhs_str, lhs_str),
+            };
+            let less = self.emit_string_lt(first, second)?;
+            self.release_string_temporary(left, lhs_str)?;
+            self.release_string_temporary(right, rhs_str)?;
+            return match op {
+                BinaryOp::Less | BinaryOp::Greater => Ok(less.into()),
+                _ => Ok(self.builder.build_not(less, "str_ge")?.into()),
+            };
+        }
+
         // `@derive(PartialEq)` equality expands over the struct's fields. Handled
         // before the numeric coercion below, which assumes a scalar left type and would
         // ask an aggregate value for its integer variant.

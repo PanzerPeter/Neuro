@@ -275,3 +275,51 @@ func main() -> i32 {
         .expect("program should compile and run");
     assert_eq!(exit_code, 0);
 }
+
+/// A string orders by its bytes: `<`, `>`, `<=` and `>=` are built in, a prefix sorts first, and
+/// a non-ASCII byte sorts after every ASCII one. Each operator is tested on both sides of an
+/// equal pair, which is where a swapped or negated operand order would show.
+#[test]
+fn strings_order_by_their_bytes() {
+    let source = r#"
+func main() -> i32 {
+    if !("abc" < "abd") || "abd" < "abc" { return 1 }
+    if !("ab" < "abc") || "abc" < "ab" { return 2 }
+    if !("b" > "a") || "a" > "b" || "a" > "a" { return 3 }
+    if !("a" <= "a") || !("a" <= "b") || "b" <= "a" { return 4 }
+    if !("a" >= "a") || !("b" >= "a") || "a" >= "b" { return 5 }
+    val accented = "é" + ""
+    val z = "z"
+    if !(&accented > &z) { return 6 }
+    if !("x".lt(&"y")) || !("y".ge(&"y")) { return 7 }
+    return 0
+}
+"#;
+    assert_eq!(crate::compile_harness::run("string_order.nr", source), 0);
+}
+
+/// `string` meets `Comparable`, so a generic body bounded by it, and an ordered map built from a
+/// `Comparable` key parameter, instantiate at `string`.
+#[test]
+fn a_string_meets_a_comparable_bound() {
+    let source = r#"
+func larger<K: Comparable>(a: K, b: K) -> K {
+    if a > b { a } else { b }
+}
+
+func first_key<K: Comparable + PartialEq, V>(a: K, b: K, v: V) -> i32 {
+    mut m: BTreeMap<K, V> = BTreeMap::new()
+    m.insert(a, v)
+    return m.len() as i32
+}
+
+func main() -> i32 {
+    if larger("pear", "fig") != "pear" { return 1 }
+    return first_key("b", "a", 7)
+}
+"#;
+    assert_eq!(
+        crate::compile_harness::run("string_comparable.nr", source),
+        1
+    );
+}

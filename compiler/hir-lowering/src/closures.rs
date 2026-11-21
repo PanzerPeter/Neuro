@@ -125,6 +125,18 @@ impl Lowerer {
         body: &Expr,
         ret_hint: Option<HirType>,
     ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
+        // A closure's return type is no signature's, as the checker takes it.
+        let saved = self.written_return.take();
+        let lowered = self.lower_closure_stmts(body, ret_hint);
+        self.written_return = saved;
+        lowered
+    }
+
+    fn lower_closure_stmts(
+        &mut self,
+        body: &Expr,
+        ret_hint: Option<HirType>,
+    ) -> Result<(Vec<HirStmt>, HirType), LoweringError> {
         Ok(match body {
             Expr::Block { stmts, .. } => match ret_hint {
                 Some(return_type) => {
@@ -399,20 +411,38 @@ impl Lowerer {
                 }
             },
             Expr::Path {
+                type_name,
+                member,
+                span,
+            } if !type_args.is_empty() => {
+                self.assoc_instance_params(&type_name.name, &member.name, type_args, *span)?
+            }
+            Expr::Path {
                 type_name, member, ..
             } => self.assoc_signature(&type_name.name, &member.name)?.0,
             Expr::FieldAccess { object, field, .. } => {
                 let receiver =
                     crate::expressions::coercion::auto_deref(self.lower_expr(object, None)?);
+                // An instantiated generic method's parameters leave `self` out already.
+                if let Some(key) = self.generic_method_key(receiver.ty.referent(), &field.name) {
+                    let params = self
+                        .instantiate_generic_method(&key, type_args, &[], field.span)?
+                        .1;
+                    return params.into_iter().next().ok_or_else(unresolved);
+                }
                 let owner = match receiver.ty.referent() {
                     HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. } => {
-                        name.clone()
+                        name
+                    }
+                    HirType::DynObject(trait_name) => {
+                        let (params, _) = self.dyn_method_signature(trait_name, &field.name)?;
+                        return params.into_iter().next().ok_or_else(unresolved);
                     }
                     _ => return Err(unresolved()),
                 };
                 let key = self
                     .impl_methods
-                    .get(&owner)
+                    .get(owner)
                     .and_then(|methods| methods.get(&field.name))
                     .ok_or_else(unresolved)?;
                 let (params, _) = self.functions.get(key).ok_or_else(unresolved)?;

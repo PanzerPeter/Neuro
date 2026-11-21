@@ -296,6 +296,36 @@ func main() -> i32 {
 }
 
 #[test]
+fn a_reversed_or_stepped_slice_of_a_dynamic_axis_reads_in_order() {
+    // Constant bounds give the result a static extent; only the end is checked at run time.
+    let source = r#"
+func pick(x: &Tensor<f32, [?B]>) -> f32 {
+    val r = x[(0..3).rev()]
+    val s = x[(0..5).step(2)]
+    val t = x[(0..5).rev().step(2)]
+    r[0] * 100.0 + r[2] * 10.0 + s[1] + s.sum() + t[0] * 1000.0
+}
+func rows(m: &Tensor<f32, [?B, 2]>) -> f32 { m[(0..2).rev(), ..][0, 1] }
+func main() -> i32 {
+    val x: Tensor<f32, [5]> = [1.0, 2.0, 3.0, 4.0, 5.0]
+    val m: Tensor<f32, [3, 2]> = [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]
+    return (pick(&x) - 5200.0 + rows(&m)) as i32
+}
+"#;
+    // r = [3, 2, 1], s = [1, 3, 5], t = [5, 3, 1]: 5322, less 5200, plus row 1's 4.
+    assert_eq!(run("dyn_rev_step.nr", source), 126);
+    let past = r#"
+func pick(x: &Tensor<f32, [?B]>) -> f32 { x[(0..3).rev()].sum() }
+func main() -> i32 {
+    val x: Tensor<f32, [2]> = [1.0, 2.0]
+    return pick(&x) as i32
+}
+"#;
+    let text = panic_text(past, "rev_bound");
+    assert!(text.contains("tensor index out of bounds"), "{text}");
+}
+
+#[test]
 fn a_reshape_whose_count_does_not_fit_panics() {
     let source = r#"
 func square(x: Tensor<f32, [?B, 4]>) -> f32 {
@@ -575,14 +605,49 @@ func main() -> i32 {
 #[test]
 fn an_inferred_constructor_over_a_bound_name_is_refused() {
     let source = r#"
-func g(x: &Tensor<f32, [?B]>) -> Tensor<f32, [?B]> {
-    Tensor::ones()
+func g(x: &Tensor<f32, [?B]>) -> f32 {
+    mut v = x.clone()
+    v = Tensor::ones()
+    v.sum()
 }
 
 func main() -> i32 { return 0 }
 "#;
     let errors = rejected("dyn_ctor_inferred.nr", source);
     assert!(errors.contains("Tensor::<f32, [?B]>::ones()"), "{errors}");
+}
+
+#[test]
+fn a_constructor_reads_a_bound_name_from_the_type_written_for_it() {
+    // An annotation, a return type (by `return` and as the tail, in a function and a
+    // method) and an annotated binding assigned to all size `B` from its value. A fresh
+    // name beside a bound one takes its `dims:` entry and is bound by the annotation.
+    let source = r#"
+struct K { k: i32 }
+impl K {
+    func make(&self, x: &Tensor<f32, [?B]>) -> Tensor<f32, [?B, 2]> { Tensor::ones() }
+}
+func tail(x: &Tensor<f32, [?B]>) -> Tensor<f32, [?B]> { Tensor::ones() }
+func early(x: &Tensor<f32, [?B]>, b: bool) -> Tensor<f32, [?B]> {
+    if b { return Tensor::zeros() }
+    Tensor::ones()
+}
+func g(x: &Tensor<f32, [?B]>) -> f32 {
+    val t: Tensor<f32, [?B, 2]> = Tensor::ones()
+    mut u: Tensor<f32, [?B]> = Tensor::zeros()
+    u = Tensor::ones()
+    val fresh: Tensor<f32, [?C]> = Tensor::ones(dims: [4])
+    val mixed: Tensor<f32, [?B, ?D]> = Tensor::ones(dims: [5])
+    t.sum() + u.sum() + fresh.sum() + mixed.sum() + (C + D) as f32
+}
+func main() -> i32 {
+    val x = Tensor::<f32, [?]>::ones(dims: [3])
+    val k = K { k: 0 }
+    return (g(&x) + tail(&x).sum() + early(&x, false).sum() + early(&x, true).sum() + k.make(&x).sum()) as i32
+}
+"#;
+    // g: 6 + 3 + 4 + 15 + 9; then 3, 3, 0 and 6.
+    assert_eq!(run("dyn_ctor_written.nr", source), 49);
 }
 
 /// A call's result names the caller's extent through a generic impl's method as through a

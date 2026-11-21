@@ -195,6 +195,52 @@ func main() -> i32 {
 }
 
 #[test]
+fn a_borrowed_literal_may_be_kept_anywhere() {
+    // `&"text"` points at read-only data that lives for the whole run, so the borrow may be
+    // bound, stored, reassigned and handed back by a generic `&T`.
+    let exit = leak_checked(
+        "literal_borrow_kept.nr",
+        r#"
+func id<T>(x: &T) -> &T { x }
+func len_of(s: &string) -> u64 { s.len() }
+struct Holder<'a> { s: &'a string }
+func pick(flag: bool) -> u64 {
+    val r = if flag { &"long one" } else { &"no" }
+    r.len()
+}
+func main() -> i32 {
+    val a = id(&"text")
+    val r = &"hello"
+    val h = Holder { s: &"abc" }
+    mut m = &"first"
+    m = &"second!"
+    return (a.len() + len_of(r) + h.s.len() + m.len() + pick(true) + pick(false)) as i32
+}
+"#,
+    );
+    // 4 + 5 + 3 + 7 + 8 + 2.
+    assert_eq!(exit, 29);
+}
+
+#[test]
+fn a_borrowed_interpolated_literal_is_still_a_temporary() {
+    let err = rejected(
+        "literal_borrow_built.nr",
+        r#"
+func id<T>(x: &T) -> &T { x }
+func main() -> i32 {
+    val n = 3
+    val a = id(&"built {n}")
+    val b = &mut "c"
+    0
+}
+"#,
+    );
+    assert!(err.contains("may outlive its statement"), "{err}");
+    assert!(err.contains("cannot borrow"), "{err}");
+}
+
+#[test]
 fn an_owned_string_value_is_still_borrowed_explicitly() {
     let err = rejected(
         "owned_not_implicit.nr",

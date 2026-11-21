@@ -4,10 +4,10 @@ Neuro has two text types: the immutable `string`, which programs pass around, an
 
 ## String Type
 
-A `string` is an immutable UTF-8 value: a pointer to its bytes plus a stored byte length. `==` and `!=` compare byte content, and `+` concatenates two strings into a new owned `string`. The ordering operators are not defined on `string`:
+A `string` is an immutable UTF-8 value: a pointer to its bytes plus a stored byte length. `==` and `!=` compare byte content, and `+` concatenates two strings into a new owned `string`. `<`, `>`, `<=` and `>=` order two strings by their bytes, which for UTF-8 is code point order, and a prefix sorts before the longer string. `string` meets a `Comparable` bound by the same order:
 
 ```neuro
-val ordered = "a" < "b"   // error: cannot apply binary operator < to types string and string
+val ordered = "ab" < "abc"   // true
 ```
 
 String literals live in read-only program memory and are never allocated. A `string` produced at run time (by `+`, by an interpolation, by `.clone()` or by `StringBuilder::to_string`) lives on the heap and owns its buffer, which its owner releases like any other value. The top bit of the stored length records which of the two a `string` is, so a string holds at most 2^63 - 1 bytes. [Memory model](memory-model.md) says when each one is released.
@@ -52,6 +52,8 @@ val lr = find("lr") ?? "unset"         // find returns Option<&string>
 ```
 
 The context is a `&string` parameter, binding, return, field, payload or element, or a generic `&T` whose `T` a turbofish or an earlier argument bound to `string` (`id::<string>("text")`). An unbound `&T` takes no literal, and neither do `&mut string` and `&&string`. An interpolated literal is built fresh and owns its buffer, so it is an ordinary `string`. Any `string` value other than a plain literal is borrowed with `&`.
+
+A plain literal may also be borrowed with `&` itself, and that borrow lives as long as the program, so it can be kept anywhere: `val r = &"hello"`, a struct field, or what an unbound `&T` hands back (`id(&"text")`). `&mut` on a literal, and `&` on an interpolated one, are still borrows of a temporary.
 
 See [`examples/strings/literal_views.nr`](../../examples/strings/literal_views.nr) for each position checked against its expected output.
 
@@ -346,7 +348,7 @@ func broken() -> Split {
 }
 ```
 
-Two results of `next()` on one iterator cannot be held at the same time yet: `val a = it.next()` followed by `val b = it.next()` is refused. Take the pieces one at a time in a `for` loop, as [`string_split.nr`](../../examples/strings/string_split.nr) does.
+A piece borrows the text, not the iterator, so several results of `next()` on one iterator can be held at once: `val a = it.next() ?? ""` followed by `val b = it.next() ?? ""` keeps both.
 
 ## Growable Strings (`StringBuilder`)
 

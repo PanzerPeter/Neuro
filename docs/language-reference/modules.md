@@ -356,9 +356,6 @@ The standard library's modules are `std::prelude`, `std::testing` ([Tests](funct
 `std::fs`, `std::safetensors`, `std::env`, `std::io` and `std::time`
 ([Standard Library](standard-library.md)). `Rng` is not declared yet.
 
-An alias of `Tensor` (`import std::prelude::{Tensor as T}`) reads a shape only where one could not
-be a type: `T<f32, [2, 3]>` works, but `T<f32, S>` and `T<f32, [N]>` do not. A turbofish after a module path,
-`std::prelude::Tensor::<f32, [2]>::zeros()` or `geo::Point::<i32>::new()`, does not parse.
 
 A compile-time error or a runtime panic names the file it comes from, with its line and column, in
 whichever module it was raised. A panic inside a prelude body names `<std>/prelude.nr`.

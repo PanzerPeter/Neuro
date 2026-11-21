@@ -372,7 +372,8 @@ fn regression_a_store_below_a_failed_place_reports_one_error() {
 fn regression_method_with_unresolved_return_type_cascaded_as_void() {
     // A method whose return type does not resolve was registered as returning `void`, so its
     // own `return` and every caller binding its result reported errors of their own. A free
-    // function's unresolved return type is `Unknown`, which reports nothing further.
+    // function's unresolved return type is `Unknown`, which reports nothing further. An
+    // `impl Shape` whose body is no `Shape` is the one error its own check reports.
     for return_type in ["Nope", "impl Shape"] {
         let source = format!(
             r#"trait Shape {{ func area(&self) -> i32 }}
@@ -395,7 +396,7 @@ fn regression_method_with_unresolved_return_type_cascaded_as_void() {
         assert!(
             matches!(
                 errors[0],
-                TypeError::UnknownTypeName { .. } | TypeError::ImplTraitNotAllowedHere { .. }
+                TypeError::UnknownTypeName { .. } | TypeError::ImplReturnDoesNotImplement { .. }
             ),
             "-> {return_type}: {errors:?}"
         );

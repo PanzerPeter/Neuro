@@ -133,6 +133,10 @@ impl Lowerer {
                 }
                 Ok(HirType::Tuple(resolved))
             }
+            // `View<'a>` applies lifetimes only, which are erased: it is the named type.
+            ast_types::Type::Generic { name, args, .. } if args.is_empty() => {
+                self.resolve_type_ctx(&ast_types::Type::Named(name.clone()), behind_ref)
+            }
             // Generic application `Name<...>`: resolve the arguments and
             // monomorphize the generic struct into a distinct concrete instance. The
             // arguments resolve under any active type-parameter substitution, so a
@@ -221,9 +225,14 @@ impl Lowerer {
                 let (extents, names) = self.resolve_shape(shape)?;
                 let element = self.resolve_type(element_type)?;
                 if !is_tensor_scalar(&element) {
-                    return Err(LoweringError::NonScalarTensorElement {
-                        ty: element.to_string(),
-                    });
+                    return Err(crate::instance_check(
+                        format!(
+                            "a tensor's element must be an integer, a floating-point type or \
+                             `bool`, but this instance makes it `{element}`: bound the parameter \
+                             by `Numeric` to refuse such a type argument at the call"
+                        ),
+                        element_type.span(),
+                    ));
                 }
                 Ok(HirType::Tensor {
                     element: Box::new(element),

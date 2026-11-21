@@ -365,7 +365,7 @@ mod tests {
     use crate::{
         GpuTarget, MlirError,
         bridge::tests::{
-            assert_host_only_on_gpu, assert_lowered, mlir_of, operand, outlined, tensor_of,
+            assert_launches_on_gpu, assert_lowered, mlir_of, operand, outlined, tensor_of,
         },
         lower_for_gpu,
     };
@@ -474,7 +474,7 @@ mod tests {
         let mlir = mlir_of(&program);
         assert!(mlir.contains("tensor.dim"), "{mlir}");
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 
     /// `a[.., 1..3]` over a dynamic row axis: the whole axis survives at its run-time extent, and
@@ -507,6 +507,6 @@ mod tests {
             "{mlir}"
         );
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 }

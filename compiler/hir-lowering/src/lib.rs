@@ -126,39 +126,50 @@ pub enum LoweringError {
     )]
     StringTraitObject { trait_name: String },
 
-    /// A generic body builds a tensor over a type parameter with no bound, and this instance
-    /// made the parameter something that is not a scalar. The checker refuses that where the
-    /// tensor shows in a signature; one built inside a body alone shows here.
-    #[error(
-        "a tensor's element must be an integer, a floating-point type or `bool`, but this instance makes it `{ty}`: bound the parameter by `Numeric` to refuse such a type argument at the call"
-    )]
-    NonScalarTensorElement { ty: String },
-
-    /// A shape rule a generic body can only check once its extents are concrete:
-    /// at this instance a reshape changes the element count, a reduction runs over no
-    /// elements, or an extent expression has no value. `span` is the operation; `origin`
-    /// is the call in ordinary code whose instance chain reached it, which is where the
-    /// extents were supplied, and `instance` names the instance and its extents.
+    /// A rule a generic body can only check once its arguments are concrete: at this
+    /// instance a reshape changes the element count, a reduction or a sort runs over no
+    /// elements, an extent expression has no value, or a tensor built in the body over an
+    /// unbounded type parameter gets an element that is not a scalar (the checker refuses
+    /// that where the tensor shows in a signature). `span` is the operation; `origin` is
+    /// the call in ordinary code whose instance chain reached it, which is where the
+    /// arguments were supplied, and `instance` names the instance and its extents.
     #[error("{check}")]
-    InstanceShape {
+    InstanceCheck {
         check: String,
         span: Span,
         origin: Option<Span>,
         instance: Option<String>,
     },
+
+    /// Several [`LoweringError::InstanceCheck`] failures, one per failing instance, in
+    /// source order of where each is reported.
+    #[error("{} checks failed at instances of generics", .0.len())]
+    InstanceChecks(Vec<LoweringError>),
 }
 
 impl LoweringError {
-    /// Name the instance an [`LoweringError::InstanceShape`] arose in, the first time it
+    /// The one shape failure, or all of them together in source order.
+    fn from_instance_errors(mut errors: Vec<LoweringError>) -> Self {
+        if errors.len() == 1 {
+            return errors.remove(0);
+        }
+        errors.sort_by_key(|error| match error {
+            LoweringError::InstanceCheck { span, origin, .. } => origin.unwrap_or(*span).start,
+            _ => 0,
+        });
+        LoweringError::InstanceChecks(errors)
+    }
+
+    /// Name the instance an [`LoweringError::InstanceCheck`] arose in, the first time it
     /// passes out of one: the innermost instance is the one whose extents failed.
     fn in_instance(self, chain: Chain, instance: impl FnOnce() -> String) -> Self {
         match self {
-            LoweringError::InstanceShape {
+            LoweringError::InstanceCheck {
                 check,
                 span,
                 origin: None,
                 instance: None,
-            } => LoweringError::InstanceShape {
+            } => LoweringError::InstanceCheck {
                 check,
                 span,
                 origin: chain.origin,
@@ -169,9 +180,9 @@ impl LoweringError {
     }
 }
 
-/// An [`LoweringError::InstanceShape`] at `span`, named for its instance on the way out.
-pub(crate) fn instance_shape(check: String, span: Span) -> LoweringError {
-    LoweringError::InstanceShape {
+/// An [`LoweringError::InstanceCheck`] at `span`, named for its instance on the way out.
+pub(crate) fn instance_check(check: String, span: Span) -> LoweringError {
+    LoweringError::InstanceCheck {
         check,
         span,
         origin: None,
@@ -297,6 +308,9 @@ struct Lowerer {
     /// importing it, and is what the `for`-loop desugar reads to tell an
     /// `IntoIterator` container from an `Iterator` that is already its own iterator.
     trait_impls: HashSet<(String, String)>,
+    /// `(trait name, implementing type name)` → the associated types that impl binds, an
+    /// instance of a generic impl included. A bound's `<Assoc = V>` reads it to bind `V`.
+    trait_assoc: HashMap<(String, String), HashMap<String, HirType>>,
     /// Declared traits → their methods in declaration order. The order is
     /// the vtable slot order for dynamic dispatch; each entry carries the method's
     /// visible (non-`self`) parameter types and return type so a call through a
@@ -324,6 +338,17 @@ struct Lowerer {
     loop_stack: Vec<LoopCtx>,
     /// The current function/method's resolved return type (for `return` typing).
     current_return: HirType,
+    /// That return type as the signature writes it; `None` in a closure, as the checker
+    /// takes it.
+    written_return: Option<ast_types::Type>,
+    /// The written type each expression at a written-type site expects, by the
+    /// expression's span: a `val` annotation, the return type, an annotated binding
+    /// assigned to. A tensor constructor there reads a bound `?B` from it, the names
+    /// `current_return` and the other `HirType`s erase.
+    written_types: HashMap<Span, ast_types::Type>,
+    /// Each annotated binding's annotation, with the depth of the scope that binds it,
+    /// innermost last, kept as `grid_aliases` is.
+    written_bindings: Vec<(usize, String, ast_types::Type)>,
     /// Whether the body being lowered is a `@kernel` function's, the only place
     /// `thread_id` and `block_id` exist.
     in_kernel: bool,
@@ -571,6 +596,7 @@ impl Lowerer {
             hashable_structs: HashSet::new(),
             impl_methods: HashMap::new(),
             trait_impls: HashSet::new(),
+            trait_assoc: HashMap::new(),
             traits: HashMap::new(),
             supertraits: HashMap::new(),
             operator_binary_impls: HashMap::new(),
@@ -581,6 +607,9 @@ impl Lowerer {
             scopes: Vec::new(),
             loop_stack: Vec::new(),
             current_return: HirType::Void,
+            written_return: None,
+            written_types: HashMap::new(),
+            written_bindings: Vec::new(),
             in_kernel: false,
             grid_aliases: Vec::new(),
             transfers: false,
@@ -629,16 +658,33 @@ impl Lowerer {
         self.scopes.pop();
         let depth = self.scopes.len();
         self.grid_aliases.retain(|(at, _, _)| *at <= depth);
+        self.written_bindings.retain(|(at, _, _)| *at <= depth);
         self.extent_names.retain(|entry| entry.depth <= depth);
     }
 
     /// Define a binding in the innermost scope. A missing scope is a lowering bug
     /// (every body opens a scope first), so the define is silently dropped rather
     /// than panicking; the subsequent lookup would surface it as an error.
+    /// The annotation of the binding `name` resolves to here, when it was declared with one.
+    fn binding_annotation(&self, name: &str) -> Option<&ast_types::Type> {
+        let depth = self
+            .scopes
+            .iter()
+            .rposition(|scope| scope.contains_key(name))?
+            + 1;
+        self.written_bindings
+            .iter()
+            .rev()
+            .find(|(at, written, _)| *at == depth && written == name)
+            .map(|(_, _, ty)| ty)
+    }
+
     fn define(&mut self, name: String, ty: HirType) {
         let depth = self.scopes.len();
         self.grid_aliases
             .retain(|(at, alias, _)| *at != depth || *alias != name);
+        self.written_bindings
+            .retain(|(at, written, _)| *at != depth || *written != name);
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name, ty);
         }
@@ -953,7 +999,7 @@ fn resolve_tensor_dim(
                 .and_then(|value| usize::try_from(value).ok());
             match value {
                 Some(value) => Ok(Some(value)),
-                None => Err(instance_shape(
+                None => Err(instance_check(
                     format!(
                         "the extent `{}` has no value at this instance: it divides by zero or \
                          is negative, and an axis has a non-negative extent",

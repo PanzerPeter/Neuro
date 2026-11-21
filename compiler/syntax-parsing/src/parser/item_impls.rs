@@ -36,7 +36,7 @@ impl Parser {
         let first_args = self.parse_optional_type_args()?;
 
         self.skip_newlines();
-        let (trait_name, type_name, type_args) = if self.check(&TokenKind::For) {
+        let (trait_name, type_name, (type_args, type_lifetimes)) = if self.check(&TokenKind::For) {
             self.advance(); // consume `for`
             self.skip_newlines();
             let ty = self.consume_path_name("struct name")?;
@@ -80,26 +80,32 @@ impl Parser {
             generics,
             lifetimes,
             type_args,
+            type_lifetimes,
             where_predicates,
             assoc_types,
+            inherited_assoc: Vec::new(),
             methods,
             span: start.span.merge(close.span),
         })
     }
 
-    /// Parse an optional `<T1, T2, ...>` type-argument list applied to a type name
-    /// E.g. the `<T>` in `impl<T> Wrapper<T>`. Returns an empty vector when no
-    /// `<` follows. Shares the delimiter grammar with [`Parser::parse_type`].
-    pub(crate) fn parse_optional_type_args(&mut self) -> ParseResult<Vec<ast_types::Type>> {
+    /// Parse an optional `<T1, T2, ...>` type-argument list applied to a type name, e.g. the
+    /// `<T>` in `impl<T> Wrapper<T>`, and the lifetime arguments ahead of it apart. Both are
+    /// empty when no `<` follows. Shares the delimiter grammar with [`Parser::parse_type`].
+    pub(crate) fn parse_optional_type_args(
+        &mut self,
+    ) -> ParseResult<(Vec<ast_types::Type>, Vec<Identifier>)> {
         if !self.check(&TokenKind::Less) {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
         self.consume(TokenKind::Less, "'<'")?;
         self.skip_newlines();
         let mut args = Vec::new();
+        let mut lifetimes = Vec::new();
         loop {
-            if !self.skip_lifetime_arg()? {
-                args.push(self.parse_type()?);
+            match self.lifetime_arg(!args.is_empty())? {
+                Some(lifetime) => lifetimes.push(lifetime),
+                None => args.push(self.parse_type()?),
             }
             self.skip_newlines();
             if !self.check(&TokenKind::Comma) {
@@ -109,7 +115,7 @@ impl Parser {
             self.skip_newlines();
         }
         self.consume(TokenKind::Greater, "'>' to close type arguments")?;
-        Ok(args)
+        Ok((args, lifetimes))
     }
 
     /// Parse an associated-type binding inside an `impl` block: `type Name = Type`

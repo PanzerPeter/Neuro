@@ -356,27 +356,135 @@ func main() -> i32 { 0 }
 }
 
 #[test]
-fn a_subtrait_does_not_inherit_associated_types() {
+fn a_subtrait_inherits_its_supertraits_associated_types() {
+    // `Self::Item` in `Mid` and `Ext` is `Src`'s, answered by the same type's `impl Src`,
+    // written after the subtrait impls. A bound on the subtrait constrains it and types
+    // the supertrait's methods too; it infers a parameter, passes a bound through, and
+    // states a return-position promise. A supertrait list fixing the type answers it for
+    // a bare bound.
+    let source = r#"
+trait Src {
+    type Item
+    func get(&self) -> Self::Item
+}
+trait Mid: Src {
+    func pair(&self) -> (Self::Item, Self::Item) { (self.get(), self.get()) }
+}
+trait Ext: Mid {
+    func last(&self) -> Self::Item
+}
+struct W<T> { t: T }
+impl<T: Copy> Ext for W<T> {
+    func last(&self) -> Self::Item { self.t }
+}
+impl<T: Copy> Mid for W<T> {}
+impl<T: Copy> Src for W<T> {
+    type Item = T
+    func get(&self) -> T { self.t }
+}
+struct C { v: i32 }
+impl Ext for C {
+    func last(&self) -> i32 { self.v + 1 }
+}
+impl Mid for C {}
+impl Src for C {
+    type Item = i32
+    func get(&self) -> i32 { self.v }
+}
+func inner<T: Src<Item = i32>>(t: &T) -> i32 { t.get() }
+func outer<T: Ext<Item = i32>>(t: &T) -> i32 {
+    val (a, b) = t.pair()
+    inner(t) + t.last() + a + b
+}
+func infer<V, T: Ext<Item = V>>(t: &T) -> V { t.last() }
+trait Numbers: Src<Item = i32> {
+    func dbl(&self) -> Self::Item
+}
+impl Numbers for C {
+    func dbl(&self) -> i32 { self.v * 2 }
+}
+func bare<T: Numbers>(t: &T) -> i32 { t.dbl() + t.get() }
+func make(v: i32) -> impl Ext<Item = i32> { C { v: v } }
+func main() -> i32 {
+    val c = C { v: 3 }
+    val w = W { t: 4i64 }
+    outer(&c) + infer(&w) as i32 + bare(&c) + make(1).last() + w.pair().0 as i32
+}
+"#;
+    assert_eq!(run("inherit_assoc.nr", source), 32);
+}
+
+#[test]
+fn an_iterator_subtrait_bound_iterates() {
+    let source = r#"
+trait Counter: Iterator {
+    func first(&mut self) -> Option<Self::Item> { self.next() }
+}
+struct Up { n: i32 }
+impl Iterator for Up {
+    type Item = i32
+    func next(&mut self) -> Option<i32> {
+        if self.n >= 4 { return Option::None }
+        self.n += 1
+        Option::Some(self.n)
+    }
+}
+impl Counter for Up {}
+func total<T: Counter<Item = i32>>(it: T) -> i32 {
+    mut s: i32 = 0
+    for x in it { s += x }
+    s
+}
+func main() -> i32 {
+    mut u = Up { n: 0 }
+    val p = match u.first() { Option::Some(x) => x, Option::None => 0 }
+    total(Up { n: 0 }) + p
+}
+"#;
+    assert_eq!(run("inherit_iter.nr", source), 11);
+}
+
+#[test]
+fn an_inherited_associated_type_is_refused_where_it_does_not_hold() {
     let prefix = r#"
 trait Source {
     type Item
-    func next(&mut self) -> Self::Item
+    func get(&self) -> Self::Item
+}
+trait Ext: Source { func last(&self) -> Self::Item }
+struct C { v: i32 }
+impl Source for C {
+    type Item = i32
+    func get(&self) -> i32 { self.v }
 }
 "#;
+    // The subtrait's impl does not bind what it inherits; the supertrait's impl does.
     let err = compile_rejected(
-        "inherit_sig.nr",
+        "inherit_rebind.nr",
         &format!(
-            "{prefix}trait Sub: Source {{ func f(&self) -> Self::Item }}\nfunc main() -> i32 {{ 0 }}\n"
+            "{prefix}impl Ext for C {{ type Item = i32  func last(&self) -> i32 {{ 0 }} }}
+func main() -> i32 {{ 0 }}
+"
         ),
     );
-    assert!(err.contains("Item"), "{err}");
+    assert!(err.contains("declares no associated type 'Item'"), "{err}");
+    // A bound on the subtrait is held to the supertrait impl's binding.
     let err = compile_rejected(
-        "inherit_bound.nr",
+        "inherit_mismatch.nr",
         &format!(
-            "{prefix}trait Sub: Source {{}}\nfunc f<T: Sub<Item = i32>>(t: &T) -> i32 {{ 0 }}\nfunc main() -> i32 {{ 0 }}\n"
+            "{prefix}impl Ext for C {{ func last(&self) -> i32 {{ 0 }} }}
+func f<T: Ext<Item = i64>>(t: &T) -> i64 {{ t.last() }}
+func main() -> i32 {{ f(&C {{ v: 1 }}) as i32 }}
+"
         ),
     );
-    assert!(err.contains("Item"), "{err}");
+    assert!(err.contains("binds `Item` to i32"), "{err}");
+    // Two supertraits declaring one name leave it to neither.
+    let err = compile_rejected(
+        "inherit_ambiguous.nr",
+        "trait A { type K  func a(&self) -> Self::K }\ntrait B { type K  func b(&self) -> Self::K }\ntrait AB: A + B { func both(&self) -> Self::K }\nfunc main() -> i32 { 0 }\n",
+    );
+    assert!(err.contains("declares no associated type 'K'"), "{err}");
 }
 
 #[test]

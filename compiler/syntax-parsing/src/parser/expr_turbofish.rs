@@ -19,6 +19,30 @@ impl Parser {
         )
     }
 
+    /// Whether the turbofish the current `::` opens is followed by another `::`, so it
+    /// qualifies the type before it (`T::<f32, [2]>::zeros()`) rather than a callee. Only a
+    /// tensor constructor takes that form, so it is how an alias of `Tensor` is recognised.
+    pub(super) fn turbofish_qualifies_type(&self) -> bool {
+        // The `<` after the `::` opens at depth 1; the `>` that brings it back to 0 closes it.
+        let mut depth = 0usize;
+        for (offset, token) in self.tokens.iter().enumerate().skip(self.current + 1) {
+            match token.kind {
+                TokenKind::Less => depth += 1,
+                TokenKind::Greater if depth == 1 => {
+                    return matches!(
+                        self.tokens.get(offset + 1).map(|t| &t.kind),
+                        Some(TokenKind::ColonColon)
+                    );
+                }
+                TokenKind::Greater => depth = depth.saturating_sub(1),
+                // A turbofish holds no block, so a brace or the end means it never closed.
+                TokenKind::LeftBrace | TokenKind::RightBrace | TokenKind::Eof => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
     /// Parse `Tensor::<T, [d0, ...]>::ctor(args)`: the tensor constructor spelling, whose
     /// turbofish qualifies the *type* rather than the callee.
     ///
@@ -32,10 +56,27 @@ impl Parser {
         type_name: Identifier,
     ) -> ParseResult<Expr> {
         self.advance(); // consume '::'
-        let (args, shape, close_span) = self.parse_generic_type_args(true)?;
+        let super::types::TypeArgs {
+            args,
+            lifetimes,
+            shape,
+            close: close_span,
+        } = self.parse_generic_type_args(true)?;
         let (args, shape) = Self::bare_shape_param(true, args, shape);
         let type_span = type_name.span.merge(close_span);
+        // `Tensor` declares no lifetime, so its constructor spelling takes no lifetime argument.
+        if !lifetimes.is_empty() {
+            return Err(ParseError::TensorTypeArity { span: type_span });
+        }
         let Some((dims, _)) = shape else {
+            // No shape: not a tensor at all, but a turbofish written after a type's name.
+            let last = type_name.name.rsplit("::").next().unwrap_or_default();
+            if last != super::types::TENSOR_TYPE_NAME {
+                return Err(ParseError::TypeTurbofish {
+                    name: type_name.name,
+                    span: type_span,
+                });
+            }
             return Err(ParseError::TensorTypeArity { span: type_span });
         };
         let tensor_type = Self::build_tensor_type(args, dims, type_span)?;

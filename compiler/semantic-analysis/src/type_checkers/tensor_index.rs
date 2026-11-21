@@ -47,30 +47,10 @@ impl TypeChecker {
         };
         // A splice has no rank to index by. A dynamic axis is indexed at run time: a
         // position and a constant range are bounds-checked there, and the strides are the
-        // run-time extents of the value.
+        // run-time extents of the value. A reversed or stepped range reads at constant
+        // positions too, so its end is the same check.
         if self.reject_splice(shape, "an index", &source, span) {
             return Type::Unknown;
-        }
-        // A reversed or stepped range would read a dynamic axis in an order or at a
-        // stride that depends on its length, which nothing here can name.
-        for (index, axis) in indices.iter().zip(shape.iter()) {
-            let TensorIndexArg::Range {
-                reversed,
-                step,
-                span: range_span,
-                ..
-            } = index
-            else {
-                continue;
-            };
-            if axis.extent.is_dynamic() && (*reversed || step.is_some()) {
-                self.record_error(TypeError::TensorDynamicExtent {
-                    operation: "a reversed or stepped range".to_string(),
-                    ty: source.clone(),
-                    span: *range_span,
-                });
-                return Type::Unknown;
-            }
         }
         if indices.len() != shape.len() {
             self.record_error(TypeError::TensorIndexRankMismatch {

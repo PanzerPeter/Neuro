@@ -33,7 +33,9 @@ fn impl_item(type_name: &str, method_names: &[&str]) -> Item {
         lifetimes: Vec::new(),
         where_predicates: Vec::new(),
         type_args: Vec::new(),
+        type_lifetimes: Vec::new(),
         assoc_types: Vec::new(),
+        inherited_assoc: Vec::new(),
         methods: method_names
             .iter()
             .map(|m| MethodDef {

@@ -279,6 +279,9 @@ pub struct ImplDef {
     /// generic parameter; monomorphization maps them positionally to the struct's
     /// concrete type arguments.
     pub type_args: Vec<Type>,
+    /// Lifetime arguments applied to `type_name`, the `'a` of `impl<'a> View<'a>`. Kept for
+    /// the checker to count against the type's declaration, then erased.
+    pub type_lifetimes: Vec<Identifier>,
     /// Value predicates from an impl-level `where` clause, checked at each
     /// instantiation (see [`FunctionDef::where_predicates`]).
     pub where_predicates: Vec<Expr>,
@@ -287,6 +290,11 @@ pub struct ImplDef {
     /// [`TraitDef::assoc_types`] declaration. Each entry is `(name, bound type)`. Empty
     /// for blocks with no `type` items.
     pub assoc_types: Vec<(Identifier, Type)>,
+    /// The associated types a supertrait declares, as the same type's impl of that
+    /// supertrait binds them: an `impl Sub for C` has `Self::Item` from `impl Src for C`.
+    /// Filled in by module resolution, written in this block's own type-parameter names, and
+    /// in scope like [`Self::assoc_types`] without being bindings of this block's trait.
+    pub inherited_assoc: Vec<(Identifier, Type)>,
     pub methods: Vec<MethodDef>,
     pub span: Span,
 }

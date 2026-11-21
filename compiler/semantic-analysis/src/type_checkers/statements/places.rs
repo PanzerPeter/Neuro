@@ -43,6 +43,11 @@ impl TypeChecker {
             self.symbols.restore_moved(root, prior);
         }
         let place_ty = place_ty?;
+        if let (Place::Var(name), None) = (place, op)
+            && self.symbols.lookup(&name.name).is_some_and(|s| s.annotated)
+        {
+            self.written_type_sites.insert(value.span());
+        }
         let holds_reference = self.type_holds_reference(&place_ty);
         let stored = self.check_store(place, place_ty, op, value, span);
         if holds_reference && self.temporary_views.contains(&value.span()) {

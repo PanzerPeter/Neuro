@@ -7,7 +7,7 @@
 //
 // An exit code is one byte, so each expected value is kept below 256.
 
-use crate::compile_harness::{rejected, run};
+use crate::compile_harness::{compile_tagged, rejected, run};
 
 #[test]
 fn a_whole_tensor_reduction_folds_every_element() {
@@ -423,20 +423,68 @@ func main() -> i32 {
     );
 }
 
+/// An integer mean is `sum / count` in the element type, truncating toward zero as integer `/`
+/// does: `-1 / 4` is 0, where a floor would give -1. The count is wider than the element, so a
+/// run longer than `i8`'s range still divides by its true length: 100 over 200 elements is 0,
+/// where a count wrapped to `i8` (-56) would give -1. An unsigned total widens without its sign.
 #[test]
-fn an_integer_mean_is_rejected() {
+fn an_integer_mean_truncates_toward_zero() {
     let source = r#"
 func main() -> i32 {
-    val v: Tensor<i32, [2]> = [1, 2]
-    val x: i32 = v.mean()
+    val v: Tensor<i32, [4]> = [1, 2, 3, -7]
+    if v.mean() != 0 { return 1 }
+    val m: Tensor<i64, [2, 3]> = [[1, 2, 3], [-4, -5, -7]]
+    val rows: Tensor<i64, [2]> = m.mean(axis: 1)
+    if rows[0] != 2 || rows[1] != -5 { return 2 }
+    mut wide = Tensor::<i8, [200]>::ones()
+    for i in 0..100 {
+        wide[i] = 0
+    }
+    if wide.mean() != 0 { return 3 }
+    val unsigned: Tensor<u8, [3]> = [200, 40, 2]
+    if unsigned.mean() != 80 { return 4 }
+    val n: u64 = 5
+    val dynamic = Tensor::<i32, [?]>::ones(dims: [n]) * 7
+    if dynamic.mean() != 7 { return 5 }
     return 0
 }
 "#;
-    let errors = rejected("tensor_reduce_int_mean.nr", source);
+    assert_eq!(run("tensor_reduce_int_mean.nr", source), 0);
+}
+
+/// The sum under an integer mean keeps `+`'s overflow guard, and a dynamic run that is empty at
+/// run time stops the program, as every reduction's does, rather than producing a value.
+#[test]
+fn an_integer_mean_keeps_the_sum_and_empty_run_guards() {
+    let overflow = r#"
+func main() -> i32 {
+    val v: Tensor<i8, [2]> = [100, 100]
+    return v.mean() as i32
+}
+"#;
+    let stderr = panic_of(overflow, "tensor_reduce_int_mean_overflow");
+    assert!(stderr.contains("panic: integer overflow"), "{stderr}");
+    let empty = r#"
+func main() -> i32 {
+    val n: u64 = 0
+    val v = Tensor::<i32, [?]>::zeros(dims: [n])
+    return v.mean()
+}
+"#;
+    let stderr = panic_of(empty, "tensor_reduce_int_mean_empty");
     assert!(
-        errors.contains("no rounding rule"),
-        "an integer mean should be rejected: {errors}"
+        stderr.contains("panic: `.mean()` reduces over no elements"),
+        "{stderr}"
     );
+}
+
+/// What `source`, compiled unoptimized, prints to stderr when run.
+fn panic_of(source: &str, tag: &str) -> String {
+    let exe = compile_tagged(source, tag, "0");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("run executable");
+    String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
 #[test]

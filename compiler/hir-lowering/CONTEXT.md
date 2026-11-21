@@ -27,7 +27,7 @@ deliberate duplicates of the checker's (the collection method surface, the `val-
 table, return-position `impl Trait` resolution), and a divergence between the two surfaces as a
 `LoweringError`, which is the point. Lowering assumes well-typedness: a shape the checker should
 have rejected is a `LoweringError`, never a panic. The exceptions are user-facing:
-`NotDifferentiable`, below, and `InstanceShape`, a shape rule only an instance can check.
+`NotDifferentiable`, below, and `InstanceCheck`, a shape rule only an instance can check.
 
 A registration pre-pass mirrors the checker's: struct field tables (plus the five derives'
 intent, in `copy_structs` / `clone_structs` / `partial_eq_structs` / `debug_structs` /
@@ -477,10 +477,14 @@ reduction symbolically and leaves the counts to the instance, where they are fir
 `.reshape` (`tensor_shape.rs`) refuses a count that changes, a `-1` that does not divide or an
 entry with no value; a reduction (`tensor_reduce.rs`) refuses an empty run; and an extent
 expression in a type (`resolve_tensor_dim`, `extent_value`) refuses one with no value at the
-instance's extents. Each is `instance_shape(check, span)`, a `LoweringError::InstanceShape`
+instance's extents. Each is `instance_check(check, span)`, a `LoweringError::InstanceCheck`
 with no origin yet: the drain loop (`in_instance`) gives it the instance's chain origin and a
 description (`describe_instance`) as it leaves the instance, and `lower_generic_call` does the same
-for a signature resolved at the request. A generic struct instance is requested by a type, so
+for a signature resolved at the request. The drain holds each one back (`defer_instance_error`),
+leaving that instance out, and goes on, so every failing instance is reported in one run: one
+failure is returned as itself, several as `LoweringError::InstanceChecks` in source order. Any
+other error after a held one ends the drain with the held ones, the later error most likely
+being their consequence. Within one instance the first failing check ends its body. A generic struct instance is requested by a type, so
 its methods' checks carry no origin and are reported at the operation. A `where` predicate the
 checker refuses first means lowering never runs, which is how a predicate moves the error to the
 signature. A generic that calls itself with a type built from its own parameter
@@ -489,7 +493,8 @@ one template, cannot tell; without the limit lowering would never finish.
 
 Two rules read the instance's type arguments. A tensor over a type parameter the checker saw with no
 bound, built inside a body whose signature does not name it, gets its element from the instance:
-`resolve_type` refuses one that is not a scalar as `NonScalarTensorElement`. And `T::f(args)`
+`resolve_type` refuses one that is not a scalar as an `InstanceCheck` at the element's span, so it
+is reported at the call that made the instance, as a shape failure is. And `T::f(args)`
 names the instance's type argument (`bound_assoc.rs`, `lower_bound_assoc_call`): a struct, enum or
 newtype argument re-dispatches the call as `Arg::f(args)`, and a scalar takes the numeric
 families' functions directly, `zero()` and `one()` as literals and `from_f64(x)` as a cast.
@@ -624,7 +629,7 @@ associated path (`Point::scale`), a non-generic enum's tuple variant (`Error::Io
 variant (`is_generic_tuple_variant`; its parameters are the expected function type's, or, as a
 generic call's argument, the `ClosureHint` the call has fixed, in `lower_function_arg`) and an
 instance (`convert::<u8>`, typed by
-`generic_instance_signature`) to a capture-free closure forwarding its `__fn_value_argN`
+`generic_instance_signature`, or `Cell::new::<i32>`, by `assoc_instance_params`) to a capture-free closure forwarding its `__fn_value_argN`
 parameters, through `lift_capture_free`. A closure literal called in place with an unannotated
 parameter (`lower_value_call`) lowers its arguments first and hands their types to the literal
 as its hint, the order the checker checks them in.
@@ -702,7 +707,11 @@ scalar it does not write.
   body's tail and `lower_block_value_inner` all go through it.
 - **Constructors**: `zeros`, `ones`, `identity` and `random_normal` fill `dims` with one `u64` per
   `None` axis (`constructor_dims`). A bound name reads its local; a fresh one takes its `dims:`
-  entry; an anonymous axis takes its entry. The entries are bound to temporaries in order, in a
+  entry; an anonymous axis takes its entry. The names come from the turbofish or, without one,
+  from `written_types`: the written type the checker's written-type sites supply, keyed by the
+  expression's span (a `val` annotation, `written_return` for a `return` operand or tail, an
+  annotated binding from `written_bindings` for an assignment). From a site only a bound name
+  is read; a fresh one is bound by the annotation. The entries are bound to temporaries in order, in a
   block. `identity` over `[?B, ?B]` repeats the value. `random_normal` takes `dims:` as its third
   argument; `zeros`, `ones` and `identity` take it as their only one. Argument binding puts the
   `dims:` argument in that position, so it is read positionally here.
@@ -762,13 +771,16 @@ declaration, naming no implementor, and `lower_supplied_trait_method` leaves it 
 `impl Trait` resolves to the type its body produces (`items/impl_returns.rs`): `register_items`
 ends with `resolve_impl_returns`, which lowers each body with `lower_inferred_body` on a clone of
 the `Lowerer` and registers the tail's type, in rounds as the checker does, so a body calling an
-unregistered one waits. `adopt_instances` makes in the real `Lowerer` the generic instances the
+unregistered one waits. An inherent method's (`method_returns_impl_trait`) is left out of
+`register_impl_methods` and probed the same way with `self` bound (`probe_method_return`); it joins
+`functions` and `impl_methods` once resolved, and `lower_method` reads its return type back. `adopt_instances` makes in the real `Lowerer` the generic instances the
 type names, which the clone made and dropped. A generic template's return is probed per instance
 (`template_return_type`, from `instance_signature` and `lower_template`), with `probing_returns`
 stopping a body that reaches itself.
 
 An **associated type** reaches lowering as a `Type::Named` spelled `Self::Item`. `enter_impl_assoc`
-adds each `impl` block's bindings to `type_subst` under that spelling for the block's signature
+adds each `impl` block's bindings, and the ones it inherits from a supertrait's impl
+(`ImplDef.inherited_assoc`), to `type_subst` under that spelling for the block's signature
 registration and its bodies: a name standing for a concrete type over one block is what the
 type-parameter substitution already is, so annotations resolve through the one path. A generic
 impl's methods are resolved per instance, so `with_impl_assoc` binds the same names under each
@@ -777,6 +789,12 @@ body lowering alike. A trait's own
 declaration has no implementor, so `resolve_trait_sig_type` gives such a position `Void` in the
 `traits` table, and a bare `Self` position too; nothing reads either, because a trait naming one
 is not object-safe. Inside an `impl` no `Self` reaches lowering: the parser replaced it.
+
+`trait_assoc` holds, per `(trait, type)`, what each impl bound its associated types to
+(`record_trait_assoc`, instance impls included via `register_instance_methods`). A generic call
+whose arguments leave a type parameter unsolved fills it from a bound's constraint through
+`infer_from_bounds` (in `items/register.rs`), called by `lower_generic_call` and
+`instantiate_generic_method`, the same fixpoint the checker runs.
 
 ### Places
 `lower_place` resolves `ast_types::Place` to `HirPlace`, giving each form the type of the
@@ -868,6 +886,8 @@ compiler bug, not a diagnostic.
   constant. `.topk` lowers to `HirSortKind::TopK(k)` at `descending: true`, top-k being the
   head of the descending order, and its type is the `HirType::Tuple` of the values tensor and
   the `i32` index tensor. The receiver is read, not moved, so a borrowed one lowers here too.
+  An instance of a shape-generic body is where an empty sorted axis, or `k` past its extent,
+  first has a number, so both are `InstanceCheck` errors here.
   The functional traversals live in `tensor_apply.rs`: `.map(f)`, `.zip(other, f)` and
   `.reduce(init, f)` become one `HirExprKind::TensorApply` whose `kind` says which. Every
   argument is lowered as a VALUE here, unlike a reduction's axis, and the function is always

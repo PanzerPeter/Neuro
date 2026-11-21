@@ -31,7 +31,7 @@ The `-O` level reaches stage 8 and stage 9. At `-O0` the tensor bodies check int
 
 **`neuroc run <FILE>`** compiles as `compile` does, into a temporary directory, runs the executable and exits with its status. The executable keeps the source's name, so `argv[0]` is meaningful. The directory is removed on exit, and no success line is printed, so the program's stdout is its own.
 
-**`neuroc test <FILE>`** runs the same front half and the same backend as `compile`, but needs no `main`: the executable's entry runs the `@test` function its first argument indexes. The driver runs it once per test, each in its own process, and a test passes when its process exits `0`. It prints a verdict per test and the output of each failure.
+**`neuroc test <FILE>`** runs the same front half and the same backend as `compile`, but needs no `main`: the executable's entry runs the `@test` function its first argument indexes. The driver runs it once per test, each in its own process, and a test passes when its process exits `0`. It prints a verdict per test and the output of each failure. **`neuroc test --std`** takes no file and runs the standard library's own `@test` functions the same way, under an empty program.
 
 Flags are documented in the [CLI Usage Guide](../guides/cli-usage.md), including `--gpu-arch`, which `compile`, `run` and `test` accept.
 

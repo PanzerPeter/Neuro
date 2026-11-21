@@ -15,7 +15,6 @@
 
 use super::TypeChecker;
 use super::closures::{closure_context, closure_param_unannotated};
-use super::statements::function_value_position;
 use crate::errors::TypeError;
 use crate::types::{TensorAxis, Type};
 use ast_types::Expr;
@@ -47,6 +46,7 @@ impl TypeChecker {
         element: &Type,
         shape: &[TensorAxis],
         method: &str,
+        receiver: &Expr,
         args: &[Expr],
         call_span: Span,
     ) -> Type {
@@ -91,16 +91,12 @@ impl TypeChecker {
         let context = closure_context(callee, wanted_params, Type::Unknown);
         // The function value is READ, not moved: it is evaluated once and called per
         // element, and stays usable after the traversal. A binding that may borrow is
-        // read here and nowhere else, so it may be named, and so may a closure literal
-        // that only reads what it borrows. A literal holding a `&mut` stays refused: the
-        // traversal marks its operands `noalias`, which a `&mut` of one would break.
-        let slot = function_value_position(callee);
-        self.function_value_slot = slot;
-        let callee_ty = self
-            .check_expr(callee, Some(&context))
-            .unwrap_or(Type::Unknown);
-        self.function_value_slot = None;
-        self.refuse_mutating_closure_literal(slot);
+        // read here and nowhere else, so it may be named, and so may a closure literal.
+        // One may not write an operand, which the traversal reads (and marks `noalias`).
+        let walked: Vec<&Expr> = std::iter::once(receiver)
+            .chain((method == ZIP_METHOD).then(|| &args[0]))
+            .collect();
+        let callee_ty = self.check_per_element_callee(callee, &context, &walked);
         self.refuse_once_per_element(&callee_ty, method, callee.span());
         let Type::Function { params, ret, .. } = &callee_ty else {
             if !matches!(callee_ty, Type::Unknown) {

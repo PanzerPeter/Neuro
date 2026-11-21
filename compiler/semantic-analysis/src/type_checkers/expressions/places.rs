@@ -7,7 +7,7 @@ use super::TypeChecker;
 use crate::errors::TypeError;
 use crate::types::Type;
 use ast_types::{Expr, TensorIndexArg};
-use shared_types::Span;
+use shared_types::{Literal, Span};
 
 impl TypeChecker {
     /// The root binding name of a place expression, peeling parentheses, field
@@ -94,6 +94,19 @@ impl TypeChecker {
             _ => None,
         };
         let Some((name, is_mut_binding)) = binding else {
+            // A string literal's bytes are part of the program image, so a shared borrow of
+            // one cannot outlive what it points at, wherever it is kept.
+            if !mutable && matches!(place, Expr::Literal(Literal::String(_), _)) {
+                let expected = match expected {
+                    Some(Type::Reference { inner, .. }) => Some(inner.as_ref()),
+                    _ => None,
+                };
+                let inner = self.check_expr(place, expected)?;
+                return Some(Type::Reference {
+                    inner: Box::new(inner),
+                    mutable: false,
+                });
+            }
             if !mutable && self.temporary_borrow_slot == Some(*span) {
                 return self.check_temporary_borrow(operand, *span, expected);
             }

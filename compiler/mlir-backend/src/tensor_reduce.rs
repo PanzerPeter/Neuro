@@ -35,7 +35,8 @@
 // time, so a float run of dynamic length always takes the lanes (the device's shape, on the host
 // too), with `min(length, REDUCE_LANES)` of them. Every lane starts inside the run, so the lanes
 // of a short run are its elements in order, which is the sequential fold a short static run
-// takes, and the bits match. A mean divides by the run-time count.
+// takes, and the bits match. A mean divides by the run-time count; an integer mean divides as
+// integer `/` does.
 
 use crate::{
     errors::MlirError,
@@ -55,7 +56,7 @@ use melior::{
     Context,
     dialect::arith::{self, CmpiPredicate},
     ir::{
-        Block, BlockLike, Identifier, Location, Region, RegionLike, Type, Value,
+        Block, BlockLike, Identifier, Location, Region, RegionLike, Type, Value, ValueLike,
         attribute::{FloatAttribute, IntegerAttribute},
         operation::OperationBuilder,
         r#type::{IntegerType, RankedTensorType},
@@ -109,9 +110,6 @@ pub(crate) fn build_reduce<'c, 'a>(
     let Some(kind) = Element::of(element) else {
         return Ok(None);
     };
-    if kind != Element::Float && *op == HirReduceOp::Mean {
-        return Ok(None);
-    }
     let Some(source) = build_expression(context, location, block, receiver, scope, lowering)?
     else {
         return Ok(None);
@@ -269,7 +267,7 @@ pub(crate) fn build_reduce<'c, 'a>(
     )?;
     let value = match *op {
         HirReduceOp::Mean => {
-            let count = count_of(context, location, block, element_type, length)?;
+            let count = count_of(context, location, block, element_type, kind, length)?;
             apply(
                 context,
                 location,
@@ -281,7 +279,7 @@ pub(crate) fn build_reduce<'c, 'a>(
                     iterators: iterator_types(context, parallel, 0)?,
                 },
                 tensor_type,
-                mean_block(location, element_type)?,
+                mean_block(location, element_type, kind, count.r#type())?,
             )?
         }
         _ => folded,
@@ -346,20 +344,30 @@ fn count_of<'c, 'a>(
     location: Location<'c>,
     block: &'a Block<'c>,
     element: Type<'c>,
+    kind: Element,
     length: Extent<'c, '_>,
 ) -> Result<Value<'c, 'a>, MlirError> {
+    // An integer count is `i64` whatever the element: a run longer than the element's range
+    // has a mean inside it, but its count does not fit there.
+    let wide: Type<'c> = IntegerType::new(context, 64).into();
+    let integer = kind != Element::Float;
     match length {
         Extent::Static(length) => append(
             block,
             arith::constant(
                 context,
-                FloatAttribute::new(context, element, length as f64).into(),
+                match integer {
+                    true => IntegerAttribute::new(wide, length as i64).into(),
+                    false => FloatAttribute::new(context, element, length as f64).into(),
+                },
                 location,
             ),
         ),
         Extent::Dynamic(length) => {
-            let wide = IntegerType::new(context, 64).into();
             let length = append(block, arith::index_cast(length, wide, location))?;
+            if integer {
+                return Ok(length);
+            }
             append(
                 block,
                 OperationBuilder::new("arith.sitofp", location)
@@ -946,19 +954,65 @@ fn fold_step<'c, 'a>(
     append(block, arith::select(wins, value, carried, location))
 }
 
-/// A mean's last step over `(length, total)`: the total divided by the run length.
-fn mean_block<'c>(location: Location<'c>, element: Type<'c>) -> Result<Block<'c>, MlirError> {
-    let block = Block::new(&[(element, location); FOLD_BODY_ARGUMENTS]);
-    let mean = append(
-        &block,
-        arith::divf(
-            block.argument(1)?.into(),
-            block.argument(0)?.into(),
-            location,
-        ),
-    )?;
+/// A mean's last step over `(length, total)`: the total divided by the run length. An integer
+/// total divides as integer `/` does, truncating toward zero, in 64 bits beside the `i64` count.
+/// The run is not empty (that is checked before the fold) and the quotient is no larger than the
+/// total, so neither of `/`'s guards can fire and it narrows back without loss.
+fn mean_block<'c>(
+    location: Location<'c>,
+    element: Type<'c>,
+    kind: Element,
+    count: Type<'c>,
+) -> Result<Block<'c>, MlirError> {
+    let block = Block::new(&[(count, location), (element, location)]);
+    let length: Value = block.argument(0)?.into();
+    let total: Value = block.argument(1)?.into();
+    let mean = match kind {
+        Element::Float | Element::Half => append(&block, arith::divf(total, length, location))?,
+        Element::Signed(bits) => {
+            let wide = match bits < 64 {
+                true => append(&block, arith::extsi(total, count, location))?,
+                false => total,
+            };
+            narrow(
+                &block,
+                location,
+                element,
+                bits,
+                arith::divsi(wide, length, location),
+            )?
+        }
+        Element::Unsigned(bits) => {
+            let wide = match bits < 64 {
+                true => append(&block, arith::extui(total, count, location))?,
+                false => total,
+            };
+            narrow(
+                &block,
+                location,
+                element,
+                bits,
+                arith::divui(wide, length, location),
+            )?
+        }
+    };
     yield_value(&block, location, mean)?;
     Ok(block)
+}
+
+/// `quotient`, a 64-bit integer, appended to `block` and truncated to `element`'s `bits`.
+fn narrow<'c, 'a>(
+    block: &'a Block<'c>,
+    location: Location<'c>,
+    element: Type<'c>,
+    bits: u32,
+    quotient: melior::ir::Operation<'c>,
+) -> Result<Value<'c, 'a>, MlirError> {
+    let quotient = append(block, quotient)?;
+    match bits < 64 {
+        true => append(block, arith::trunci(quotient, element, location)),
+        false => Ok(quotient),
+    }
 }
 
 pub(crate) fn append<'c, 'a>(
@@ -985,10 +1039,7 @@ pub(crate) fn yield_value<'c>(
 mod tests {
     use crate::{
         GpuTarget,
-        bridge::tests::{
-            assert_host_only_on_gpu, assert_launches_on_gpu, assert_lowered, mlir_of, operand,
-            tensor_of,
-        },
+        bridge::tests::{assert_launches_on_gpu, assert_lowered, mlir_of, operand, tensor_of},
         lower_for_gpu, lower_for_link,
     };
 
@@ -1336,6 +1387,6 @@ mod tests {
         let mlir = mlir_of(&program);
         assert!(mlir.contains("tensor<?xf32>"), "{mlir}");
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 }

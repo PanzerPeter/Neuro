@@ -11,40 +11,72 @@ use ast_types::{COMPOSE_PARAM, Expr, GenericArg};
 use shared_types::{Identifier, Span};
 
 use super::TypeChecker;
+use super::calls::BoundMethod;
 use crate::errors::TypeError;
+use crate::type_checkers::GenericFnSig;
 use crate::types::{FunctionMode, Type};
 
 impl TypeChecker {
-    /// The type of `callee::<type_args>` named as a value: the generic function's
-    /// signature with every type argument substituted.
+    /// The type of `callee::<type_args>` named as a value: the generic function's, or
+    /// generic associated function's, signature with every type argument substituted. A
+    /// method is a value only as a bound method, an operand of `|>` or `>>`.
     pub(crate) fn check_instance(
         &mut self,
         callee: &Expr,
         type_args: &[GenericArg],
         span: Span,
     ) -> Option<Type> {
-        let Expr::Identifier(ident) = callee else {
-            self.record_error(TypeError::InstanceNotAValue { span });
-            return None;
+        let (name, sig) = match callee {
+            Expr::Identifier(ident) => (
+                ident.name.clone(),
+                self.generic_funcs
+                    .get(&ident.name)
+                    .filter(|_| self.symbols.lookup(&ident.name).is_none())
+                    .cloned(),
+            ),
+            Expr::Path {
+                type_name, member, ..
+            } if !self.generic_scope.contains(&type_name.name) => {
+                let mangled = format!("{}__{}", type_name.name, member.name);
+                let Some(Type::Function { params, ret, .. }) =
+                    self.functions.get(&mangled).cloned()
+                else {
+                    // Not an associated function: the path reports what it is.
+                    return self.check_expr(callee, None);
+                };
+                let sig = self.assoc_generic_signature(&type_name.name, &mangled, params, *ret);
+                (format!("{}::{}", type_name.name, member.name), sig)
+            }
+            _ => {
+                self.record_error(TypeError::InstanceNotAValue { span });
+                return None;
+            }
         };
-        let Some(sig) = self
-            .generic_funcs
-            .get(&ident.name)
-            .filter(|_| self.symbols.lookup(&ident.name).is_none())
-            .cloned()
-        else {
+        let Some(sig) = sig else {
             // A turbofish on a non-generic function names nothing, as on a call.
             self.record_error(TypeError::TurbofishCountMismatch {
-                name: ident.name.clone(),
+                name,
                 expected: 0,
                 found: type_args.len(),
                 span,
             });
             return self.check_expr(callee, None);
         };
+        self.instantiate_signature(&name, &sig, type_args, span)
+    }
+
+    /// `sig` as a function type, every type argument taken from the turbofish `type_args`,
+    /// which must name them all.
+    fn instantiate_signature(
+        &mut self,
+        name: &str,
+        sig: &GenericFnSig,
+        type_args: &[GenericArg],
+        span: Span,
+    ) -> Option<Type> {
         let mut subst = HashMap::new();
         self.seed_turbofish(
-            &ident.name,
+            name,
             &sig.param_names,
             &sig.const_types,
             type_args,
@@ -83,7 +115,7 @@ impl TypeChecker {
                 return self.resolve_type(written);
             }
             // Every error the instance has is the call's to report.
-            Expr::Identifier(_) if !type_args.is_empty() => {
+            Expr::Identifier(_) | Expr::Path { .. } if !type_args.is_empty() => {
                 self.quietly(|checker| checker.check_instance(stage, type_args, span))
             }
             Expr::Identifier(ident) => match self.symbols.lookup(&ident.name) {
@@ -118,9 +150,10 @@ impl TypeChecker {
         }
     }
 
-    /// The signature of `object.field` as a function of its arguments alone, for a
-    /// method its receiver's own `impl` declares and that has no type parameters of its
-    /// own. Anything else is left to the call.
+    /// The signature of `object.field` as a function of its arguments alone, read where
+    /// the call reads it: the receiver's own `impl`, a trait object's trait, or a type
+    /// parameter's bounds. A generic method is named at the instance its turbofish gives
+    /// in full. A builtin method has no signature to read and is left to the call.
     fn bound_method_signature(
         &mut self,
         object: &Expr,
@@ -130,20 +163,55 @@ impl TypeChecker {
         let receiver = self.quietly(|checker| checker.check_expr(object, None))?;
         let owner = match receiver.auto_deref().referent() {
             Type::Struct(name) | Type::Enum(name) | Type::Newtype(name) => name.clone(),
+            Type::DynObject(trait_name) => {
+                // An object-safe trait declares no generic method, so no turbofish applies.
+                let sig = self.trait_member(trait_name, &field.name)?;
+                return type_args.is_empty().then(|| Type::Function {
+                    params: sig.params.clone(),
+                    ret: Box::new(sig.ret.clone()),
+                    mode: FunctionMode::Shared,
+                });
+            }
+            Type::Generic(param) => {
+                let param = param.clone();
+                let method = self.quietly(|checker| {
+                    checker.resolve_generic_trait_method(&param, &field.name, field.span)
+                })?;
+                return match method {
+                    BoundMethod::Plain(params, ret) => {
+                        type_args.is_empty().then_some(Type::Function {
+                            params,
+                            ret: Box::new(ret),
+                            mode: FunctionMode::Shared,
+                        })
+                    }
+                    BoundMethod::Generic(sig, _) if !type_args.is_empty() => {
+                        self.quietly(|checker| {
+                            checker.instantiate_signature(&field.name, &sig, type_args, field.span)
+                        })
+                    }
+                    BoundMethod::Generic(..) => None,
+                };
+            }
             _ => return None,
         };
         let key = self.impl_methods.get(&owner)?.get(&field.name)?.clone();
-        if !type_args.is_empty() || self.generic_methods.contains_key(&key) {
+        let Type::Function { params, ret, mode } = self.functions.get(&key)?.clone() else {
+            return None;
+        };
+        let params: Vec<Type> = params.into_iter().skip(1).collect();
+        let Some(own) = self.generic_methods.get(&key).cloned() else {
+            return type_args
+                .is_empty()
+                .then_some(Type::Function { params, ret, mode });
+        };
+        if type_args.is_empty() {
             return None;
         }
-        match self.functions.get(&key)? {
-            Type::Function { params, ret, mode } => Some(Type::Function {
-                params: params.iter().skip(1).cloned().collect(),
-                ret: ret.clone(),
-                mode: *mode,
-            }),
-            _ => None,
-        }
+        let sig = own.signature(params, *ret);
+        self.quietly(|checker| {
+            checker.instantiate_signature(&field.name, &sig, type_args, field.span)
+        })
     }
 
     fn untyped_composition(&mut self, span: Span) -> Option<Type> {

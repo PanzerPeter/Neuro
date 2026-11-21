@@ -400,15 +400,84 @@ func main() -> i32 { 0 }
     assert!(err.contains("`Add` is compiler-known"), "{err}");
 }
 
-// The body of a default is copied into the impl, where the name would mean two parameters.
+// A provided method's own parameter may share a name with the impl's: its copy in the impl is
+// renamed, so `T` keeps meaning the method's own in the body, a turbofish and a closure, and an
+// extent parameter keeps sizing its array. The impl's `T` (`u8` here) never leaks in.
 #[test]
-fn a_default_method_parameter_named_like_the_impls_is_refused() {
-    let err = compile_rejected(
-        "default_shadow.nr",
-        r#"
-trait Tr { func f<T>(&self, t: T) -> T { t } }
+fn a_default_method_parameter_named_like_the_impls_is_renamed() {
+    let source = r#"
+trait Tr {
+    func f<T>(&self, t: T) -> T { t }
+    func g<T: Copy>(&self, t: T) -> T {
+        val k = self.f::<T>(t)
+        val c = |x: T| x
+        c(k)
+    }
+    func size<N>(&self, a: [i32; N]) -> u64 {
+        val doubled = N * 2
+        doubled + a.len() as u64
+    }
+}
+struct C<T, N> { v: T, w: [u8; N] }
+impl<T, N> Tr for C<T, N> {}
+func main() -> i32 {
+    val c = C { v: 1u8, w: [0u8, 0u8] }
+    // 300 does not fit the impl's `u8`; 3 * 2 + 3 is the method's `N`, not the impl's 2.
+    return c.g(300) - 290 + c.size([1, 2, 3]) as i32 + c.f(true) as i32
+}
+"#;
+    assert_eq!(run("default_rename.nr", source), 20);
+}
+
+// The renamed copy is made after the file's aliases are expanded, so the default body's own use
+// of an alias is expanded in the trait before it is copied.
+#[test]
+fn a_renamed_default_keeps_its_aliases() {
+    let source = r#"
+type Meters = i32
+trait Tr {
+    func f<T>(&self, t: T) -> Meters {
+        val m: Meters = 4
+        m
+    }
+}
 struct C<T> { v: T }
 impl<T> Tr for C<T> {}
+func main() -> i32 {
+    val c = C { v: 1u8 }
+    c.f(true)
+}
+"#;
+    assert_eq!(run("default_rename_alias.nr", source), 4);
+}
+
+// The same rename reaches a trait declared in another module, which module resolution supplies.
+#[test]
+fn a_default_from_another_module_is_renamed_too() {
+    let files = [
+        (
+            "shapes.nr",
+            "export trait Tr {\n    func f<T>(&self, t: T) -> T { t }\n}\n",
+        ),
+        (
+            "main.nr",
+            "import ./shapes::{Tr}\nstruct C<T> { v: T }\nimpl<T> Tr for C<T> {}\nfunc main() -> i32 {\n    val c = C { v: 1u8 }\n    c.f(300) - 290\n}\n",
+        ),
+    ];
+    assert_eq!(
+        crate::compile_harness::run_program(&files, "main.nr").expect("compiles"),
+        10
+    );
+}
+
+// A written method still may not reuse the impl's name: there the author picks the name.
+#[test]
+fn a_written_method_parameter_named_like_the_impls_is_refused() {
+    let err = compile_rejected(
+        "written_shadow.nr",
+        r#"
+struct C<T> { v: T }
+impl<T> C<T> { func f<T>(&self, t: T) -> T { t } }
 func main() -> i32 { 0 }
 "#,
     );

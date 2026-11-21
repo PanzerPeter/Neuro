@@ -398,7 +398,7 @@ func describe<S>(x: &Tensor<f32, S>) -> u64 {
 }
 ```
 
-In a body, `S` is read through `S.rank()` and `S.count()`, both `u64`. A shape-generic body accepts what is valid at every rank: moving and borrowing, `.clone()`, element-wise arithmetic and the scalar broadcast, the math methods, the constructors (`Tensor::<f32, S>::zeros()`), the traversals, a whole-tensor reduction, `.reshape`, and a whole `.flatten()`, which gives a `Tensor<f32, [S.count()]>`. An axis reduction works along an axis the shape writes, counted from its own side, so `axis: -1` of `[..S, N]` is `N` at every rank. A splice broadcasts only against the same splice, aligned at the trailing axis, so `[..S, N] + [N]` works and `Tensor<f32, S> + Tensor<f32, [3]>` is an error. A splice may stand for the batch axes of `@` and for an `einsum` `...`. Anything else that counts or picks axes (an index, `.t()`, `.permute`, `.flatten(dims:)`, sorting, `.item()`, a reduction along `axis: 0` of `[..S, N]`) is refused on a spliced shape: `` `.t` needs the rank of `Tensor<f32, [..S, 2, 2]>`, which the shape parameter 'S' leaves open ``.
+In a body, `S` is read through `S.rank()` and `S.count()`, both `u64`. A shape-generic body accepts what is valid at every rank: moving and borrowing, `.clone()`, element-wise arithmetic and the scalar broadcast, the math methods, the constructors (`Tensor::<f32, S>::zeros()`), the traversals, a whole-tensor reduction, `.reshape`, and a whole `.flatten()`, which gives a `Tensor<f32, [S.count()]>`. An axis reduction and a sort work along an axis the shape writes, counted from its own side, so `axis: -1` of `[..S, N]` is `N` at every rank. A splice broadcasts only against the same splice, aligned at the trailing axis, so `[..S, N] + [N]` works and `Tensor<f32, S> + Tensor<f32, [3]>` is an error. A splice may stand for the batch axes of `@` and for an `einsum` `...`. Anything else that counts or picks axes (an index, `.t()`, `.permute`, `.flatten(dims:)`, `.item()`, a reduction or a sort along `axis: 0` of `[..S, N]`) is refused on a spliced shape: `` `.t` needs the rank of `Tensor<f32, [..S, 2, 2]>`, which the shape parameter 'S' leaves open ``.
 
 A shape argument is written as a bracketed shape where a call or a type needs it spelled, and a parameter in scope is passed on by its bare name:
 
@@ -444,7 +444,7 @@ impl<T: Numeric> Dense<T> {
 }
 ```
 
-An unbounded `T` admits `bool`, and a call that makes it anything other than a scalar is refused: ``tensor element type string is not a numeric scalar`` at the call, or, for a tensor built only inside the body, when that instance is compiled. The bounds are described under [Numeric bounds](generics-and-traits.md#numeric-bounds), and [`tensor_element_generics.nr`](../../examples/tensors/tensor_element_generics.nr) runs these forms.
+An unbounded `T` admits `bool`, and a call that makes it anything other than a scalar is refused: ``tensor element type string is not a numeric scalar`` at the call, or, for a tensor built only inside the body, when that instance is compiled, still reported at the call with a note at the tensor that needed the scalar. The bounds are described under [Numeric bounds](generics-and-traits.md#numeric-bounds), and [`tensor_element_generics.nr`](../../examples/tensors/tensor_element_generics.nr) runs these forms.
 
 ## Named dimensions
 
@@ -590,10 +590,11 @@ This is how a loss leaves a `@grad` function's rank-0 result as a number, for pr
 
 **The order a float reduction adds in is part of the language.** Float addition is not associative, so the order decides the last bits of a sum. A run of up to 4096 elements folds left to right. A longer run folds in 4096 lanes: lane `l` folds the elements at run positions `l`, `l + 4096`, `l + 8192`, and so on, and then the lanes fold in order, lane 0 first. `.mean()` divides that sum by the run length. `.max()` and `.min()` take the same path, though their answer does not depend on it. Every backend follows this order, so a reduction gives the same bits on the host and on a GPU. The lanes can run side by side, in SIMD registers or as thousands of GPU threads, without changing the answer. The lanes are also more accurate than one running total: a long `f32` sum no longer stalls once each new element is below half its precision. Integer reductions fold left to right at any length, and their total is exact whatever the order. The order only decides where a checked build reports an overflow.
 
-Three rules are compile-time errors:
+`.mean()` on an integer tensor is `sum / count` in the element type. It truncates toward zero, as integer `/` does, and the sum carries the overflow check of `+`. So `[1, 2, 3, -7]` has mean `0`, and a fractional mean is `.cast::<f32>().mean()`.
+
+Two rules are compile-time errors:
 
 - The element type must be an integer or a float. A `bool` tensor has nothing to fold: `` `.sum()` reduces a tensor's elements, which requires an integer or float element type; this tensor holds bool ``.
-- `.mean()` is for floats only, because an integer mean would have to pick a rounding rule the language does not give: `` `.mean()` averages i32 elements, which has no rounding rule ``. Sum and divide explicitly instead.
 - A reduction over **no** elements is rejected, since `.max()` of nothing has no answer. Over an extent or shape parameter the run length is known only at each instance, which is where an empty one is refused ([Reshaping over parameters](#reshaping-over-parameters)). Over a dynamic axis the run is counted at run time, and an empty one panics.
 
 A half-precision reduction accumulates in `f32`, so a long `bf16` sum does not stall.
@@ -635,7 +636,7 @@ Equal elements keep the order they were written in, which makes an `argsort` of 
 
 Like a reduction, a selection **reads** its receiver. It allocates its own result and leaves the ordered buffer where it was, so it is offered on `&Tensor<T, S>` too.
 
-`k:` and `descending:` must be constants, because the result's shape and the comparator are both settled before any element is read. `k` must lie between `1` and the sorted axis's extent, so `` `.topk(k: 5)` selects more elements than the sorted axis holds, which is 4 `` is an error. The element type must be an integer or a float, half precision included. The receiver must have at least one axis, and its shape must be numbers or dynamic axes rather than parameters; on a dynamic sorted axis, `k` past the extent panics.
+`k:` and `descending:` must be constants, because the result's shape and the comparator are both settled before any element is read. `k` must lie between `1` and the sorted axis's extent, so `` `.topk(k: 5)` selects more elements than the sorted axis holds, which is 4 `` is an error. The element type must be an integer or a float, half precision included. The receiver must have at least one axis. Over an extent parameter or a splice the result is typed from the shape as written (`.topk(k: 2)` of `[..S, N]` is `[..S, 2]`), the sorted axis must be one the shape writes, counted from its own side as for a reduction, and an empty axis or `k` past the extent is reported at the instance that makes it so. On a dynamic sorted axis, `k` past the extent panics.
 
 ## Einstein notation
 
@@ -798,9 +799,9 @@ val buf = Tensor::<f32, [?, 128]>::zeros(dims: [n])
 val out = Tensor::<f32, [?B, 10]>::zeros()               // B already in scope
 ```
 
-A bound name is read only from a shape written on the call. `val out: Tensor<f32, [?B, 10]> = Tensor::zeros()` is a compile error, and its hint gives the turbofish form.
+A constructor with no turbofish also reads a bound name from the type the program writes for it: a `val` or `mut` annotation, the return type of the function or method it returns from, and the annotation of the binding it is assigned to. So `val out: Tensor<f32, [?B, 10]> = Tensor::zeros()` and a tail `Tensor::zeros()` under `-> Tensor<f32, [?B]>` both size `B` from its value. A fresh name there is bound from the value, as any annotation binds one. Anywhere else (a closure's result, an unannotated binding, an argument) a bound name in the expected type is a compile error, and its hint gives the turbofish form.
 
-**What works on a dynamic axis.** Everything a static axis supports, with the checks that depend on an extent moved to run time: `.clone()` and `.to(device)`; indexing, where every position is bounds-checked; slicing, where `..` keeps the axis and a range with constant bounds gives a static extent whose end is checked; the reductions and sorting; the shape casts, where `.reshape` compares element counts at run time and a `-1` there is `?`; compound assignment, `@`, `einsum`, `.map` / `.zip` / `.reduce` and the element-wise operators. A reduction over an empty run panics.
+**What works on a dynamic axis.** Everything a static axis supports, with the checks that depend on an extent moved to run time: `.clone()` and `.to(device)`; indexing, where every position is bounds-checked; slicing, where `..` keeps the axis and a range with constant bounds, `.rev()` and `.step(n)` included, gives a static extent whose end is checked; the reductions and sorting; the shape casts, where `.reshape` compares element counts at run time and a `-1` there is `?`; compound assignment, `@`, `einsum`, `.map` / `.zip` / `.reduce` and the element-wise operators. A reduction over an empty run panics.
 
 **Narrowing.** `.as_shape::<[...]>()` checks a tensor's extents against a written shape at run time and returns `Option<Tensor<T, [...]>>`, consuming its receiver either way. The written shape may use literals, extent parameters, names in scope and a fresh name, which stays in scope after the expression whatever the outcome:
 
@@ -970,9 +971,8 @@ The attribute goes on a free function, never beside `@gpu` or `@grad`. A kernel 
 
 These are the limits a reader is most likely to hit. Each one is described in full in the section linked.
 
-- An operation whose result has a dynamic axis runs on the host only, so it panics on a GPU tensor; `.rev()` and `.step(n)` ranges refuse a dynamic axis; and a `@grad`, `@gpu` or `@kernel` signature cannot name one (see [Dynamic shapes](#dynamic-shapes)).
+- On a GPU tensor with a dynamic axis, compound assignment and `.map` / `.zip` / `.reduce` run on the host only, so they panic; every other operation runs on the device. A `@grad`, `@gpu` or `@kernel` signature cannot name a dynamic axis (see [Dynamic shapes](#dynamic-shapes)).
 - There is no `.filter`, and no operation produces a `Tensor<bool, S>` mask, so a mask is written by hand (see [Functional traversals](#functional-traversals)).
-- `.sort`, `.argsort` and `.topk` need every extent to be a number, so they are not available inside a shape-generic function (see [Sorting and selection](#sorting-and-selection)).
 - `@gpu` is not accepted on a method (see [Running on a GPU](#running-on-a-gpu-gpu)).
 - Operations on `f16`, `bf16` and `bool` tensors have no device form (see [Device transfer](#device-transfer)).
 

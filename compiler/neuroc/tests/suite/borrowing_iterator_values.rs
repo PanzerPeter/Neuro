@@ -458,3 +458,150 @@ func main() -> i32 {
         "cannot borrow this expression: `&` requires a place",
     );
 }
+
+/// An item borrows the container, not the iterator, so two results of `next()` are held
+/// at once over every library view and over a program's iterator whose result names its
+/// `impl`'s lifetime.
+#[test]
+fn two_items_of_one_iterator_are_held_at_once() {
+    let source = r#"
+func get(o: Option<&i32>) -> i32 {
+    match o {
+        Option::Some(x) => *x,
+        Option::None => 0
+    }
+}
+
+struct Walk<'a> { items: &'a [i32], at: u64 }
+
+impl<'a> Walk<'a> {
+    func step(&mut self) -> Option<&'a i32> {
+        if self.at >= self.items.len() {
+            return Option::None
+        }
+        val at = self.at
+        self.at = at + 1
+        Option::Some(&self.items[at])
+    }
+}
+
+func main() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    v.push(1)
+    v.push(2)
+    mut it = v.iter()
+    val a = it.next()
+    val b = it.next()
+    mut m: BTreeMap<i32, i32> = BTreeMap::new()
+    m.insert(1, 30)
+    m.insert(2, 40)
+    mut vals = m.values()
+    val c = vals.next()
+    val d = vals.next()
+    val text = "ab\ncde"
+    mut lines = text.lines()
+    val e = lines.next() ?? ""
+    val f = lines.next() ?? ""
+    val xs = [5, 6]
+    mut w = Walk { items: &xs, at: 0 }
+    val g = w.step()
+    val h = w.step()
+    println("{get(a) + get(b)} {get(c) + get(d)} {e.len() + f.len()} {get(g) + get(h)}")
+    0
+}
+"#;
+    assert_eq!(stdout_of("two_items.nr", source), "3 70 5 11\n");
+}
+
+/// The container stays frozen while an item lives, a method whose result elides its
+/// lifetime still borrows its receiver, and so does one returning a view of `self`.
+#[test]
+fn an_item_keeps_its_container_frozen() {
+    let message = "cannot borrow 'v' as mutable: it is already borrowed";
+    assert_check_error(
+        "item_push_under_item.nr",
+        r#"
+func main() -> i32 {
+    mut v: Vec<i32> = Vec::new()
+    v.push(3)
+    mut it = v.iter()
+    val a = it.next()
+    v.push(9)
+    match a { Option::Some(x) => *x, Option::None => 0 }
+}
+"#,
+        message,
+    );
+    assert_check_error(
+        "elided_getter.nr",
+        r#"
+struct Cell { v: i32 }
+impl Cell {
+    func get(&self) -> &i32 { &self.v }
+    func set(&mut self, x: i32) { self.v = x }
+}
+func main() -> i32 {
+    mut v = Cell { v: 1 }
+    val r = v.get()
+    v.set(5)
+    *r
+}
+"#,
+        message,
+    );
+    assert_check_error(
+        "view_of_self.nr",
+        r#"
+struct Bag { items: Vec<i32> }
+impl Bag {
+    func walk(&self) -> Iter<i32> { self.items.iter() }
+}
+func main() -> i32 {
+    mut v = Bag { items: Vec::new() }
+    val it = v.walk()
+    v.items.push(1)
+    for x in it { }
+    0
+}
+"#,
+        message,
+    );
+}
+
+/// Regression: a builtin mutating method on a field (`b.v.push(x)`) skipped the borrow
+/// check its binding's own call gets, and a reader on one (`b.v.get(0)`) lent nothing for
+/// its statement, so a borrow of `b.v` was left dangling.
+#[test]
+fn regression_a_field_is_not_mutated_under_a_borrow() {
+    assert_check_error(
+        "field_push_under_get.nr",
+        r#"
+struct Bag { v: Vec<i32> }
+func main() -> i32 {
+    mut b = Bag { v: Vec::new() }
+    b.v.push(1)
+    match b.v.get(0) {
+        Option::Some(x) => {
+            b.v.push(2)
+            *x
+        }
+        Option::None => 0
+    }
+}
+"#,
+        "cannot borrow 'b' as mutable: it is already borrowed",
+    );
+    assert_check_error(
+        "field_push_under_view.nr",
+        r#"
+struct Bag { v: Vec<i32> }
+func main() -> i32 {
+    mut b = Bag { v: Vec::new() }
+    val r = &b.v
+    b.v.push(1)
+    r.len() as i32
+}
+"#,
+        "cannot borrow 'b' as mutable: it is already borrowed",
+    );
+}

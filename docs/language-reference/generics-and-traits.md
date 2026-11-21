@@ -101,7 +101,7 @@ func main() -> i32 {
 }
 ```
 
-The turbofish is the only call-site form for explicit generic arguments, and its arguments may be types or compile-time values. A turbofish on a function that declares no type parameters is an error (`turbofish supplies 1 generic argument(s), but 'identity' declares 0`).
+The turbofish is the only call-site form for explicit generic arguments, and its arguments may be types or compile-time values. A turbofish on a function that declares no type parameters is an error (`turbofish supplies 1 generic argument(s), but 'identity' declares 0`). Once the turbofish, or an earlier argument, has fixed every type parameter a parameter names, that parameter takes its argument as a non-generic one does, so `twice::<&dyn Named>(&thing)` passes a `&Thing` as a trait object and `twice::<&[i32]>(&array)` passes an array as a slice.
 
 ```neuro
 func identity<T>(x: T) -> T { x }
@@ -244,7 +244,7 @@ func labeled_value<T: Labeler>(source: &T) -> i32 {
 }
 ```
 
-An implementor declares the same list up to renaming: as many parameters in the same order, each of the same kind, with the same bounds and the same `where` predicates. An `impl Trait` parameter counts as one of them, so either side may spell it either way. A default method carries its parameters into each implementor, where they may not reuse a name of that `impl`. `Drop` and the operator traits declare none. A trait declaring a generic method is not [object-safe](#object-safety).
+An implementor declares the same list up to renaming: as many parameters in the same order, each of the same kind, with the same bounds and the same `where` predicates. An `impl Trait` parameter counts as one of them, so either side may spell it either way. A default method carries its parameters into each implementor. One that shares a name with the `impl`'s own (`func f<T>` inherited by `impl<T>`) is renamed in the copy, so the body's `T` still means the method's. A method the `impl` writes itself may not reuse one of its names. `Drop` and the operator traits declare none. A trait declaring a generic method is not [object-safe](#object-safety).
 
 ## Traits and Impls
 
@@ -287,7 +287,7 @@ impl Resizable for Square {
 
 Enums and newtypes take trait impls the same way structs do. A trait that names `Self` outside its receiver cannot be used as `dyn Trait` (see [Object Safety](#object-safety)).
 
-The operator traits (`Add`, `Neg`, `PartialEq`, `Comparable` and the rest) are built into the compiler and are documented under [Operator Overloading](operators.md#operator-overloading). A `T: PartialEq` bound gives a generic body `==` and `!=`, and `T: Comparable` gives it the orderings, each with its method form (`a.le(b)`). An integer or `char` meets `Comparable`; a float does not, because `NaN` has no place in a total order. The arithmetic and `*Assign` traits give a type parameter no operator; the [numeric bounds](#numeric-bounds) give it the built-in ones. The derivable traits (`Copy`, `Clone`, `Debug`, `Hashable`) are also ordinary traits, see [Derivable traits](structs.md#derivable-traits-by-hand-and-as-bounds).
+The operator traits (`Add`, `Neg`, `PartialEq`, `Comparable` and the rest) are built into the compiler and are documented under [Operator Overloading](operators.md#operator-overloading). A `T: PartialEq` bound gives a generic body `==` and `!=`, and `T: Comparable` gives it the orderings, each with its method form (`a.le(b)`). An integer, `char` or `string` meets `Comparable`; a float does not, because `NaN` has no place in a total order. The arithmetic and `*Assign` traits give a type parameter no operator; the [numeric bounds](#numeric-bounds) give it the built-in ones. The derivable traits (`Copy`, `Clone`, `Debug`, `Hashable`) are also ordinary traits, see [Derivable traits](structs.md#derivable-traits-by-hand-and-as-bounds).
 
 ## Supertraits
 
@@ -319,7 +319,23 @@ trait Numbers: Source<Item = u32> {}
 func head<T: Numbers>(t: &mut T) -> Option<u32> { t.next() }
 ```
 
-An impl whose binding differs is `AssociatedTypeBoundMismatch`. A subtrait does not inherit a supertrait's associated types: it cannot write `Self::Item` in its own signatures, and `T: Numbers<Item = u32>` is refused. To constrain a supertrait the list leaves open, name it too, as in `T: Named + Source<Item = u32>`.
+An impl whose binding differs is `AssociatedTypeBoundMismatch`.
+
+A subtrait inherits its supertraits' associated types. Its own signatures and default bodies may write `Self::Item`, and a bound on it may constrain one:
+
+```neuro
+trait Peekable: Source {
+    func peek(&self) -> Self::Item
+}
+
+func top<T: Peekable<Item = u32>>(t: &mut T) -> u32 {
+    val first = t.peek()          // u32, through the inherited `Item`
+    t.next()                      // Option<u32>, `Source`'s own method
+    first
+}
+```
+
+The subtrait's impl does not bind `Item` again. It takes what the same type's `impl Source` binds, wherever that impl is written, and binding it in `impl Peekable` is refused. The constraint holds for `Source`'s methods as well, so `T: Peekable<Item = u32>` is the same promise as `T: Peekable + Source<Item = u32>`. A subtrait that declares a name of its own keeps it apart from a supertrait's, and a name two supertraits both declare is neither's, so naming it is refused.
 
 A generic impl holds per instance. With `impl<T: Tag> Base for Wrap<T>` and `impl<T> Top for Wrap<T>`, where `Top: Base`, a `Wrap<i32>` meets `Top` only if `i32` is `Tag`.
 
@@ -450,6 +466,8 @@ func anonymous(source: &impl Channel<Sample = i32>) -> i32 { source.sample() }
 func make(seed: i32) -> impl Channel<Sample = i32> { Tally { counted: seed } }
 ```
 
+A constraint may name another type parameter, which a call then infers from the argument's impl even when no argument mentions it. In `func hold<V, T: Channel<Sample = V>>(source: &T) -> V`, a call `hold(&tally)` reads `V` from the `type Sample` that `Tally`'s impl binds. The chain may run through several bounds (`U` from `V: Channel<Sample = U>`, `V` from `T: Channel<Sample = V>`), and a type parameter passed through from an enclosing function's bound counts as well.
+
 At the call site, the concrete type's own binding must match the one the bound demands. Passing a `Channel` implementor whose `type Sample = f64` to a `Sample = i32` bound is rejected with ``bound `Channel<Sample = i32>` is not satisfied by Th, which binds `Sample` to f64``. A bare bound cannot type a call to a method that names the associated type:
 
 ```neuro
@@ -488,7 +506,7 @@ func evens(n: u32) -> impl Iterator<Item = u32> {
 }
 ```
 
-The body may end in any expression: a constructor, a binding, a call, an `if`/`else`, or an adapter chain. An early `return` must produce the same type. A function may return the result of another `impl Trait` function, declared before or after it, but its type cannot depend on its own result: a function that calls itself for its value, directly or through another `impl Trait` function, is rejected with ``cannot infer the concrete type of the `impl Shape` return``, as is a body that ends in no value. In a generic function, each instance returns the type its own body produces. Only a free function returns `impl Trait` so far; a method spells out its return type.
+The body may end in any expression: a constructor, a binding, a call, an `if`/`else`, or an adapter chain. An early `return` must produce the same type. A function may return the result of another `impl Trait` function, declared before or after it, but its type cannot depend on its own result: a function that calls itself for its value, directly or through another `impl Trait` function, is rejected with ``cannot infer the concrete type of the `impl Shape` return``, as is a body that ends in no value. In a generic function, each instance returns the type its own body produces. A method of an inherent `impl` returns `impl Trait` the same way, with `self` in scope, and its result keeps the receiver borrowed, since the hidden type may hold a borrow of it. A trait's method, a method of a generic `impl` and a generic method spell out their return type.
 
 ### `dyn Trait`: dynamic dispatch
 

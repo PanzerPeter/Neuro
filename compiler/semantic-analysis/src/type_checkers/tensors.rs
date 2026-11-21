@@ -210,6 +210,7 @@ impl TypeChecker {
         type_args: &[GenericArg],
         args: &[Expr],
         expected: Option<&Type>,
+        written: bool,
         span: Span,
     ) -> Type {
         if !is_tensor_constructor(&ctor.name) {
@@ -219,7 +220,8 @@ impl TypeChecker {
             });
             return Type::Unknown;
         }
-        let Some(tensor) = self.tensor_construction_type(type_args, expected, ctor, span) else {
+        let Some(tensor) = self.tensor_construction_type(type_args, expected, written, ctor, span)
+        else {
             return Type::Unknown;
         };
         let Type::Tensor { element, shape } = &tensor else {
@@ -377,11 +379,13 @@ impl TypeChecker {
     }
 
     /// The tensor type a construction builds: the turbofish's when one was written,
-    /// otherwise the surrounding expectation's.
+    /// otherwise the surrounding expectation's. `written` says that expectation is a type
+    /// the program wrote (`written_type_sites`), whose names lowering can read.
     fn tensor_construction_type(
         &mut self,
         type_args: &[GenericArg],
         expected: Option<&Type>,
+        written: bool,
         ctor: &Identifier,
         span: Span,
     ) -> Option<Type> {
@@ -391,7 +395,11 @@ impl TypeChecker {
         match expected {
             Some(ty @ Type::Tensor { shape, .. }) => {
                 // Lowering sees the expected type with its names erased, so a bound name
-                // there would build an axis it cannot size.
+                // there would build an axis it cannot size, unless the expectation is a
+                // type the program wrote, which lowering reads the names from.
+                if written {
+                    return Some(ty.clone());
+                }
                 let bound = shape.iter().find_map(|axis| match &axis.extent {
                     ArrayLen::Dynamic(Some(name)) if self.dynamic_name_in_scope(name) => {
                         Some(name.clone())

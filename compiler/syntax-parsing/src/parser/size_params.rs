@@ -145,9 +145,48 @@ fn collect_extent_expr_names(expr: &ast_types::Expr, out: &mut Vec<(String, bool
 /// an `impl` reaches a type declared in another module. A name two declarations of the
 /// file share is skipped here, since only resolution knows which one the `impl` means.
 pub fn kind_passed_sizes(items: &mut [Item]) {
+    rekind_own_sizes(items);
     let mut declared: HashMap<String, Option<SizeKinds>> = HashMap::new();
     collect_extent_positions(items, &mut declared);
     rekind_impls(items, &declared);
+}
+
+/// Re-kind each declaration's own size parameters again, as its parse did. Module resolution
+/// rebuilds a tensor type written through an alias or a path (`T<f32, [N]>` after
+/// `import std::prelude::{Tensor as T}`), which the parse read as a slice type, so its names
+/// become sizes only here. A parameter already re-kinded is left as it is.
+fn rekind_own_sizes(items: &mut [Item]) {
+    for item in items {
+        match item {
+            Item::Function(def) => {
+                let types = def.params.iter().map(|p| &p.ty);
+                rekind_size_params(types.chain(def.return_type.as_ref()), &mut def.generics);
+            }
+            Item::Struct(def) => {
+                rekind_size_params(def.fields.iter().map(|f| &f.ty), &mut def.generics);
+            }
+            Item::Enum(def) => {
+                let types = def.variants.iter().flat_map(|v| payload_types(&v.payload));
+                rekind_size_params(types, &mut def.generics);
+            }
+            Item::Impl(def) => {
+                for method in &mut def.methods {
+                    let types = method.params.iter().map(|p| &p.ty);
+                    let types = types.chain(method.return_type.as_ref());
+                    rekind_size_params(types, &mut method.generics);
+                }
+            }
+            Item::Trait(def) => {
+                for method in &mut def.methods {
+                    let types = method.params.iter().map(|p| &p.ty);
+                    let types = types.chain(method.return_type.as_ref());
+                    rekind_size_params(types, &mut method.generics);
+                }
+            }
+            Item::Module(def) => rekind_own_sizes(&mut def.items),
+            _ => {}
+        }
+    }
 }
 
 /// Per parameter of a declaration, its kind when it is a size.
@@ -191,6 +230,7 @@ fn rekind_impls(items: &mut [Item], declared: &HashMap<String, Option<SizeKinds>
                         .cloned()
                         .map(GenericArg::Type)
                         .collect(),
+                    lifetimes: Vec::new(),
                     span: def.type_name.span,
                 };
                 rekind_passed([&header], declared, &mut def.generics);

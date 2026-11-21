@@ -120,8 +120,10 @@ fn impl_block(type_name: &str, methods: Vec<MethodDef>) -> Item {
         generics: Vec::new(),
         lifetimes: Vec::new(),
         type_args: Vec::new(),
+        type_lifetimes: Vec::new(),
         where_predicates: Vec::new(),
         assoc_types: Vec::new(),
+        inherited_assoc: Vec::new(),
         methods,
         span: span(),
     })

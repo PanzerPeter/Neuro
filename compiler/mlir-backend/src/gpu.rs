@@ -182,8 +182,7 @@ const DEVICE_MEMREF_TO_LLVM: &str = "finalize-memref-to-llvm{use-generic-functio
 /// cannot become one.
 ///
 /// A body qualifies exactly when [`lower_for_link`](crate::lower_for_link) would link
-/// it were it not `@gpu`, has no rank-0 tensor in it, and returns no tensor with a run-time
-/// extent ([`dynamic_result`]): an operation with no
+/// it were it not `@gpu` and has no rank-0 tensor in it: an operation with no
 /// parallel axis has no loop to map, so the launcher would run it on the host
 /// against buffers that live on the device. Each symbol's signature is
 /// `lower_for_link`'s: the host side takes the same exploded descriptors and
@@ -408,21 +407,6 @@ fn runs_on_gpu(function: &HirFunction) -> bool {
     (is_gpu_body(function) || function.target == HirTarget::FollowsOperands)
         && launches_every_op(function)
         && exact_on_gpu(function)
-        && !dynamic_result(function)
-}
-
-/// Whether `function` hands back a tensor with a run-time extent. A device body cannot take one
-/// yet: bufferization sizes such a result at run time, so it cannot be hoisted into the caller's
-/// out-parameter and is copied there with a host `memcpy`, which would read device memory. Such a
-/// body keeps its host form alone, the same fallback as a body with no device form.
-pub(crate) fn dynamic_result(function: &HirFunction) -> bool {
-    let results = match &function.return_type {
-        HirType::Tuple(parts) => parts.iter().collect(),
-        result => vec![result],
-    };
-    results
-        .into_iter()
-        .any(|ty| matches!(ty, HirType::Tensor { shape, .. } if shape.iter().any(Option::is_none)))
 }
 
 /// Whether a GPU computes `function` with the host's bits: no half-precision tensor, whose

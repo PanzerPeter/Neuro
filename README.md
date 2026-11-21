@@ -309,7 +309,7 @@ compiler/
 ├── hir-lowering/            # Type-checked AST -> typed HIR
 ├── llvm-backend/            # HIR -> object code (inkwell / LLVM 23)
 ├── mlir-backend/            # HIR -> MLIR linalg and GPU kernels
-└── neuroc/                   # CLI compiler driver
+└── neuroc/                  # CLI compiler driver
 ```
 
 Today a `.nr` file travels: **tokens → AST → merged program → type-checked AST → typed HIR →

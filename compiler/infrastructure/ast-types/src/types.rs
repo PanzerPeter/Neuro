@@ -143,9 +143,14 @@ pub enum Type {
     /// is itself a type (and may name an in-scope type parameter inside a generic
     /// definition). `span` covers the name through the closing `>`. Monomorphization
     /// substitutes the arguments to produce a distinct concrete type.
+    ///
+    /// `lifetimes` are the lifetime arguments written ahead of the type arguments
+    /// (`View<'a>`, `Pick<'a, i32>`), `'_` included. They are erased once checked, so a
+    /// use that applies lifetimes only has no `args`, and is otherwise the named type.
     Generic {
         name: Identifier,
         args: Vec<GenericArg>,
+        lifetimes: Vec<Identifier>,
         span: Span,
     },
 

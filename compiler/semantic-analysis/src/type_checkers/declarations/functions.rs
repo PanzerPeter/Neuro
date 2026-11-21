@@ -263,6 +263,7 @@ impl TypeChecker {
     ) {
         self.symbols.push_scope();
         self.current_function_return_type = Some(return_type.clone());
+        self.return_type_written = true;
         self.in_kernel = crate::type_checkers::kernel::kernel_attribute(&func.attributes).is_some();
 
         // Reference-typed parameters outlive the call, so a returned reference may
@@ -312,6 +313,7 @@ impl TypeChecker {
     pub(super) fn leave_function_body(&mut self) {
         self.pop_scope();
         self.current_function_return_type = None;
+        self.return_type_written = false;
         self.in_kernel = false;
         self.kernel_outs.clear();
         self.current_fn_outliving.clear();
@@ -346,6 +348,9 @@ impl TypeChecker {
     pub(super) fn check_implicit_return(&mut self, body: &[Stmt], return_type: &Type) {
         match body.last() {
             Some(Stmt::Expr(expr)) => {
+                if self.return_type_written {
+                    self.written_type_sites.insert(expr.span());
+                }
                 if let Some(expr_type) = self.check_expr(expr, Some(return_type))
                     && !self.assignable(&expr_type, return_type)
                 {

@@ -1406,8 +1406,10 @@ fn a_renamed_import_reaches_impl_bound_and_struct_literal_positions() {
             generics: Vec::new(),
             lifetimes: Vec::new(),
             type_args: Vec::new(),
+            type_lifetimes: Vec::new(),
             where_predicates: Vec::new(),
             assoc_types: Vec::new(),
+            inherited_assoc: Vec::new(),
             methods: Vec::new(),
             span: Span::new(0, 0),
         }));

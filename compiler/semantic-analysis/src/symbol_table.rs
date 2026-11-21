@@ -134,6 +134,9 @@ pub(crate) struct SymbolInfo {
     /// inside a `pool` and only when `x` reaches no storage but its own, so every write
     /// through `r` lands in `x`. Kept per binding, so a shadow never inherits it.
     pub(crate) block_referent: Option<usize>,
+    /// Declared with a type annotation, which lowering keeps too, so a constructor
+    /// assigned to the binding is sized from the names the annotation writes.
+    pub(crate) annotated: bool,
 }
 
 impl SymbolInfo {
@@ -150,6 +153,7 @@ impl SymbolInfo {
             grad_loss: None,
             scope_bound: false,
             block_referent: None,
+            annotated: false,
         }
     }
 }
@@ -421,6 +425,12 @@ impl SymbolTable {
     }
 
     /// Mark `holder` as holding a scope-bound closure.
+    pub(crate) fn mark_annotated(&mut self, holder: &str) {
+        if let Some(info) = self.lookup_mut(holder) {
+            info.annotated = true;
+        }
+    }
+
     pub(crate) fn mark_scope_bound(&mut self, holder: &str) {
         if let Some(info) = self.lookup_mut(holder) {
             info.scope_bound = true;

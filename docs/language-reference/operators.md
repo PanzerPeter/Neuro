@@ -98,11 +98,11 @@ Comparisons return `bool`.
 | Operator | Meaning | Operands |
 |----------|---------|----------|
 | `==`, `!=` | Equal, not equal | Numbers, `bool`, `char`, `string` (and `&string`), a newtype over these, or a type with `impl PartialEq` |
-| `<`, `<=`, `>`, `>=` | Ordering | Numbers and `char` (by code point), or a type with `impl Comparable` |
+| `<`, `<=`, `>`, `>=` | Ordering | Numbers, `char` (by code point), `string` (by bytes), or a type with `impl Comparable` |
 
 - Both operands must have the same type. `a == b` with `i32` and `i64` fails with `type mismatch: expected i32, found i64`.
 - Comparisons do not chain. `a < b < c` fails with ``comparison operators cannot be chained: use `&&` to combine separate comparisons``. Write `a < b && b < c`.
-- Ordering is not defined for `string` or `bool`. `"a" < "b"` fails with `cannot apply binary operator < to types string and string`.
+- Ordering is not defined for `bool`. `true < false` fails with `cannot apply binary operator < to types bool and bool`.
 - Floats follow IEEE ordering: every comparison involving NaN is `false`, `!=` included. So `nan != nan` is `false`.
 - Arrays, tuples and collections have no `==` yet. `[1, 2] == [1, 2]` fails with `cannot apply binary operator == to types [i32; 2] and [i32; 2]`. Compare the elements.
 - Comparisons read through `&` and `&mut`, so `r == 4` works for `r: &i32`. On two references to a struct, `==` calls the struct's `eq`, as `*ra == *rb` does.

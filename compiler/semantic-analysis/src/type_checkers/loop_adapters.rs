@@ -5,7 +5,7 @@
 //! argument is an ordinary expression of function type, checked in the scope
 //! *outside* the loop, so it cannot see the loop binding it feeds.
 
-use ast_types::{LoopAdapter, LoopAdapterKind};
+use ast_types::{Expr, LoopAdapter, LoopAdapterKind};
 
 use super::TypeChecker;
 use super::closures::closure_context;
@@ -27,14 +27,17 @@ impl TypeChecker {
     /// `element` is `None` when the base head failed to type, in which case the
     /// adapters are still checked, since their arguments may hold errors of their own,
     /// but no element-type mismatch is reported against a type nobody knows.
+    /// `walked` are the head's own expressions (the iterable, or a range's bounds), which
+    /// an adapter's closure literal may not write.
     pub(crate) fn check_loop_adapters(
         &mut self,
         element: Option<Type>,
         adapters: &[LoopAdapter],
+        walked: &[&Expr],
     ) -> Option<Type> {
         let mut current = element;
         for adapter in adapters {
-            current = self.check_loop_adapter(current, adapter);
+            current = self.check_loop_adapter(current, adapter, walked);
         }
         current
     }
@@ -65,7 +68,12 @@ impl TypeChecker {
         }
     }
 
-    fn check_loop_adapter(&mut self, element: Option<Type>, adapter: &LoopAdapter) -> Option<Type> {
+    fn check_loop_adapter(
+        &mut self,
+        element: Option<Type>,
+        adapter: &LoopAdapter,
+        walked: &[&Expr],
+    ) -> Option<Type> {
         let name = adapter_name(adapter.kind).to_string();
         let answer = match adapter.kind {
             LoopAdapterKind::Filter => Type::Bool,
@@ -79,13 +87,7 @@ impl TypeChecker {
         // The function value is READ, not moved: it is evaluated once, called per
         // element, and stays usable after the loop. A borrowing closure literal written
         // here dies with the loop, which holds its borrows (`hold_adapter_borrows`).
-        let slot = function_value_position(&adapter.callee);
-        self.function_value_slot = slot;
-        let callee_ty = self
-            .check_expr(&adapter.callee, Some(&context))
-            .unwrap_or(Type::Unknown);
-        self.function_value_slot = None;
-        self.refuse_mutating_closure_literal(slot);
+        let callee_ty = self.check_per_element_callee(&adapter.callee, &context, walked);
         self.refuse_once_per_element(&callee_ty, &name, adapter.span);
 
         let (param, ret) = match &callee_ty {

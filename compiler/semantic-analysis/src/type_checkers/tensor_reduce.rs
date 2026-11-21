@@ -46,13 +46,6 @@ impl TypeChecker {
             });
             return Type::Unknown;
         }
-        if method == MEAN_METHOD && !self.is_floating(element) {
-            self.record_error(TypeError::TensorReduceMeanNotFloat {
-                element: element.clone(),
-                span: call_span,
-            });
-            return Type::Unknown;
-        }
 
         // A run whose length is a number here is checked for emptiness. An extent parameter,
         // a splice or a dynamic axis has none here: whether that run is empty is answered
@@ -145,23 +138,39 @@ impl TypeChecker {
                 span: entry.span(),
             });
         }
-        // Around a splice a position names a written axis only when it counts from the
-        // side the axis is written on: `-1` of `[..S, N]` is `N` at every rank, `0` is not.
+        match axis {
+            Some(found)
+                if !self.axis_clear_of_splice(shape, value, found, method, entry.span()) =>
+            {
+                None
+            }
+            _ => axis,
+        }
+    }
+
+    /// Whether the axis at `found`, written as position `value`, is one the program wrote
+    /// rather than one a splice supplies, reporting it when it is not. Around a splice a
+    /// position names a written axis only when it counts from the side the axis is written
+    /// on: `-1` of `[..S, N]` is `N` at every rank, `0` is not.
+    pub(crate) fn axis_clear_of_splice(
+        &mut self,
+        shape: &[TensorAxis],
+        value: i128,
+        found: usize,
+        method: &str,
+        span: Span,
+    ) -> bool {
         let splice = shape
             .iter()
             .position(|axis| matches!(axis.extent, ArrayLen::Splice(_)));
-        if let (Some(at), Some(found)) = (splice, axis)
-            && !(if value < 0 { found > at } else { found < at })
-        {
-            let ty = Type::Shape(shape.to_vec());
-            self.reject_splice(
-                shape,
-                &format!("`.{method}` along axis {value}"),
-                &ty,
-                entry.span(),
-            );
-            return None;
+        let Some(at) = splice else {
+            return true;
+        };
+        if if value < 0 { found > at } else { found < at } {
+            return true;
         }
-        axis
+        let ty = Type::Shape(shape.to_vec());
+        self.reject_splice(shape, &format!("`.{method}` along axis {value}"), &ty, span);
+        false
     }
 }

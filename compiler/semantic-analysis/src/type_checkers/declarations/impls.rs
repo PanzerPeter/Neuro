@@ -12,7 +12,7 @@ use crate::type_checkers::operator_traits::{
 };
 use crate::type_checkers::resolution::{NameSlot, SELF_ASSOC_PREFIX, SELF_TYPE_NAME};
 use crate::type_checkers::val_else::stmts_diverge;
-use crate::type_checkers::{MethodGenerics, TypeChecker};
+use crate::type_checkers::{GenericScope, MethodGenerics, TypeChecker};
 use crate::types::{FunctionMode, Type};
 use ast_types::{ImplDef, Item, MethodDef, SelfParam, StructDef};
 use std::collections::HashMap;
@@ -116,7 +116,9 @@ impl TypeChecker {
                 }
             }
 
-            let return_type = if let Some(ret_ty) = &method.return_type {
+            let return_type = if let Some(ret_ty) = &method.return_type
+                && !returns_impl_trait(def, method)
+            {
                 // A return type that failed to resolve was reported; `Unknown` keeps the
                 // body's `return`s and each call site from reporting it again as a `void`
                 // it never wrote, as for a free function.
@@ -125,6 +127,10 @@ impl TypeChecker {
                     .unwrap_or(Type::Unknown);
                 self.refuse_unbound_return_names(&param_types, &resolved, ret_ty.span());
                 resolved
+            } else if method.return_type.is_some() {
+                // `impl Trait`: what the body produces, which `resolve_impl_returns` reads
+                // once every signature is registered.
+                Type::Unknown
             } else {
                 Type::Void
             };
@@ -147,12 +153,17 @@ impl TypeChecker {
             }
 
             self.functions.insert(mangled.clone(), func_ty);
+            // A lifetime the method declares itself may be the one `self` is borrowed for
+            // (`func get<'b>(&'b self) -> &'b T`), so a result naming one is taken to borrow
+            // the receiver. Only the impl's own lifetimes are known to outlive it.
+            // So may an `impl Trait`, whose hidden type can hold a borrow of `self`.
             if method.self_param.is_some()
                 && !matches!(method.self_param, Some(SelfParam::Owned))
-                && method
-                    .return_type
-                    .as_ref()
-                    .is_some_and(|ret| self.lifetime_positions(ret) > method.return_lifetimes)
+                && method.return_type.as_ref().is_some_and(|ret| {
+                    self.lifetime_positions(ret) > method.return_lifetimes
+                        || (!method.lifetimes.is_empty() && method.return_lifetimes > 0)
+                        || returns_impl_trait(def, method)
+                })
             {
                 let _ = self.self_borrowing_methods.insert(mangled.clone());
             }
@@ -279,7 +290,10 @@ impl TypeChecker {
     pub(super) fn enter_impl_assoc(&mut self, def: &ImplDef) -> HashMap<String, Type> {
         self.lifetime_scope = def.lifetimes.iter().map(|lt| lt.name.clone()).collect();
         let mut bindings = HashMap::new();
-        for (name, ty) in &def.assoc_types {
+        for (name, ty) in def.assoc_types.iter().chain(&def.inherited_assoc) {
+            if bindings.contains_key(&name.name) {
+                continue;
+            }
             if let Some(resolved) = self.resolve_type(ty) {
                 bindings.insert(name.name.clone(), resolved);
             }
@@ -631,71 +645,9 @@ impl TypeChecker {
                 _ => continue,
             };
 
-            // The signature in `functions` was resolved with these in scope; the body
-            // names the same placeholders.
-            let saved_scope = self.enter_method_generics(&method.generics, &method.lifetimes);
-            self.symbols.push_scope();
-            self.current_function_return_type = Some(return_type.clone());
+            let saved_scope =
+                self.enter_method_body(&struct_name, method, &param_types, &return_type);
             let warnings_before = self.warnings.len();
-
-            // Bind `self` as a variable of the struct type. A `&mut self` receiver
-            // is mutable so the body may assign to `self.field`; `&self` is
-            // immutable.
-            if method.self_param.is_some() {
-                let self_ty = self.impl_target_type(&struct_name).unwrap_or(Type::Unknown);
-                let self_mutable = matches!(method.self_param, Some(SelfParam::RefMut));
-                let _ = self
-                    .symbols
-                    .define("self".to_string(), self_ty, self_mutable);
-            }
-            self.self_is_owned = matches!(method.self_param, Some(SelfParam::Owned));
-
-            // Bind remaining parameters (skip param[0] which is the implicit self).
-            let non_self_params = if method.self_param.is_some() && !param_types.is_empty() {
-                &param_types[1..]
-            } else {
-                &param_types[..]
-            };
-            // The dynamic names the signature writes are in scope for the whole body.
-            for param_ty in non_self_params {
-                for name in self.dynamic_names_of(param_ty, method.name.span) {
-                    self.introduce_dynamic_name(&name, None, method.name.span);
-                }
-            }
-
-            // `self` (`&self` or `&mut self`) and reference parameters outlive the
-            // call, so a returned reference may borrow them (the receiver lifetime
-            // is applied to method outputs).
-            self.backward_losses = crate::type_checkers::backward::backward_losses(&method.body);
-            self.current_fn_outliving = method
-                .params
-                .iter()
-                .zip(non_self_params.iter())
-                .filter(|(_, ty)| matches!(ty, Type::Reference { .. }))
-                .map(|(param, _)| param.name.name.clone())
-                .collect();
-            // A consuming receiver is destroyed when the method returns, so a reference
-            // into it dangles at the call site; only a borrowed receiver outlives the call.
-            if method.self_param.is_some() && !self.self_is_owned {
-                self.current_fn_outliving.insert("self".to_string());
-            }
-
-            for (param, param_ty) in method.params.iter().zip(non_self_params.iter()) {
-                if matches!(param_ty, Type::Unknown) {
-                    continue;
-                }
-                self.refuse_value_named_dynamic(&param.name.name, param.name.span);
-                if let Err(dup) =
-                    self.symbols
-                        .define(param.name.name.clone(), param_ty.clone(), false)
-                {
-                    self.record_error(TypeError::VariableAlreadyDefined {
-                        name: dup,
-                        span: param.name.span,
-                    });
-                }
-                self.bind_function_param(&param.name.name, param_ty);
-            }
 
             // The implicit-return tail is checked once, below: see the same rule in
             // `check_function`, where checking it twice moved a by-value argument twice.
@@ -724,15 +676,110 @@ impl TypeChecker {
             }
 
             self.drop_allowed_warnings(warnings_before, &method.attributes);
-            self.pop_scope();
-            self.current_function_return_type = None;
-            self.current_fn_outliving.clear();
-            self.self_is_owned = false;
-            self.exit_method_generics(saved_scope);
+            self.leave_method_body(saved_scope);
         }
 
         self.self_assoc = saved_assoc;
     }
+
+    /// Open `method`'s body for checking: its own generics, `self` and its parameters
+    /// bound at `param_types` (`self`'s first when it has one), and `return_type` as what
+    /// a `return` is checked against. [`Self::leave_method_body`] closes it.
+    pub(crate) fn enter_method_body(
+        &mut self,
+        struct_name: &str,
+        method: &MethodDef,
+        param_types: &[Type],
+        return_type: &Type,
+    ) -> Option<GenericScope> {
+        // The signature in `functions` was resolved with these in scope; the body
+        // names the same placeholders.
+        let saved_scope = self.enter_method_generics(&method.generics, &method.lifetimes);
+        self.symbols.push_scope();
+        self.current_function_return_type = Some(return_type.clone());
+        self.return_type_written = true;
+
+        // Bind `self` as a variable of the struct type. A `&mut self` receiver
+        // is mutable so the body may assign to `self.field`; `&self` is
+        // immutable.
+        if method.self_param.is_some() {
+            let self_ty = self.impl_target_type(struct_name).unwrap_or(Type::Unknown);
+            let self_mutable = matches!(method.self_param, Some(SelfParam::RefMut));
+            let _ = self
+                .symbols
+                .define("self".to_string(), self_ty, self_mutable);
+        }
+        self.self_is_owned = matches!(method.self_param, Some(SelfParam::Owned));
+
+        // Bind remaining parameters (skip param[0] which is the implicit self).
+        let non_self_params = if method.self_param.is_some() && !param_types.is_empty() {
+            &param_types[1..]
+        } else {
+            param_types
+        };
+        // The dynamic names the signature writes are in scope for the whole body.
+        for param_ty in non_self_params {
+            for name in self.dynamic_names_of(param_ty, method.name.span) {
+                self.introduce_dynamic_name(&name, None, method.name.span);
+            }
+        }
+
+        // `self` (`&self` or `&mut self`) and reference parameters outlive the
+        // call, so a returned reference may borrow them (the receiver lifetime
+        // is applied to method outputs).
+        self.backward_losses = crate::type_checkers::backward::backward_losses(&method.body);
+        self.current_fn_outliving = method
+            .params
+            .iter()
+            .zip(non_self_params.iter())
+            .filter(|(_, ty)| matches!(ty, Type::Reference { .. }))
+            .map(|(param, _)| param.name.name.clone())
+            .collect();
+        // A consuming receiver is destroyed when the method returns, so a reference
+        // into it dangles at the call site; only a borrowed receiver outlives the call.
+        if method.self_param.is_some() && !self.self_is_owned {
+            self.current_fn_outliving.insert("self".to_string());
+        }
+
+        for (param, param_ty) in method.params.iter().zip(non_self_params.iter()) {
+            if matches!(param_ty, Type::Unknown) {
+                continue;
+            }
+            self.refuse_value_named_dynamic(&param.name.name, param.name.span);
+            if let Err(dup) = self
+                .symbols
+                .define(param.name.name.clone(), param_ty.clone(), false)
+            {
+                self.record_error(TypeError::VariableAlreadyDefined {
+                    name: dup,
+                    span: param.name.span,
+                });
+            }
+            self.bind_function_param(&param.name.name, param_ty);
+        }
+        saved_scope
+    }
+
+    /// Close a body [`Self::enter_method_body`] opened.
+    pub(crate) fn leave_method_body(&mut self, saved_scope: Option<GenericScope>) {
+        self.pop_scope();
+        self.current_function_return_type = None;
+        self.return_type_written = false;
+        self.current_fn_outliving.clear();
+        self.self_is_owned = false;
+        self.exit_method_generics(saved_scope);
+    }
+}
+
+/// Whether `method` returns an `impl Trait` its body decides: a method of an inherent,
+/// non-generic `impl` with no type parameters of its own. Anywhere else the position is
+/// refused as it is in any other type.
+pub(crate) fn returns_impl_trait(def: &ImplDef, method: &MethodDef) -> bool {
+    matches!(method.return_type, Some(ast_types::Type::ImplTrait { .. }))
+        && def.trait_name.is_none()
+        && def.generics.is_empty()
+        && def.type_args.is_empty()
+        && method.generics.is_empty()
 }
 
 /// The traits a struct's `@derive` attributes name, `Clone` included when `Copy` is.

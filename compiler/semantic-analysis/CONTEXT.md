@@ -64,11 +64,15 @@ module per declaration kind beside it. `tests/` is split by subject.
 - **1d. `register_trait`** runs before impl registration. Trait NAMES are collected first
   (pass 0b, `trait_names`), so a struct field's `&dyn Trait` resolves in pass 1; its object
   safety needs the methods, so it is queued and checked right after 1d
-  (`check_deferred_object_safety`). `register_supertraits` then resolves each `: A + B` list,
-  so a binding can be checked against the trait it names, and `reject_supertrait_cycles`
+  (`check_deferred_object_safety`). `preregister_supertraits` records every list by name, so
+  each trait's closure is known, then `register_supertraits` resolves each `: A + B` list,
+  so a binding can be checked against the trait it names (inherited names included), and
+  `reject_supertrait_cycles`
   reports and cuts every cycle (`SupertraitCycle`): each later walk of the relation may assume
-  it ends. `traits_registered` holds a `dyn` verdict back until here, because one reads through
-  supertraits that may not be registered yet.
+  it ends. `check_trait_assoc_names` then reports a `Self::X` in a trait's signatures that
+  neither it nor a supertrait declares (`UnknownAssociatedType`). `traits_registered` holds a
+  `dyn` verdict back until here, because one reads through supertraits that may not be
+  registered yet.
 - **2. impl method signatures** into `functions` (mangled `TypeName__methodName`) and
   `impl_methods` (type → method → mangled key). The target is a struct or an enum
   (`impl_target_type`); on an enum a member sharing a variant's name is refused
@@ -90,8 +94,10 @@ module per declaration kind beside it. `tests/` is split by subject.
   functions can name each other. `check_function` reads the signature back via
   `lookup_registered_signature` rather than resolving it twice. The root module's `main` must
   resolve to `func main() -> i32` with no generics (`InvalidMainSignature`). A return-position
-  `impl Trait` registers as `Unknown`. **3b'. `resolve_impl_returns`** (`declarations/impl_returns.rs`)
-  then gives each one the type its body produces: see Dispatch below.
+  `impl Trait` registers as `Unknown`, and so does an inherent method's (`returns_impl_trait`: a
+  non-generic inherent `impl`, a method with no type parameters), registered in pass 2. **3b'.
+  `resolve_impl_returns`** (`declarations/impl_returns.rs`) then gives each one the type its body
+  produces: see Dispatch below.
 - **3c. `check_grad_attributes`** (`type_checkers/grad.rs`) holds a `@grad` function's
   signature to what its derivative needs: a rank-0 `Tensor<f32, []>` return, every
   differentiated parameter `&mut` over a float element with literal extents (`GradSignature`),
@@ -299,9 +305,13 @@ unrenderable. A statement-level `if` / `else if` / `while` condition that is
   `i32 == &string` stays a type error.
 - A string literal is `Type::String` unless the expected type is `&string`
   (`Type::is_string_view`), which it then takes: it is a view of read-only data, so nothing is
-  borrowed or freed. `&mut string`, `&&string` and an unbound `&T` take nothing. A generic call
+  borrowed or freed. `&mut string`, `&&string` and an unbound `&T` take nothing. `&"text"` is the
+  same view written out: `check_reference_expr` types a shared borrow of a plain literal as
+  `&string` with no temporary recorded, so it may be bound, stored or returned through `&T`. A generic call
   passes a parameter's type down as the expected type only for a scalar or `&string`, written as
-  one or through a type parameter the turbofish or an earlier argument bound.
+  one or through a type parameter the turbofish or an earlier argument bound. A parameter whose
+  every type parameter is bound that way also accepts any argument assignable to it, as a
+  non-generic call's does (`twice::<&dyn Named>(&thing)`), and lowering applies the unsizing.
 - `+` on two strings yields a new owned `Type::String`. Any other arithmetic op on a string, or
   mixing a string with a non-string, is `InvalidBinaryOperator`. Comparison and `+` operands are
   **not consuming positions**, so they borrow to read and never move.
@@ -760,7 +770,10 @@ so `val x = x` moves and `val x = &x` borrows the binding it shadows.
 a reference, or a tuple, array, struct, enum or newtype with one inside, `Option<&T>` included)
 or a function value makes its binding a holder (`hold_carried_borrows`). The value is walked
 (`tail_borrow_targets`): `&place` and `.slice` views in it, struct, struct-variant, tuple and
-array literals, a call's arguments (variant constructors among them) and its receiver, a part of
+array literals, a call's arguments (variant constructors among them) and what its receiver
+holds, plus the receiver itself when the method is in `self_borrowing_methods` or is not known
+statically (`result_borrows_receiver`; the escape and `break` walks keep the receiver always,
+`receivers_as_places`), a part of
 a value (`.field`, `.0`, `[i]`), `?`, both sides of `??`, a `match` scrutinee and its arms, the
 tails of blocks and `if`s, a closure's captures, and block bindings back to their initializers.
 The holder takes each borrow found, as it would for the same borrow written directly. A name the
@@ -835,8 +848,11 @@ and what its receiver holds. It runs when the return type only *holds* a referen
 (`type_holds_reference`). A trailing `if` used as the tail is reached through `tail_expr`, so
 each of its arms is checked. A method whose return type leaves a lifetime position unnamed
 (`lifetime_positions` above `MethodDef::return_lifetimes`) is in `self_borrowing_methods`: under
-elision its result borrows `self`, so such a call on an owned local is reported. One naming the
-impl's lifetimes returns what the receiver borrows, which the receiver walk covers.
+elision its result borrows `self`, so such a call on an owned local is reported. So is a method
+whose result names a lifetime the method declares itself, which may be the one `self` is
+borrowed for. One naming only the impl's lifetimes returns what the receiver borrows, which the
+receiver walk covers: the prelude's borrowing iterators (`Iter<'a, T>`, the map views, `Lines`,
+`Split`) name theirs, so an item borrows the container and not the iterator.
 
 The same set types a temporary receiver. `temporary_views` holds the spans of calls whose result
 borrows a value that dies with its statement (`make().view()`, and `.slice`, `.char_slice`,
@@ -851,7 +867,10 @@ Explicit lifetime annotations are validated and then **erased**: `lifetime_scope
 `enter_generic_scope` from each definition's `lifetimes` (a function's, a struct's, an enum's,
 and an `impl` block's through `enter_impl_assoc`), an unknown name in a `Type::Reference` is
 `UndeclaredLifetime`, and `&'a T` and `&T` remain the same semantic type. A lifetime argument in
-a type application (`View<'a>`) never reaches this slice: the parser checks and drops it. No
+a type application (`View<'a>`, an `impl` header's `S<'a>`) is counted by `lifetime_args_match`
+against `declared_lifetimes`: none, or exactly as many as the type declares
+(`LifetimeArgumentCount`, or `LifetimeArgumentsUndeclared` for a type that declares none). A
+`Type::Generic` with lifetimes and no type arguments then resolves as the named type. No
 outlives logic rides on lifetimes: every borrow a value holds is tracked by the holder rules
 above, and the elision rule accepts returning a borrowed parameter, which is exactly the
 `longest<'a>` case.
@@ -993,7 +1012,7 @@ keeps a constant `Fixed` and a lone parameter `Param`, so one extent has one spe
 `TensorExtent::Expr`. `.reshape`, `.flatten`, the reductions, the traversals and `einsum`
 accept extent parameters, and the first three a splice where the operation is valid at every
 rank: the result is typed symbolically, a count or an empty run is refused here only when
-it is concrete, and the rest is the per-instance check lowering makes (`InstanceShape`). A
+it is concrete, and the rest is the per-instance check lowering makes (`InstanceCheck`). A
 symbolic reshape count is never refused here: `[N, 2]` into `[N, 3]` holds at `N = 0`. An `ArrayLen::Expr` in a template binds nothing (`unify_array_len` accepts it while a
 name it reads is unbound), so a call or a struct literal re-unifies such a parameter or field
 once every argument has bound what it can (`writes_extent_expr`). `resolve_type` maps a `TensorExtent::Param` to `ArrayLen::Param` when
@@ -1063,8 +1082,8 @@ instantiation check each argument's kind against its parameter (`arg_kind`,
 - *Single-operand operations* (R9) keep the operand's axis and its name: `.clone()`, `.to`,
   `.detach`, the math methods, the reductions, `.sort`/`.argsort`/`.topk` (`k` checked at run
   time), `.map`/`.zip`/`.reduce`, `.t()`, `.permute`, `.flat(i)`, and indexing (a position and `..`
-  keep their axis, a constant range takes its static extent with `end` checked at run time).
-  A reversed or stepped range on a dynamic axis is `TensorDynamicExtent`. `.reshape` and
+  keep their axis, a constant range takes its static extent with `end` checked at run time,
+  reversed or stepped as well, since it reads at constant positions too). `.reshape` and
   `.flatten` are in the shape paragraph below. Unary `-` on a tensor is refused for static tensors
   too (`InvalidOperator`), so it is not a dynamic gap. A literal, `Tensor::from`, a safetensors
   read or write and a kernel parameter keep `reject_dynamic_extent` (`TensorDynamicExtent`).
@@ -1124,6 +1143,18 @@ the trait the program wrote, and leaves bounds read before pass 1d untouched.
 `type_implements_trait` asks for the supertraits as well as the impl: a generic impl answers for
 its instances by name only, so an instance can fall short of what the template met.
 
+A subtrait **inherits** its supertraits' associated types. `visible_assoc` is what a trait can
+name: its own, then each one exactly one trait in its closure declares (an own declaration
+shadows, two declaring supertraits leave the name to neither). Every reader of a trait's names
+goes through it: a signature's `Self::X`, a bound's `Trait<X = T>` (`resolve_bounds`), the
+placeholders `open_trait_signature` holds open, and conformance. An `impl Sub for C` has the
+inherited types in scope from `ImplDef.inherited_assoc`, which module resolution fills from
+`impl Src for C`, and records them in `impl_assoc` under `Sub` as well, so a bound on the
+subtrait is checked against the same pair as one on the supertrait. `param_bounds` moves a
+binding both ways: `T: Sub<Item = u32>` passes `Item` down to the `Src` bound, and the `Sub`
+bound takes it back from whichever bound holds it, a fixing supertrait list (`trait Numbers:
+Src<Item = u32>`) included.
+
 `traits` (name → `TraitInfo` of resolved method signatures), `trait_impls` (the `(trait, type)`
 pairs with an impl), `impl_assoc` (`(trait, type)` → what that impl bound each associated type
 to), and `generic_bounds` (type-parameter → `BoundInfo`s, live inside a generic definition)
@@ -1178,7 +1209,11 @@ bare bound leaves the position open and still reports `UnconstrainedAssociatedTy
 site `check_trait_bounds` substitutes the constraint with what the call inferred, and
 `check_assoc_bindings` compares it against `impl_assoc` for the concrete type argument (or, for a type parameter passed through from an enclosing generic, against that
 parameter's own bound), reporting `AssociatedTypeBoundMismatch`; `resolve_impl_return` runs the
-same check for return-position `impl Trait<Assoc = U>`.
+same check for return-position `impl Trait<Assoc = U>`. A parameter the arguments leave
+unsolved is read off a bound whose constraint names it: `infer_from_bound_bindings` (in
+`expressions/calls.rs`) repeats until nothing changes, taking `bound_assoc_type` of each bound
+whose own parameter is already solved (`impl_assoc` for a concrete type, the enclosing bound for
+a type parameter), so a chain of bounds resolves in any order.
 
 **Lang items** are compiler-known traits the user only ever writes an `impl` for:
 - `Drop`: `register_drop_impl` requires exactly the destructor `drop(&mut self)` (no params, no
@@ -1262,8 +1297,11 @@ against the trait's declared signature. Return-position `impl Trait` resolves tr
 the body produces, so callers see the concrete type at zero cost. `resolve_impl_returns` takes
 each such signature out of `functions` / `generic_funcs` and checks the body with its tail typed
 against nothing (`probe_body_type`), keeping no error or warning; a clean check gives the type,
-which must implement the trait and meet its `Assoc = T` bindings. A body calling an unresolved
-one fails and waits for the next round, so order does not matter and a body depending on its own
+which must implement the trait and meet its `Assoc = T` bindings. A method's body is opened with
+`enter_method_body`, the prologue `check_impl` uses, and the method is in `self_borrowing_methods`
+whenever it takes `&self` or `&mut self`. A body calling an unresolved function fails, and one
+calling an unresolved method types as `Unknown`; either waits for the next round, so order does
+not matter and a body depending on its own
 result never resolves (`ImplReturnNotInferable`, also for a body ending in no value; a body with
 errors of its own is left to pass 4). A failed check forgets the struct and enum instances it
 made, since an instance reports its errors only when it is made. Pass 4 then checks the body
@@ -1326,8 +1364,8 @@ from any argument. A `break` value is checked against the loop it leaves (`carry
 borrow of a binding the loop declares is `BorrowLeavesScope`, and the rest are resolved to places
 at the `break`, while a binding the value copies is still in scope, and kept on the loop's
 `LoopContext`. A checked value `loop` files them under its span (`loop_break_borrows`), and the
-walk reads a `loop` there, so the holder of its value takes them. `refuse_borrowing_break` still
-refuses a `break` carrying a function value that borrows.
+walk reads a `loop` there, so the holder of its value takes them. A borrowing closure's captures
+are among them, so a `break` may carry one.
 
 A value that stays in its call is scope-bound (`scope_bound_closures`, a set of literal spans, and
 `SymbolInfo::scope_bound` on a binding holding one): a `mut` function parameter of a function, method
@@ -1336,8 +1374,9 @@ or closure (`bind_function_param`), a closure holding a reference no local backs
 capturing either, `move` or not. It may be checked only in `function_value_slot`: the whole
 initializer of a binding, a whole argument to a function-typed parameter (`check_receiver_call_args`,
 `check_generic_call_with`), or a callee. A tensor traversal and a `for`-head adapter open it for a
-bare binding or a closure literal (`function_value_position`), but `refuse_mutating_closure_literal`
-refuses a literal holding a `&mut`, whose borrow would begin after the built-in read what it walks.
+bare binding or a closure literal (`function_value_position`) through `check_per_element_callee`,
+which lends what the built-in walks (the iterable, a range's bounds, a traversal's operands) while
+the literal is checked, so a literal writing one meets `CannotMutablyBorrowWhileBorrowed`.
 A `for` head's literals keep their borrows for the loop under the hidden `$adapters` holder
 (`hold_adapter_borrows`), so the body cannot write what they read. Anywhere else:
 `ScopeBoundClosureStored`. The reference rule is what lets `hold_argument_stores` keep a plain `&`
@@ -1370,14 +1409,19 @@ payloads, newtypes, arrays and tuples for `hold_carried_borrows`. A callee may k
 value, so `check_pool_retention` judges a closure argument by its captures like any other.
 
 ### Function values and composition
-`expressions/compose.rs`. `check_instance` types `f::<T>` named as a value: the generic's
-signature under the turbofish, its bounds and `where` predicates checked; anything but a generic
-free function there is `InstanceNotAValue`. A composition reaches the checker as the closure the
+`expressions/compose.rs`. `check_instance` types `f::<T>` and `Cell::new::<T>` named as a value:
+the generic's signature (`assoc_generic_signature` for an associated function, a generic type's
+parameters ahead of the function's own) under the turbofish, its bounds and `where` predicates
+checked (`instantiate_signature`). A method there is `InstanceNotAValue`: a bound method is a
+value only as an operator's operand, where `bound_method_signature` names a generic one's
+instance the same way. A composition reaches the checker as the closure the
 parser built, so captures, modes and the scope-bound rule are the closure rules. `check_closure`
 asks `compose_param` for that closure's parameter type when no context fixes it: the first
 stage's first parameter, read from its signature without checking it (errors from that read are
 dropped, the call in the body reports them). A generic stage without a turbofish, or a bound
-method not declared in its receiver's own `impl`, is `ComposeParamUntyped`, and the body is then
+method with no declared signature (a builtin receiver's, or a trait method supplied without an
+`impl`; one of the receiver's `impl`, a `&dyn`'s trait or a type parameter's bound has one), is
+`ComposeParamUntyped`, and the body is then
 not checked, since it would only repeat the error. Later stages are ordinary calls, so a generic
 or an unannotated closure there infers from the stage before it. `check_closure_call`
 (`expressions/calls.rs`) checks a closure literal called in place with an unannotated parameter:
@@ -1562,7 +1606,11 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   must seed `dims` for these constructors. `dims:` on a closed shape is
   `TensorDimsWithoutOpenAxis`; a wrong count is `TensorDimsCount`. A constructor without a
   turbofish whose expected type names a bound extent is `TensorCtorBoundNameInferred`, since
-  lowering receives that type with its names erased.
+  lowering receives that type with its names erased, unless the expected type is one the
+  program wrote and lowering keeps too: `written_type_sites` holds the span of each such
+  expression (a `val` initializer under an annotation, a function's or method's `return`
+  operand and tail, `return_type_written` being false in a closure, and the value assigned to a
+  binding `SymbolInfo.annotated` marks).
 - **Tensor shape manipulation, in `type_checkers/tensor_shape.rs`.** `.t()`,
   `.reshape([...])`, `.permute([...])`, and `.flatten()` / `.flatten(dims: [...])` reach
   `check_tensor_shape_method` from the builtin arm, matched on `recv` (not the referent) like
@@ -1594,8 +1642,8 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   `.permute`'s is (a dimension NAME resolves against the receiver's shape and no value
   scope declares it) and a negative index counts from the end, which is how the
   specification spells the last axis. The element must be an integer or `f32`/`f64`
-  (`TensorReduceElementType`); `.mean` narrows that to `f32`/`f64`, an integer mean having
-  no rounding rule in the specification (`TensorReduceMeanNotFloat`); a reduced run of zero
+  (`TensorReduceElementType`), an integer `.mean` being `sum / count` truncated toward zero
+  in the element type; a reduced run of zero
   elements has no value to produce, `.max()` least of all, so the whole family reports
   `TensorReduceEmpty` rather than each inventing an identity. Every extent must be a number
   here: an extent parameter or a splice is reduced per instance, and a dynamic axis is reduced at
@@ -1614,10 +1662,11 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   before any element exists (`TensorSortArgNotConstant`). The element must be an integer or a
   float, half precision included (`TensorSortElementType`); a rank-0 receiver has no axis to order
   (`TensorSortRankZero`); an empty axis has no ordering (`TensorSortEmpty`); and `k` must lie
-  in `1..=extent` (`TensorTopKOutOfRange`, `TensorTopKZero` for 0). A dynamic axis is ordered at
-  run time and `k` past it is checked there; an extent parameter or a splice must be a number
-  here (`TensorShapeCastSymbolicExtent`), because the result's shape and the backend's strides
-  are built from it.
+  in `1..=extent` (`TensorTopKOutOfRange`, `TensorTopKZero` for 0). Only a concrete extent is
+  held to the last two here: a dynamic axis is checked at run time, and an extent parameter or a
+  splice at its instance, in lowering. Around a splice the sorted axis, the default last one
+  included, must be a written one counted from its own side (`axis_clear_of_splice`, shared with
+  the reductions), so the sorts are rank-free in `resolve_builtin_method`.
 - **Functional traversals, in `type_checkers/tensor_apply.rs`.** `.map(f)`,
   `.zip(other, f)`, and `.reduce(init, f)` reach `check_tensor_apply` from
   `resolve_builtin_method`, matched on the REFERENT for the reason the reductions are: the
@@ -1682,8 +1731,8 @@ out of the scrutinee, so `take_from_scrutinee` records a move of an owned scruti
   (`expressions/const_predicates.rs`) or it is `TensorSliceBoundNotConstant`: the extent is
   part of the result's TYPE, so it cannot wait for a value. A reversed or over-long range is
   `TensorSliceOutOfRange`. A dynamic axis is indexed at run time: a position is bounds-checked
-  there and `..` keeps the axis and its name, a constant range takes its static extent, and a
-  reversed or stepped range on it is `TensorDynamicExtent`. Two spellings reach this: `Expr::TensorIndex` through
+  there and `..` keeps the axis and its name, and a constant range, reversed or stepped
+  included, takes its static extent with its end checked there. Two spellings reach this: `Expr::TensorIndex` through
   `check_tensor_index_expr`, and the one-argument `Expr::Index` whose object is a tensor,
   routed from `check_index_expr` (`expressions/places.rs`) ahead of the sequence rules so a
   rank-1 tensor takes the ordinary bracket. Indexing READS its receiver (nothing is moved,

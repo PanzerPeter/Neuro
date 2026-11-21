@@ -15,6 +15,15 @@ pub(super) type AssocBindings = (Vec<(Identifier, Type)>, Option<Span>);
 /// separately rather than widening [`GenericArg`] for a single type.
 pub(super) type ShapeArg = (Vec<TensorDim>, Span);
 
+/// A parsed `<...>` type-argument list: the type and const arguments, the lifetime
+/// arguments ahead of them, the tensor shape when one was claimed, and the span of the `>`.
+pub(super) struct TypeArgs {
+    pub(super) args: Vec<GenericArg>,
+    pub(super) lifetimes: Vec<Identifier>,
+    pub(super) shape: Option<ShapeArg>,
+    pub(super) close: Span,
+}
+
 /// The one type name that accepts a `[...]` shape argument. It is a prelude name
 /// rather than a keyword, so the parser only claims it once a shape appears: a module
 /// that shadows `Tensor` with its own generic type keeps parsing as before.
@@ -285,8 +294,12 @@ impl Parser {
                         .strip_suffix(TENSOR_TYPE_NAME)
                         .is_some_and(|path| path.ends_with("::"));
                     let symbolic_extents = ident.name == TENSOR_TYPE_NAME || qualified_tensor;
-                    let (mut args, shape, close_span) =
-                        self.parse_generic_type_args(symbolic_extents)?;
+                    let TypeArgs {
+                        mut args,
+                        lifetimes,
+                        shape,
+                        close: close_span,
+                    } = self.parse_generic_type_args(symbolic_extents)?;
                     let span = span.merge(close_span);
                     // `std::prelude::Tensor<f32, [2, 3]>` keeps its path, so resolution can
                     // check it reaches the prelude's `Tensor` before it becomes a tensor
@@ -303,20 +316,24 @@ impl Parser {
                         return Ok(Type::Generic {
                             name: ident,
                             args,
+                            lifetimes,
                             span,
                         });
                     }
                     let (args, shape) = Self::bare_shape_param(symbolic_extents, args, shape);
                     if let Some((dims, _)) = shape {
+                        // `Tensor` declares no lifetime, so it takes no lifetime argument.
+                        if !lifetimes.is_empty() {
+                            return Err(ParseError::TensorTypeArity { span });
+                        }
                         return Self::build_tensor_type(args, dims, span);
                     }
-                    // `Ref<'a>` applies lifetimes only, which leave a plain named type.
-                    if args.is_empty() {
-                        return Ok(Type::Named(ident));
-                    }
+                    // `Ref<'a>` applies lifetimes only: still a `Generic`, so the checker can
+                    // count them, though it resolves as the plain named type.
                     return Ok(Type::Generic {
                         name: ident,
                         args,
+                        lifetimes,
                         span,
                     });
                 }
@@ -398,14 +415,17 @@ impl Parser {
     pub(super) fn parse_generic_type_args(
         &mut self,
         symbolic_extents: bool,
-    ) -> ParseResult<(Vec<GenericArg>, Option<ShapeArg>, Span)> {
+    ) -> ParseResult<TypeArgs> {
         self.consume(TokenKind::Less, "'<'")?;
         self.skip_newlines();
         let mut args = Vec::new();
+        let mut lifetimes = Vec::new();
         let mut shape: Option<ShapeArg> = None;
         loop {
-            if self.skip_lifetime_arg()? {
-                // Checked and dropped: a lifetime argument names no part of the type.
+            let seen_type = !args.is_empty() || shape.is_some();
+            if let Some(lifetime) = self.lifetime_arg(seen_type)? {
+                // Kept for the checker to count against the declaration, then erased.
+                lifetimes.push(lifetime);
             } else if !symbolic_extents && self.shape_argument_ahead(false) {
                 let (dims, span) = self.parse_shape_argument()?;
                 args.push(GenericArg::Shape { dims, span });
@@ -444,14 +464,20 @@ impl Parser {
             self.skip_newlines();
         }
         let close = self.consume(TokenKind::Greater, "'>' to close type arguments")?;
-        Ok((args, shape, close.span))
+        Ok(TypeArgs {
+            args,
+            lifetimes,
+            shape,
+            close: close.span,
+        })
     }
 
     /// Consume a lifetime argument at the cursor, if one is there, refusing a name no
-    /// enclosing item declares. `'_` is the anonymous lifetime and always allowed.
-    pub(super) fn skip_lifetime_arg(&mut self) -> ParseResult<bool> {
+    /// enclosing item declares. `'_` is the anonymous lifetime and always allowed. A lifetime
+    /// goes ahead of the type arguments, so one after `seen_type` is refused.
+    pub(super) fn lifetime_arg(&mut self, seen_type: bool) -> ParseResult<Option<Identifier>> {
         let Some(TokenKind::Lifetime(name)) = self.peek_kind().cloned() else {
-            return Ok(false);
+            return Ok(None);
         };
         let span = self
             .advance()
@@ -459,20 +485,24 @@ impl Parser {
             .ok_or_else(|| ParseError::UnexpectedEof {
                 expected: "lifetime".to_string(),
             })?;
+        if seen_type {
+            return Err(ParseError::LifetimeAfterTypeArgument { span });
+        }
         if name != ANONYMOUS_LIFETIME {
             if !self.lifetime_scope.contains(&name) {
                 return Err(ParseError::UndeclaredLifetime { name, span });
             }
             self.named_lifetimes += 1;
         }
-        Ok(true)
+        Ok(Some(Identifier { name, span }))
     }
 
     /// Whether the argument at the cursor is a `[d0, d1, ...]` shape rather than an
     /// array or slice type. An integer, a `?`, or an immediate `]` can never open a
     /// type, so the token after `[` decides without backtracking.
     ///
-    /// A `..` splice opens no type either, and neither does a name followed by `,` or `:`.
+    /// A `..` splice opens no type either, and neither does a name followed by `,`, `:` or an
+    /// arithmetic operator or `.`.
     /// A lone identifier-led shape (`[N]`) is ambiguous with the slice type `[T]`, so it
     /// is claimed only under `Tensor`, where a slice cannot appear: `symbolic_extents` carries
     /// that from the caller, which already knows the name.
@@ -497,11 +527,22 @@ impl Parser {
                 | TokenKind::Question
                 | TokenKind::DotDot,
             ) => true,
+            // An operator after the name (`[N + 1]`, `[S.count()]`) cannot continue a type either,
+            // so an extent expression is a shape under an alias of `Tensor` too.
             Some(TokenKind::Identifier(_)) => {
                 symbolic_extents
                     || matches!(
                         self.tokens.get(skip_newlines(i + 1)).map(|t| &t.kind),
-                        Some(TokenKind::Comma | TokenKind::Colon)
+                        Some(
+                            TokenKind::Comma
+                                | TokenKind::Colon
+                                | TokenKind::Plus
+                                | TokenKind::Minus
+                                | TokenKind::Star
+                                | TokenKind::Slash
+                                | TokenKind::Percent
+                                | TokenKind::Dot
+                        )
                     )
             }
             _ => false,

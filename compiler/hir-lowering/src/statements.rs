@@ -32,6 +32,9 @@ impl Lowerer {
                     Some(t) => Some(self.resolve_type(t)?),
                     None => None,
                 };
+                if let (Some(written), Some(expr)) = (ty, init) {
+                    self.written_types.insert(expr.span(), written.clone());
+                }
                 let init = match init {
                     Some(expr) => Some(self.lower_expr(expr, declared.as_ref())?),
                     None => None,
@@ -55,6 +58,11 @@ impl Lowerer {
                     self.bind_annotation_extents(&name.name, annotation, &final_ty, *span);
                 }
                 self.define(name.name.clone(), final_ty.clone());
+                if let Some(annotation) = ty {
+                    let depth = self.scopes.len();
+                    self.written_bindings
+                        .push((depth, name.name.clone(), annotation.clone()));
+                }
                 Ok(HirStmt::VarDecl {
                     name: name.name.clone(),
                     ty: final_ty,
@@ -120,6 +128,11 @@ impl Lowerer {
                         })
                     }
                     None => {
+                        if let Place::Var(name) = place
+                            && let Some(written) = self.binding_annotation(&name.name).cloned()
+                        {
+                            self.written_types.insert(value.span(), written);
+                        }
                         let value = self.lower_expr(value, Some(&place_ty))?;
                         Ok(HirStmt::Assign {
                             place: lowered,
@@ -133,6 +146,9 @@ impl Lowerer {
             Stmt::Return { value, span } => {
                 let value = match value {
                     Some(expr) => {
+                        if let Some(written) = self.written_return.clone() {
+                            self.written_types.insert(expr.span(), written);
+                        }
                         let expected = self.current_return.clone();
                         Some(self.lower_expr(expr, Some(&expected))?)
                     }

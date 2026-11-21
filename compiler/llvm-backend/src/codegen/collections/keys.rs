@@ -207,7 +207,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Lexicographic `<` over two UTF-8 strings: compare the shared prefix, and fall
     /// back to the lengths when it matches.
-    fn emit_string_lt(
+    pub(crate) fn emit_string_lt(
         &mut self,
         lhs: BasicValueEnum<'ctx>,
         rhs: BasicValueEnum<'ctx>,

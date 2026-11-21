@@ -5,6 +5,38 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-171: a `val` named like a size parameter does not shadow it
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` / `hir-lowering` (a size parameter read as a value)
+- **Severity**: high. Valid source compiles and gives a wrong answer with no diagnostic
+
+**Minimal repro**
+
+```neuro
+func s<N>(a: [i32; N]) -> u64 {
+    val N = 100u64
+    N
+}
+
+func main() -> i32 {
+    s([1]) as i32
+}
+```
+
+Expected: exit code 100, since a later `val` shadows a name for the rest of its scope. Observed:
+exit code 1. The `N` after the `val` still reads the extent parameter. A `const N: u32`
+parameter behaves the same way.
+
+**Root cause**: not traced. A size parameter read as a value resolves before the local scope is
+consulted, so the binding is made and never read.
+
+**Workaround**: give the local another name.
+
+**Fix sketch**: resolve a name read as a value against the local scope first, as every other
+binding does, and only then as a size parameter, in both the checker and lowering. Alternatively
+refuse the shadowing in the checker, with the spec amended to say so.
+
 ## BUG-170: reading a field of a temporary with a `Drop` impl skips its destructor
 
 - **Status**: open, confirmed

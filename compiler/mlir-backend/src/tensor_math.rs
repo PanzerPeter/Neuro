@@ -255,7 +255,7 @@ mod tests {
     };
 
     use crate::bridge::tests::{
-        assert_host_only_on_gpu, assert_lowered, mlir_of, operand, outlined, tensor_of,
+        assert_launches_on_gpu, assert_lowered, mlir_of, operand, outlined, tensor_of,
     };
 
     use neuro_hir::{HirExpr, HirExprKind, HirMathOp, HirProgram, HirTarget, HirType};
@@ -349,6 +349,6 @@ mod tests {
             "{mlir}"
         );
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 }

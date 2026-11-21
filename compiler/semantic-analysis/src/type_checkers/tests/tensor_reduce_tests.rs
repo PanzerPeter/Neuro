@@ -107,25 +107,6 @@ func main() -> i32 {
 }
 
 #[test]
-fn an_integer_mean_has_no_rounding_rule() {
-    let errors = semantic_errors(
-        r#"
-func main() -> i32 {
-    val v: Tensor<i32, [2]> = Tensor::<i32, [2]>::ones()
-    val x: i32 = v.mean()
-    return 0
-}
-"#,
-    );
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::TensorReduceMeanNotFloat { .. })),
-        "an integer mean should be rejected; got {errors:?}"
-    );
-}
-
-#[test]
 fn a_reduction_over_no_elements_is_rejected() {
     let errors = semantic_errors(
         r#"

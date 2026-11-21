@@ -548,6 +548,7 @@ impl Lowerer {
             &mut subst,
             &mut const_subst,
         )?;
+        self.infer_from_bounds(&template.generics, &mut subst, &mut const_subst);
 
         // The signature is resolved here, at the request, so an extent in it with no value
         // at these arguments is reported against this call's chain.
@@ -829,28 +830,7 @@ impl Lowerer {
             &mut const_subst,
         )?;
 
-        let mut instance_args = Vec::with_capacity(generics.len());
-        for gp in &generics {
-            let arg = match gp.kind {
-                ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape => {
-                    subst.get(&gp.name.name).cloned().map(crate::MonoArg::Type)
-                }
-                ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent => {
-                    const_subst
-                        .get(&gp.name.name)
-                        .copied()
-                        .map(crate::MonoArg::Const)
-                }
-            };
-            instance_args.push(arg.ok_or_else(|| LoweringError::UnresolvedType {
-                name: format!("{}::{} parameter '{}'", base, member, gp.name.name),
-            })?);
-        }
-        let instance = if self.is_generic_enum(base) {
-            self.instantiate_generic_enum(base, &instance_args)?
-        } else {
-            self.instantiate_generic_struct(base, &instance_args)?
-        };
+        let instance = self.type_instance(base, member, &generics, &subst, &const_subst)?;
         // The function's own parameters follow the type's in the turbofish.
         if self
             .generic_methods
@@ -867,6 +847,8 @@ impl Lowerer {
         }
 
         let (params, ret) = self.assoc_signature(&instance, member)?;
+        // `Cell::new::<&dyn Named>(&thing)`: the instance's parameter may want an unsizing.
+        let lowered_args = coerce_to_params(lowered_args, &params);
         let callee = HirExpr::new(
             HirExprKind::Path {
                 type_name: instance,
@@ -886,6 +868,73 @@ impl Lowerer {
             ret,
             span,
         ))
+    }
+
+    /// The instance of the generic type `base` that `subst` and `const_subst` bind each of
+    /// its `generics` in, for a call to its associated function `member`.
+    fn type_instance(
+        &mut self,
+        base: &str,
+        member: &str,
+        generics: &[ast_types::GenericParam],
+        subst: &std::collections::HashMap<String, HirType>,
+        const_subst: &std::collections::HashMap<String, u64>,
+    ) -> Result<String, LoweringError> {
+        let mut instance_args = Vec::with_capacity(generics.len());
+        for gp in generics {
+            let arg = match gp.kind {
+                ast_types::GenericParamKind::Type | ast_types::GenericParamKind::Shape => {
+                    subst.get(&gp.name.name).cloned().map(crate::MonoArg::Type)
+                }
+                ast_types::GenericParamKind::Const(_) | ast_types::GenericParamKind::Extent => {
+                    const_subst
+                        .get(&gp.name.name)
+                        .copied()
+                        .map(crate::MonoArg::Const)
+                }
+            };
+            instance_args.push(arg.ok_or_else(|| LoweringError::UnresolvedType {
+                name: format!("{}::{} parameter '{}'", base, member, gp.name.name),
+            })?);
+        }
+        if self.is_generic_enum(base) {
+            self.instantiate_generic_enum(base, &instance_args)
+        } else {
+            self.instantiate_generic_struct(base, &instance_args)
+        }
+    }
+
+    /// The parameter types of `type_name`'s associated function `member` at the instance
+    /// its turbofish `type_args` names in full: a generic type's parameters, then the
+    /// function's own, in the order a call's turbofish lists them.
+    pub(crate) fn assoc_instance_params(
+        &mut self,
+        type_name: &str,
+        member: &str,
+        type_args: &[ast_types::GenericArg],
+        span: shared_types::Span,
+    ) -> Result<Vec<HirType>, LoweringError> {
+        let generics = self.template_generics(type_name);
+        let (instance, own_args) = if generics.is_empty() {
+            (type_name.to_string(), type_args)
+        } else {
+            let mut subst = std::collections::HashMap::new();
+            let mut const_subst = std::collections::HashMap::new();
+            self.seed_turbofish(&generics, type_args, &mut subst, &mut const_subst)?;
+            let instance =
+                self.type_instance(type_name, member, &generics, &subst, &const_subst)?;
+            (
+                instance,
+                type_args.get(generics.len()..).unwrap_or_default(),
+            )
+        };
+        let key = format!("{instance}__{member}");
+        if self.generic_methods.contains_key(&key) {
+            return Ok(self
+                .instantiate_generic_method(&key, own_args, &[], span)?
+                .1);
+        }
+        Ok(self.assoc_signature(&instance, member)?.0)
     }
 
     /// A call to the generic associated function `member` of `type_name`, a concrete type
@@ -923,8 +972,27 @@ impl Lowerer {
         ))
     }
 
+    /// The visible parameter and return types of `method` called through a `dyn` of
+    /// `trait_name`: the trait's declaration, its supertraits' included, since no
+    /// implementor is known until the vtable picks one at run time.
+    pub(crate) fn dyn_method_signature(
+        &self,
+        trait_name: &str,
+        method: &str,
+    ) -> Result<(Vec<HirType>, HirType), LoweringError> {
+        self.trait_closure(trait_name)
+            .iter()
+            .filter_map(|name| self.traits.get(name))
+            .flatten()
+            .find(|m| m.name == method)
+            .map(|sig| (sig.params.clone(), sig.ret.clone()))
+            .ok_or_else(|| LoweringError::UnresolvedCall {
+                target: format!("dyn {trait_name}.{method}"),
+            })
+    }
+
     /// The key of `method` on `receiver` when that method is generic.
-    fn generic_method_key(&self, receiver: &HirType, method: &str) -> Option<String> {
+    pub(crate) fn generic_method_key(&self, receiver: &HirType, method: &str) -> Option<String> {
         let (HirType::Struct(name) | HirType::Enum(name) | HirType::Newtype { name, .. }) =
             receiver
         else {
@@ -1307,17 +1375,7 @@ impl Lowerer {
             // Dynamic dispatch: the call is typed from the trait's declaration,
             // no implementor is named here, since the concrete method is selected at
             // runtime through the vtable. The backend keys off the receiver's type.
-            let trait_name = trait_name.clone();
-            let sig = self
-                .trait_closure(&trait_name)
-                .iter()
-                .filter_map(|name| self.traits.get(name))
-                .flatten()
-                .find(|m| m.name == method)
-                .ok_or_else(|| LoweringError::UnresolvedCall {
-                    target: format!("dyn {}.{}", trait_name, method),
-                })?;
-            let (params, ret) = (sig.params.clone(), sig.ret.clone());
+            let (params, ret) = self.dyn_method_signature(trait_name, method)?;
             (self.lower_args(args, &params)?, ret)
         } else if method == SLICE_METHOD && sliceable_element(recv.referent()).is_some() {
             // `.slice(range)` borrows the receiver's buffer, so it is a slice intrinsic

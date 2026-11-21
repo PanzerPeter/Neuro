@@ -197,3 +197,93 @@ func main() -> i32 { 0 }
         "binds `Item` to u32",
     );
 }
+
+/// An inherent method returns `impl Trait` the way a function does: an associated function,
+/// a `self` method, one calling a later one, and a free function calling one. A result that
+/// may hold a borrow of `self` keeps the receiver borrowed.
+#[test]
+fn an_inherent_method_returns_impl_trait() {
+    let out = stdout_of(
+        "method_impl_return.nr",
+        r#"
+trait Shape {
+    func area(&self) -> i32
+}
+
+struct Sq { s: i32 }
+
+impl Shape for Sq {
+    func area(&self) -> i32 { self.s * self.s }
+}
+
+struct Factory { base: i32, items: Vec<i32> }
+
+impl Factory {
+    func unit() -> impl Shape { Sq { s: 1 } }
+    func make(&self) -> impl Shape { Sq { s: self.base } }
+    func bigger(&self) -> impl Shape { self.grown(1) }
+    func grown(&self, d: i32) -> impl Shape { Sq { s: self.base + d } }
+    func odd(&self) -> impl Iterator<Item = &i32> { self.items.iter().filter(|x| **x % 2 == 1) }
+}
+
+func made(f: &Factory) -> impl Shape { f.make() }
+
+func main() -> i32 {
+    mut items: Vec<i32> = Vec::new()
+    for i in 1..=5 { items.push(i) }
+    val f = Factory { base: 3, items: items }
+    mut odd = 0
+    for x in f.odd() { odd += x }
+    println("{Factory::unit().area()} {f.make().area()} {f.bigger().area()} {made(&f).area()} {odd}")
+    0
+}
+"#,
+    );
+    assert_eq!(out, "1 9 16 9 9\n");
+}
+
+/// The borrow rules and the body checks reach a method's `impl Trait` too, and the
+/// position stays refused where no ruling covers it: a trait's method, and a generic one.
+#[test]
+fn an_inherent_method_impl_return_is_checked() {
+    let shape = "trait Shape {\n    func area(&self) -> i32\n}\n";
+    assert_check_error(
+        "method_impl_return_borrow.nr",
+        r#"
+struct Bag { items: Vec<i32> }
+impl Bag {
+    func walk(&self) -> impl Iterator<Item = &i32> { self.items.iter() }
+}
+func main() -> i32 {
+    mut b = Bag { items: Vec::new() }
+    val it = b.walk()
+    b.items.push(1)
+    for x in it { }
+    0
+}
+"#,
+        "cannot borrow 'b' as mutable: it is already borrowed",
+    );
+    assert_check_error(
+        "method_impl_return_wrong.nr",
+        &format!(
+            "{shape}struct B {{ }}\nimpl B {{\n    func bad(&self) -> impl Shape {{ 5 }}\n}}\nfunc main() -> i32 {{ 0 }}\n"
+        ),
+        "the `impl Shape` return type resolves to `i32`, which does not implement 'Shape'",
+    );
+    let refused = "`impl Trait` is only allowed in a function parameter";
+    assert_check_error(
+        "method_impl_return_trait.nr",
+        &format!(
+            "{shape}trait Maker {{\n    func mk(&self) -> impl Shape\n}}\nfunc main() -> i32 {{ 0 }}\n"
+        ),
+        refused,
+    );
+    assert_check_error(
+        "method_impl_return_generic.nr",
+        &format!(
+            "{shape}struct Sq {{ }}\nimpl Shape for Sq {{\n    func area(&self) -> i32 {{ 1 }}\n}}\nstruct G<T> {{ v: T }}\nimpl<T> G<T> {{\n    func g(&self) -> impl Shape {{ Sq {{ }} }}\n}}\nfunc main() -> i32 {{ 0 }}\n"
+        ),
+        refused,
+    );
+}

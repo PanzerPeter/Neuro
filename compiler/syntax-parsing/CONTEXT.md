@@ -82,7 +82,10 @@ no types.
   the language lists. Anonymous `?` aliases are accepted.
 - **Trait default methods**: `inject_trait_defaults` copies each trait's defaults into the
   `impl Trait for Type` blocks that omit them, never replacing a method the implementor wrote.
-  It runs *before* `expand_type_aliases`, so injected bodies are alias-expanded too. Downstream
+  It runs *before* `expand_type_aliases`, so injected bodies are alias-expanded too, and the
+  trait's own default bodies are expanded as well, for the copies module resolution makes. A
+  default whose own type parameters share a name with the impl's is left to module resolution,
+  which copies it with those parameters renamed. Downstream
   passes therefore see trait methods as ordinary inherent methods. `PartialEq` and `Comparable`
   are lang-items with no declaration to copy from, so `inject_comparison_defaults` writes their
   provided methods itself: `ne` from `eq`, and `le`, `gt`, `ge` from `lt`, each cloning the
@@ -270,14 +273,22 @@ the tuple-index parse, so it needs no expression grammar of its own.
   (`impl<S> Layer<S>`, `func f<N>(r: &Ring<N>)`) is settled by `kind_passed_sizes` from that
   declaration's kinds: `parse_program` runs it over the file, skipping a name the
   file declares twice, and `neuroc` runs it again over the resolved program, where every name is
-  canonical and a type from another module is in reach.
+  canonical and a type from another module is in reach. That run also re-kinds each
+  declaration's own sizes again, since resolution turns a tensor written through an alias
+  (`T<f32, [N]>`, parsed as a slice) into a `Type::Tensor` only then. An identifier-led `[...]`
+  whose name is followed by `,`, `:`, an arithmetic operator or `.` is a shape under any name,
+  since no type continues that way (`T<f32, [N + 1]>`).
 - **Tensor constructor turbofish.** `Tensor::<f32, [3, 3]>::zeros()` is the one turbofish that
   qualifies a *type* rather than a callee, so `parse_tensor_qualified_call` handles it in the
   identifier-primary arm instead of the general infix `::` arm (which still requires a `(`
   right after the `>`). It reuses `parse_generic_type_args` / `build_tensor_type` and emits an
   ordinary `Expr::Call` on an `Expr::Path { Tensor, ctor }` whose single `type_args` entry is
   the assembled `Type::Tensor`: no AST node of its own, because a turbofish already carries
-  exactly that. The parser claims the form on the name `Tensor` followed by `::<`; a turbofish
+  exactly that. The parser claims the form on the name `Tensor` followed by `::<`, bare or as
+  the last segment of a path (`std::prelude::Tensor::<f32, [2]>::zeros()`), whose qualifier
+  becomes the `Path`'s type name. Any other name whose turbofish is followed by `::`
+  (`turbofish_qualifies_type`) is an alias of `Tensor`, no other type taking one, and a shapeless
+  one is `ParseError::TypeTurbofish`, which points at the function's turbofish. A turbofish
   with no shape in it is `ParseError::TensorTypeArity`. The shape-free spelling
   `Tensor::scalar(v)` stays a plain `Path` call, resolved against the annotation by semantic
   analysis, which is what keeps a program's own `Tensor` type working.
@@ -523,10 +534,12 @@ Every item that declares lifetimes (function, method, struct, enum, `impl`) push
 `Parser::lifetime_scope` in `parse_generic_params` and truncates it back when the item ends, so
 a method sees its impl's lifetimes and the next item sees none. A lifetime argument in a type
 application (`View<'a>`, `Pick<'a, i32>`, the impl header's `S<'a>`) is consumed by
-`skip_lifetime_arg`: `'_` always passes, any other name must be in that scope or the parse fails
-with `UndeclaredLifetime`, and the argument is then dropped, since lifetimes are erased and
-nothing past the parser reads one. An application left with no type argument is a plain
-`Type::Named`. A parse error ends the parse, so a scope an early return leaves behind is never
+`lifetime_arg`: `'_` always passes, any other name must be in that scope or the parse fails
+with `UndeclaredLifetime`, and one after a type argument is `LifetimeAfterTypeArgument`. The
+arguments are kept (`Type::Generic::lifetimes`, `ImplDef::type_lifetimes`) for the checker to
+count against the declaration; an application of lifetimes only is a `Type::Generic` with no
+`args`, which every later pass reads as the named type. A type alias given lifetimes
+(`V<'a>` for `type V = View`) hands them to its target. A parse error ends the parse, so a scope an early return leaves behind is never
 read.
 
 `Type::Generic`'s span covers its **closing `>`**: `parse_generic_type_args` returns the closing

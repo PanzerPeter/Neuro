@@ -345,7 +345,7 @@ func view<'a>(text: &'a string, from: u64) -> View<'a> {
 }
 ```
 
-A use of the type names its lifetimes before its type arguments (`View<'a>`, `Pick<'a, i32>`), writes `'_`, or leaves them out.
+A use of the type names its lifetimes before its type arguments (`View<'a>`, `Pick<'a, i32>`), writes `'_`, or leaves them out. Written ones must number exactly what the declaration declares: `View<'a, 'b>` is `` `View` declares 1 lifetime parameter(s), but 2 lifetime argument(s) are written ``, and `i32<'a>` is refused as a type that declares none.
 
 The binding that holds such a value holds its borrows, just as `val r = &s` holds one. While it lives, the borrowee cannot be moved, assigned or borrowed `&mut`. The value takes the borrows written into it, the borrows of the holder it was copied from or is part of (including a `match` or `for` binding), and, for a call's result, the borrows of every argument and the receiver, since under elision the result may hold any of them. A holder keeps its borrows until its own scope ends, even after its value has moved on, so two holders of `&mut x` need separate blocks.
 

@@ -260,8 +260,7 @@ mod tests {
     use crate::{
         GpuTarget,
         bridge::tests::{
-            assert_host_only_on_gpu, assert_launches_on_gpu, assert_lowered, mlir_of, operand,
-            outlined, tensor_of,
+            assert_launches_on_gpu, assert_lowered, mlir_of, operand, outlined, tensor_of,
         },
         context::new_context,
         lower::build_linkable_module,
@@ -376,7 +375,7 @@ mod tests {
             "{mlir}"
         );
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 
     /// A dynamic contracted letter has no static trip count in the HIR, and the body takes it

@@ -147,6 +147,83 @@ func main() -> i32 {
 }
 
 #[test]
+fn a_parameter_named_only_in_a_bound_is_inferred_from_the_impl() {
+    // `V` appears in no argument, only in `Src<Item = V>`: the impl of the argument's
+    // type says what `Item` is, and that solves `V`. Covers a generic impl, a chain
+    // through two bounds, a call passed through from an enclosing bound, and a method.
+    let test = CompileTest::new();
+    let source = r#"
+trait Src {
+    type Item
+    func get(&self) -> Self::Item
+}
+struct C { v: u32 }
+impl Src for C {
+    type Item = u32
+    func get(&self) -> u32 { self.v }
+}
+struct W<T> { t: T }
+impl<T: Copy> Src for W<T> {
+    type Item = T
+    func get(&self) -> T { self.t }
+}
+struct Nest { c: C }
+impl Src for Nest {
+    type Item = C
+    func get(&self) -> C { C { v: self.c.v * 10 } }
+}
+func hold<V, T: Src<Item = V>>(s: &T) -> V { s.get() }
+func deep<U, V: Src<Item = U>, T: Src<Item = V>>(s: &T) -> U { s.get().get() }
+func outer<T: Src<Item = u32>>(s: &T) -> u32 { hold(s) }
+struct K { k: i32 }
+impl K {
+    func via<V, T: Src<Item = V>>(&self, s: &T) -> V { s.get() }
+}
+func main() -> i32 {
+    val c = C { v: 7 }
+    val w = W { t: 5i64 }
+    val n = Nest { c: C { v: 2 } }
+    val k = K { k: 0 }
+    return hold(&c) as i32 + hold(&w) as i32 + deep(&n) as i32 + outer(&c) as i32 + k.via(&c) as i32
+}
+"#;
+    let exit = test
+        .compile_and_run("bound_infer.nr", source)
+        .expect("compile/run failed");
+    assert_eq!(exit, 46);
+}
+
+#[test]
+fn an_explicit_argument_contradicting_the_impl_does_not_compile() {
+    let test = CompileTest::new();
+    let source = r#"
+trait Src {
+    type Item
+    func get(&self) -> Self::Item
+}
+struct C { v: u32 }
+impl Src for C {
+    type Item = u32
+    func get(&self) -> u32 { self.v }
+}
+func hold<V, T: Src<Item = V>>(s: &T) -> V { s.get() }
+func main() -> i32 {
+    val c = C { v: 7 }
+    val x = hold::<i64, C>(&c)
+    0
+}
+"#;
+    let path = test.write_source("bound_infer_mismatch.nr", source);
+    let err = test
+        .compile(&path)
+        .expect_err("`V = i64` contradicts the impl's `Item = u32`");
+    assert!(
+        err.contains("Item") && err.contains("u32"),
+        "the diagnostic should name the associated type and the impl's binding; got: {err}"
+    );
+}
+
+#[test]
 fn a_type_argument_binding_another_type_does_not_compile() {
     let test = CompileTest::new();
     let source = r#"

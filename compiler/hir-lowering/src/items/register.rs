@@ -305,6 +305,7 @@ impl Lowerer {
                 .insert((trait_name.name.clone(), struct_name.clone()));
         }
         let saved_ty = self.enter_impl_assoc(def)?;
+        self.record_trait_assoc(def, &struct_name);
         let outcome = self.register_impl_methods(def, &struct_name);
         self.type_subst = saved_ty;
         outcome
@@ -337,6 +338,10 @@ impl Lowerer {
                 self.generic_methods.insert(mangled, Rc::new(template));
                 continue;
             }
+            // Its body decides an `impl Trait` return, once every signature is known.
+            if super::impl_returns::method_returns_impl_trait(def, method) {
+                continue;
+            }
             let (params, ret) = self.method_signature(&self_ty, method)?;
             self.functions.insert(mangled.clone(), (params, ret));
             if let Some(sig) =
@@ -363,20 +368,86 @@ impl Lowerer {
     ///
     /// A binding is a name standing for a concrete type over one block, which is what
     /// the type-parameter substitution already is, so `Self::Item` joins it under its
-    /// written spelling and every annotation resolves through the one path.
+    /// written spelling and every annotation resolves through the one path. The types a
+    /// subtrait impl inherits from its supertraits' impls join it the same way.
     pub(super) fn enter_impl_assoc(
         &mut self,
         def: &ImplDef,
     ) -> Result<std::collections::HashMap<String, HirType>, LoweringError> {
-        if def.assoc_types.is_empty() {
+        if def.assoc_types.is_empty() && def.inherited_assoc.is_empty() {
             return Ok(self.type_subst.clone());
         }
         let mut subst = self.type_subst.clone();
-        for (name, ty) in &def.assoc_types {
+        for (name, ty) in def.assoc_types.iter().chain(&def.inherited_assoc) {
+            let key = format!("Self::{}", name.name);
+            if subst.contains_key(&key) {
+                continue;
+            }
             let resolved = self.resolve_type(ty)?;
-            subst.insert(format!("Self::{}", name.name), resolved);
+            subst.insert(key, resolved);
         }
         Ok(std::mem::replace(&mut self.type_subst, subst))
+    }
+
+    /// Record what the trait impl `def` binds each associated type to on `type_name`, read
+    /// from the `Self::` entries [`Self::enter_impl_assoc`] put in the substitution.
+    pub(super) fn record_trait_assoc(&mut self, def: &ImplDef, type_name: &str) {
+        let Some(trait_name) = &def.trait_name else {
+            return;
+        };
+        let bound = def
+            .assoc_types
+            .iter()
+            .chain(&def.inherited_assoc)
+            .filter_map(|(name, _)| {
+                let ty = self.type_subst.get(&format!("Self::{}", name.name))?;
+                Some((name.name.clone(), ty.clone()))
+            })
+            .collect();
+        self.trait_assoc
+            .insert((trait_name.name.clone(), type_name.to_string()), bound);
+    }
+
+    /// Bind each type parameter a bound's `<Assoc = V>` names (`V` in `T: Src<Item = V>`) to
+    /// what the bounded parameter's type argument binds `Assoc` to, until nothing more binds.
+    pub(crate) fn infer_from_bounds(
+        &self,
+        generics: &[ast_types::GenericParam],
+        subst: &mut std::collections::HashMap<String, HirType>,
+        const_subst: &mut std::collections::HashMap<String, u64>,
+    ) {
+        let (gnames, cnames) = crate::items::generic_name_sets(generics);
+        loop {
+            let before = subst.len() + const_subst.len();
+            for generic in generics {
+                let name = match subst.get(&generic.name.name) {
+                    Some(HirType::Struct(name) | HirType::Enum(name)) => name.clone(),
+                    Some(HirType::Newtype { name, .. }) => name.clone(),
+                    _ => continue,
+                };
+                for bound in &generic.bounds {
+                    let key = (bound.trait_name.name.clone(), name.clone());
+                    let Some(bound_types) = self.trait_assoc.get(&key) else {
+                        continue;
+                    };
+                    for (assoc, written) in &bound.assoc_bindings {
+                        if let Some(found) = bound_types.get(&assoc.name) {
+                            self.unify_ast_hir(
+                                written,
+                                found,
+                                &gnames,
+                                &cnames,
+                                subst,
+                                const_subst,
+                            );
+                        }
+                    }
+                }
+            }
+            if subst.len() + const_subst.len() == before {
+                return;
+            }
+        }
     }
 
     /// Record the operator dispatch for an operator-trait impl, mirroring the

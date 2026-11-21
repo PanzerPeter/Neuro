@@ -159,23 +159,28 @@ fn param_type(source: &str, index: usize) -> Type {
 }
 
 #[test]
-fn lifetime_arguments_are_checked_then_dropped() {
+fn lifetime_arguments_are_kept_apart_from_type_arguments() {
     let decls = "struct H<'a> { r: &'a string }\nstruct P<'a, T> { r: &'a T }\n";
-    // Lifetimes alone leave a plain named type.
+    // Lifetimes alone are an application with no type arguments, so the checker can count
+    // them against the declaration.
     let only = param_type(&format!("{decls}func f<'a>(h: H<'a>) -> i32 {{ 0 }}"), 0);
     assert!(
-        matches!(&only, Type::Named(id) if id.name == "H"),
+        matches!(&only, Type::Generic { name, args, lifetimes, .. }
+            if name.name == "H" && args.is_empty() && lifetimes.len() == 1),
         "{only:?}"
     );
-    // Mixed with a type argument, the type argument alone stays.
+    // Mixed with a type argument, each list keeps its own.
     let mixed = param_type(
         &format!("{decls}func f<'a>(p: P<'a, i32>) -> i32 {{ 0 }}"),
         0,
     );
-    let Type::Generic { args, .. } = &mixed else {
+    let Type::Generic {
+        args, lifetimes, ..
+    } = &mixed
+    else {
         panic!("expected a generic application, got {mixed:?}");
     };
-    assert_eq!(args.len(), 1);
+    assert_eq!((args.len(), lifetimes.len()), (1, 1));
     // The anonymous lifetime needs no declaration.
     let anonymous = param_type(&format!("{decls}func f(h: &H<'_>) -> i32 {{ 0 }}"), 0);
     assert!(matches!(anonymous, Type::Reference { .. }));
@@ -192,6 +197,21 @@ impl<'a> H<'a> {
         panic!("expected an impl item");
     };
     assert!(def.type_args.is_empty(), "{:?}", def.type_args);
+    assert_eq!(def.type_lifetimes.len(), 1, "{:?}", def.type_lifetimes);
+}
+
+#[test]
+fn a_lifetime_argument_after_a_type_argument_is_rejected() {
+    let decls = "struct P<'a, T> { r: &'a T }\n";
+    for source in [
+        format!("{decls}func f<'a>(p: P<i32, 'a>) -> i32 {{ 0 }}"),
+        format!("{decls}impl<'a, T> P<T, 'a> {{}}"),
+    ] {
+        let err = parse(&source)
+            .expect_err("a lifetime after a type argument must be rejected")
+            .to_string();
+        assert!(err.contains("goes ahead of the type arguments"), "{err}");
+    }
 }
 
 #[test]

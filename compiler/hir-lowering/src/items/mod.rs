@@ -48,7 +48,9 @@ fn is_kernel(func: &FunctionDef) -> bool {
 fn kernel_param_reference(ty: &ast_types::Type) -> Option<ast_types::Type> {
     let (inner, mutable, span) = match ty {
         ast_types::Type::Tensor { span, .. } => (ty, false, *span),
-        ast_types::Type::Generic { name, args, span } if name.name == KERNEL_OUT_TYPE => {
+        ast_types::Type::Generic {
+            name, args, span, ..
+        } if name.name == KERNEL_OUT_TYPE => {
             let [GenericArg::Type(inner)] = args.as_slice() else {
                 return None;
             };
@@ -222,10 +224,13 @@ impl Lowerer {
         &mut self,
         body: &[ast_types::Stmt],
         return_type: &HirType,
+        written: Option<&ast_types::Type>,
         target: HirTarget,
     ) -> Result<Vec<HirStmt>, LoweringError> {
         self.in_kernel = matches!(target, HirTarget::Kernel { .. });
+        let saved = std::mem::replace(&mut self.written_return, written.cloned());
         let lowered = self.lower_body(body, return_type);
+        self.written_return = saved;
         self.in_kernel = false;
         lowered
     }
@@ -295,7 +300,10 @@ impl Lowerer {
         // each instance below) enqueues every generic function and struct instantiation
         // it references, so this runs until the transitive closure is emitted.
         // Struct instances are drained first because emitting their method bodies can in
-        // turn enqueue generic-function instances.
+        // turn enqueue generic-function instances. A shape check that fails at one instance
+        // leaves that instance out and the drain goes on, so every failing instance is
+        // reported in one run, as the checker reports every error it finds.
+        let mut instance_errors = Vec::new();
         loop {
             if let Some(me) = self.mono_enum_pending.pop() {
                 self.mono_chain = me.chain;
@@ -304,29 +312,34 @@ impl Lowerer {
             }
             if let Some(ms) = self.mono_struct_pending.pop() {
                 self.mono_chain = ms.chain;
-                self.emit_mono_struct(&ms).map_err(|error| {
+                let outcome = self.emit_mono_struct(&ms).map_err(|error| {
                     error.in_instance(ms.chain, || {
                         crate::describe_instance(&ms.base, &ms.const_subst)
                     })
-                })?;
+                });
+                defer_instance_error(outcome, &mut instance_errors)?;
                 continue;
             }
             if let Some(mm) = self.mono_method_pending.pop() {
                 self.mono_chain = mm.chain;
-                self.emit_mono_method(&mm).map_err(|error| {
+                let outcome = self.emit_mono_method(&mm).map_err(|error| {
                     error.in_instance(mm.chain, || {
                         crate::describe_instance(&mm.key.replace("__", "::"), &mm.const_subst)
                     })
-                })?;
+                });
+                defer_instance_error(outcome, &mut instance_errors)?;
                 continue;
             }
             if let Some(instance) = self.mono_pending.pop() {
                 self.mono_chain = instance.chain;
-                let hir_fn = self.lower_mono_instance(&instance).map_err(|error| {
+                let outcome = self.lower_mono_instance(&instance).map_err(|error| {
                     error.in_instance(instance.chain, || {
                         crate::describe_instance(&instance.fn_name, &instance.const_subst)
                     })
-                })?;
+                });
+                let Some(hir_fn) = defer_instance_error(outcome, &mut instance_errors)? else {
+                    continue;
+                };
                 // A `@grad` template's derivative is derived per instance, where the
                 // shapes the reverse pass builds its gradients from are concrete.
                 let attributes = self
@@ -344,6 +357,9 @@ impl Lowerer {
                 continue;
             }
             break;
+        }
+        if !instance_errors.is_empty() {
+            return Err(LoweringError::from_instance_errors(instance_errors));
         }
         hir_items.append(&mut self.mono_items);
         // Lifted closures are appended last; their bodies are self-contained and the
@@ -462,7 +478,12 @@ impl Lowerer {
             self.define(param.name.clone(), param.ty.clone());
         }
         let mut body = self.bind_parameter_extents(&func.params, func.span)?;
-        body.extend(self.lower_function_body(&func.body, &return_type, target)?);
+        body.extend(self.lower_function_body(
+            &func.body,
+            &return_type,
+            func.return_type.as_ref(),
+            target,
+        )?);
         self.pop_scope();
 
         Ok(HirFunction {
@@ -519,6 +540,23 @@ impl Lowerer {
             });
         }
         let return_type = match &method.return_type {
+            // `resolve_impl_returns` registered the type the body produces.
+            Some(ast_types::Type::ImplTrait { trait_name, .. }) => {
+                let (HirType::Struct(owner)
+                | HirType::Enum(owner)
+                | HirType::Newtype { name: owner, .. }) = self_ty
+                else {
+                    return Err(LoweringError::UnresolvedType {
+                        name: format!("impl {}", trait_name.name),
+                    });
+                };
+                self.functions
+                    .get(&format!("{}__{}", owner, method.name.name))
+                    .map(|(_, ret)| ret.clone())
+                    .ok_or_else(|| LoweringError::UnresolvedType {
+                        name: format!("impl {}", trait_name.name),
+                    })?
+            }
             Some(t) => self.resolve_type(t)?,
             None => HirType::Void,
         };
@@ -532,7 +570,10 @@ impl Lowerer {
             self.define(param.name.clone(), param.ty.clone());
         }
         let mut body = self.bind_parameter_extents(&method.params, method.span)?;
-        body.extend(self.lower_body(&method.body, &return_type)?);
+        let saved = std::mem::replace(&mut self.written_return, method.return_type.clone());
+        let lowered = self.lower_body(&method.body, &return_type);
+        self.written_return = saved;
+        body.extend(lowered?);
         self.pop_scope();
 
         Ok(HirMethod {
@@ -575,6 +616,9 @@ impl Lowerer {
             if is_tail && !matches!(return_type, HirType::Void) {
                 match stmt {
                     ast_types::Stmt::Expr(expr) => {
+                        if let Some(written) = self.written_return.clone() {
+                            self.written_types.insert(expr.span(), written);
+                        }
                         self.in_extent_statement(&mut out, |lo, out| {
                             out.push(HirStmt::Expr(lo.lower_expr(expr, Some(return_type))?));
                             Ok(())
@@ -654,5 +698,25 @@ fn is_kernel_place(arg: &ast_types::Expr) -> bool {
         }
         Expr::Paren(inner, _) => is_kernel_place(inner),
         _ => false,
+    }
+}
+
+/// Hold back a shape check that failed at one instance, so the drain can go on to the
+/// rest. Any other error ends lowering; one that follows a held shape error is likely its
+/// consequence (the instance it left out), so the held ones are what is reported.
+fn defer_instance_error<T>(
+    outcome: Result<T, LoweringError>,
+    deferred: &mut Vec<LoweringError>,
+) -> Result<Option<T>, LoweringError> {
+    match outcome {
+        Ok(value) => Ok(Some(value)),
+        Err(error @ LoweringError::InstanceCheck { .. }) => {
+            deferred.push(error);
+            Ok(None)
+        }
+        Err(_) if !deferred.is_empty() => Err(LoweringError::from_instance_errors(std::mem::take(
+            deferred,
+        ))),
+        Err(error) => Err(error),
     }
 }

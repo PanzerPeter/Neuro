@@ -423,7 +423,7 @@ impl Lowerer {
     /// reads its local; a fresh one takes its entry; an anonymous axis takes its entry.
     pub(crate) fn constructor_dims(
         &mut self,
-        annotation: Option<&Type>,
+        written: &[Option<String>],
         shape: &[Option<usize>],
         dims: Option<&[ast_types::Expr]>,
         span: Span,
@@ -437,12 +437,6 @@ impl Lowerer {
         if open.is_empty() {
             return Ok((Vec::new(), Vec::new()));
         }
-        let written = match annotation {
-            Some(Type::Tensor { shape: written, .. }) if written.len() == shape.len() => {
-                written_names(written)
-            }
-            _ => vec![None; shape.len()],
-        };
         let entries = dims.unwrap_or_default();
         let mut next = 0;
         let mut stmts = Vec::new();

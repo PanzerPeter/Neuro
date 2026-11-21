@@ -365,8 +365,8 @@ impl TypeChecker {
         for bound in bounds {
             let declared = self
                 .traits
-                .get(&bound.trait_name.name)
-                .map(|info| info.assoc_types.clone());
+                .contains_key(&bound.trait_name.name)
+                .then(|| self.visible_assoc(&bound.trait_name.name));
             let mut assoc = Vec::new();
             for (name, ty) in &bound.assoc_bindings {
                 if let Some(declared) = &declared

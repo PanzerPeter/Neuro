@@ -318,3 +318,28 @@ fn the_examples_with_tests_pass_them() {
         assert!(text.contains("3 passed; 0 failed"), "{program}:\n{text}");
     }
 }
+
+/// `neuroc test --std` runs the standard library's own tests, which a program's run leaves
+/// out, and it takes no file.
+#[test]
+fn the_standard_library_passes_its_own_tests() {
+    let output = Command::new(neuroc_path())
+        .args(["test", "--std"])
+        .output()
+        .expect("run neuroc test --std");
+    let text = stdout(&output);
+    assert!(output.status.success(), "{text}");
+    assert!(text.contains("test std::testing::"), "{text}");
+    assert!(text.contains(" passed; 0 failed"), "{text}");
+
+    let program = neuroc_test(&[("lone.nr", "@test\nfunc only() { }\n")], &[]);
+    let text = stdout(&program);
+    assert!(text.contains("running 1 test(s)"), "{text}");
+    assert!(!text.contains("std::"), "{text}");
+
+    let both = neuroc_test(&[("lone.nr", "func main() { }\n")], &["--std"]);
+    assert!(
+        !both.status.success(),
+        "a file and --std together are refused"
+    );
+}

@@ -25,9 +25,12 @@ use neuro_hir::{HirFunction, HirItem, HirProgram, HirTarget, HirType};
 /// which is what a DLPack buffer is; left at its default, the layout is fully
 /// strided and a copy into it lowers to a runtime-library call nothing links.
 /// Out-params (`modify-public-functions`, since every definition is public, and
-/// `hoist-static-allocs`, so the body writes straight into the caller's buffer
-/// rather than into its own and copying) leave the result's allocation to the
-/// caller, which is the only side that knows how a Neuro tensor is allocated.
+/// `hoist-static-allocs` with `hoist-dynamic-allocs`, so the body writes straight into
+/// the caller's buffer rather than into its own and copying) leave the result's
+/// allocation to the caller, which is the only side that knows how a Neuro tensor is
+/// allocated. The caller sizes a run-time extent from the same operand the body reads
+/// it from (`result_extents`), so a dynamic result needs no copy either, and a device
+/// body never meets the host `memcpy` that copy would be.
 ///
 /// The rest is the descent those loops land in: `scf` becomes `cf` branches,
 /// `memref` becomes pointer arithmetic against `malloc`, and each remaining
@@ -62,7 +65,7 @@ fn llvm_lowering_pipeline() -> String {
 pub(crate) const BUFFERIZE: &str = "\
     linalg-fuse-elementwise-ops,\
     one-shot-bufferize{bufferize-function-boundaries=true function-boundary-type-conversion=identity-layout-map},\
-    buffer-results-to-out-params{hoist-static-allocs=true modify-public-functions=true},\
+    buffer-results-to-out-params{hoist-static-allocs=true hoist-dynamic-allocs=true modify-public-functions=true},\
     buffer-deallocation-pipeline";
 
 /// A buffer the body allocates for itself comes from libc `malloc`.
@@ -464,7 +467,8 @@ pub(crate) mod tests {
     }
 
     /// Lower `program`'s body for an NVIDIA device, and check the device path keeps it with
-    /// kernels that launch. Returns the launch count.
+    /// kernels that launch, and with no host copy, which would read device memory. Returns
+    /// the launch count.
     pub(crate) fn assert_launches_on_gpu(program: &HirProgram) -> usize {
         let target = crate::GpuTarget::Nvidia {
             chip: "sm_80".to_string(),
@@ -482,6 +486,11 @@ pub(crate) mod tests {
             .matches("call void @mgpuLaunchKernel")
             .count();
         assert!(launches > 0, "{}", bodies.llvm_ir);
+        assert!(
+            !bodies.llvm_ir.contains("@llvm.memcpy"),
+            "a host copy over device buffers:\n{}",
+            bodies.llvm_ir
+        );
         launches
     }
 
@@ -583,10 +592,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_dynamic_extent_survives_the_crossing() {
-        // The destination is sized by `tensor.dim` on an operand, so bufferizing
-        // it has to keep that extent as a run-time value feeding the allocation
-        // rather than needing it as a constant.
+    fn a_dynamic_result_is_written_into_the_callers_buffer() {
+        // The destination is sized by `tensor.dim` on an operand, a run-time value, and
+        // the caller sizes its out-param from the same extent, so the body writes there
+        // rather than allocating its own and copying (which a device could not run).
         let shape = vec![None];
         let ir = translate_to_llvm_ir(&program_with_tensor_operator(
             BinaryOp::Multiply,
@@ -598,8 +607,8 @@ pub(crate) mod tests {
 
         assert_is_a_lowered_body(&ir);
         assert!(
-            ir.contains("@malloc"),
-            "expected the destination buffer to be allocated at run time:\n{ir}"
+            !ir.contains("@malloc") && !ir.contains("llvm.memcpy"),
+            "expected the body to write into its out-param:\n{ir}"
         );
     }
 

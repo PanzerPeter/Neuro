@@ -872,8 +872,7 @@ mod tests {
     use crate::{
         GpuTarget,
         bridge::tests::{
-            assert_host_only_on_gpu, assert_launches_on_gpu, assert_lowered, mlir_of, operand,
-            outlined, tensor_of,
+            assert_launches_on_gpu, assert_lowered, mlir_of, operand, outlined, tensor_of,
         },
         context::new_context,
         gpu::math_functions,
@@ -1062,7 +1061,7 @@ mod tests {
             "{mlir}"
         );
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 
     /// A run of static length keeps the static passes even when another axis is dynamic.
@@ -1073,7 +1072,7 @@ mod tests {
         assert!(!mlir.contains("math.ctlz"), "{mlir}");
         assert!(mlir.contains("tensor<?x4xi32>"), "{mlir}");
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 
     /// `.topk` over a dynamic axis gathers its static `k`, which the result takes.

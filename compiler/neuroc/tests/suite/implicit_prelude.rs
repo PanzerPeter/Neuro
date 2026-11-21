@@ -215,6 +215,36 @@ func main() -> i32 {
     );
 }
 
+/// `std::prelude::Tensor::<T, [...]>::ctor()` is the bare word's constructor spelling through the
+/// standard path, with or without the prelude; the bare word stays refused in an opted-out file.
+#[test]
+fn the_tensor_constructor_spelling_takes_the_standard_path() {
+    let with_prelude = r#"
+func main() -> i32 {
+    val t = std::prelude::Tensor::<i32, [2, 2]>::from([[1, 2], [3, 4]])
+    return t[1, 1]
+}
+"#;
+    assert_eq!(run(with_prelude).expect("compiles"), 4);
+    let without = r#"@no_prelude
+
+func main() -> i32 {
+    val t = std::prelude::Tensor::<i32, [3]>::ones()
+    return t.sum()
+}
+"#;
+    assert_eq!(run(without).expect("compiles"), 3);
+    let bare = run(r#"@no_prelude
+
+func main() -> i32 {
+    val t = Tensor::<i32, [3]>::ones()
+    return t.sum()
+}
+"#)
+    .expect_err("the bare word needs the prelude");
+    assert!(bare.contains("opts out of the prelude"), "{bare}");
+}
+
 #[test]
 fn a_misplaced_no_prelude_is_reported() {
     let error = run(r#"

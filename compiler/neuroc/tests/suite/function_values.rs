@@ -279,6 +279,92 @@ func main() -> i32 {
     );
 }
 
+/// An instantiated associated function is a value, of a plain type or a generic one whose
+/// turbofish names the type's parameters and then the function's own, and it is a first
+/// `>>` stage. So is an instantiated generic bound method.
+#[test]
+fn an_instantiated_associated_function_is_a_value() {
+    let exit = run(
+        "assoc_instance_value.nr",
+        r#"
+struct Wrap { x: i32 }
+
+impl Wrap {
+    func pass<T>(v: T) -> T { v }
+    func pick<T>(&self, v: T) -> T { v }
+}
+
+struct Cell<T> { v: T }
+
+impl<T> Cell<T> {
+    func new(v: T) -> Cell<T> { Cell { v: v } }
+    func pair<U>(v: T, u: U) -> (T, U) { (v, u) }
+}
+
+func main() -> i32 {
+    val w = Wrap { x: 0 }
+    val pass = Wrap::pass::<i32>
+    val make = Cell::new::<i32>
+    val pair = Cell::pair::<i32, bool>
+    val t = pair(4, true)
+    val doubled = Wrap::pass::<i32> >> double
+    val boxed = Cell::new::<i32> >> (|c: Cell<i32>| c.v + 10)
+    val picked = w.pick::<i32> >> double
+    val flag = if t.1 { 1 } else { 0 }
+    pass(1) + make(2).v + t.0 + flag + doubled(3) + boxed(5) + picked(7)
+}
+"#,
+    );
+    assert_eq!(exit, 1 + 2 + 4 + 1 + 6 + 15 + 14);
+}
+
+/// A bound method types a composition wherever its call would find it: through a `&dyn`,
+/// through a type parameter's bound (a generic method of one at its instance), and as a
+/// trait's provided method on a concrete receiver.
+#[test]
+fn a_trait_method_is_a_first_stage() {
+    let exit = run(
+        "trait_method_stage.nr",
+        r#"
+trait Scale {
+    func by(&self, v: i32) -> i32
+    func twice(&self, v: i32) -> i32 { self.by(v) * 2 }
+}
+
+trait Pick {
+    func pick<T>(&self, v: T) -> T { v }
+}
+
+struct K { k: i32 }
+
+impl Scale for K {
+    func by(&self, v: i32) -> i32 { v * self.k }
+}
+
+impl Pick for K { }
+
+func through_dyn(s: &dyn Scale) -> i32 {
+    val f = s.by >> double
+    f(5)
+}
+
+func through_bound<S: Scale + Pick>(s: &S) -> i32 {
+    val f = s.by >> double
+    val g = s.twice >> double
+    val h = s.pick::<i32> >> double
+    f(1) + g(1) + h(1)
+}
+
+func main() -> i32 {
+    val k = K { k: 3 }
+    val d = k.twice >> double
+    through_dyn(&k) + through_bound(&k) + d(1)
+}
+"#,
+    );
+    assert_eq!(exit, 30 + 20 + 12);
+}
+
 #[test]
 fn an_instantiated_method_is_not_a_value_on_its_own() {
     let error = check_error(
@@ -292,7 +378,7 @@ func main() -> i32 {
 "#,
     );
     assert!(
-        error.contains("only a generic function's instance"),
+        error.contains("an instantiated method `x.m::<T>` is a bound method"),
         "{error}"
     );
 }

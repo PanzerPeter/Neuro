@@ -249,6 +249,104 @@ func main() -> i32 {
     assert_eq!(run("unsized.nr", source), 14);
 }
 
+/// A parameter the turbofish, or an earlier argument, has bound to a concrete type takes its
+/// argument as a non-generic call does, unsizing included: `&thing` to `&dyn Named`, `&arr` to
+/// `&[i32]`, through a free function, an associated function and a generic method.
+#[test]
+fn an_explicit_type_argument_coerces_its_argument() {
+    let source = r#"
+trait Named {
+    func id(&self) -> i32
+}
+
+struct Thing {
+    n: i32
+}
+
+impl Named for Thing {
+    func id(&self) -> i32 {
+        self.n
+    }
+}
+
+struct Cell<T> {
+    v: T
+}
+
+impl<T> Cell<T> {
+    func new(v: T) -> Cell<T> {
+        Cell { v: v }
+    }
+}
+
+struct Keeper {
+    k: i32
+}
+
+impl Keeper {
+    func keep<U: Copy>(&self, u: U) -> U {
+        u
+    }
+}
+
+func twice<T: Clone>(v: T) -> (T, T) {
+    (v.clone(), v.clone())
+}
+
+func both<T: Copy>(a: T, b: T) -> (T, T) {
+    (a, b)
+}
+
+func main() -> i32 {
+    val thing = Thing { n: 3 }
+    val other = Thing { n: 20 }
+    val arr = [1, 2, 3]
+    val pair = twice::<&dyn Named>(&thing)
+    val slice = twice::<&[i32]>(&arr)
+    val object: &dyn Named = &thing
+    val mixed = both(object, &other)
+    val cell = Cell::new::<&dyn Named>(&other)
+    val keeper = Keeper { k: 0 }
+    val kept = keeper.keep::<&[i32]>(&arr)
+    // 3 + 3 + 3 + 3 + 20 + 20 + 3
+    pair.0.id() + pair.1.id() + slice.1[2] + mixed.0.id() + mixed.1.id() + cell.v.id()
+        + kept.len() as i32
+}
+"#;
+    assert_eq!(run("turbofish_coercion.nr", source), 55);
+}
+
+/// The coercion is the non-generic call's, no wider: no trait object of a type that does not
+/// implement the trait, and no numeric widening.
+#[test]
+fn an_explicit_type_argument_coerces_no_further_than_a_call() {
+    let errors = compile_rejected(
+        "turbofish_no_coercion.nr",
+        r#"
+trait Named {
+    func id(&self) -> i32
+}
+
+func first<T: Copy>(x: T) -> T {
+    x
+}
+
+func main() -> i32 {
+    val n = 5
+    val a = first::<&dyn Named>(&n)
+    val x: i32 = 3
+    val b = first::<i64>(x)
+    0
+}
+"#,
+    );
+    assert!(
+        errors.contains("expected &dyn Named, found &i32"),
+        "{errors}"
+    );
+    assert!(errors.contains("expected i64, found i32"), "{errors}");
+}
+
 #[test]
 fn an_owned_argument_still_reaches_its_own_clone() {
     let source = r#"

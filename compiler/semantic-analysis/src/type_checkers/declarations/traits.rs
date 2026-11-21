@@ -46,18 +46,10 @@ impl TypeChecker {
                 collect_self_assoc(ty, &mut named);
                 names_self_type |= names_self(ty);
             }
-            for assoc in &named {
-                if !declared.contains(&assoc.name) {
-                    self.record_error(TypeError::UnknownAssociatedType {
-                        trait_name: def.name.name.clone(),
-                        name: assoc.name.clone(),
-                        span: assoc.span,
-                    });
-                }
-            }
             let (params, ret) = if declares_generics(m) {
-                // An undeclared `Self::X` is reported above, so it is held open like the
-                // declared ones rather than reported a second time as unbound.
+                // A `Self::X` declared by no trait is reported by
+                // `check_trait_assoc_names` once supertraits are known, so it is held open
+                // like the declared ones rather than reported a second time as unbound.
                 let mut open: Vec<String> = declared.clone();
                 open.extend(named.iter().map(|a| a.name.clone()));
                 let sig = self.open_trait_signature(m, &open);
@@ -103,6 +95,78 @@ impl TypeChecker {
                 supertraits: Vec::new(),
             },
         );
+    }
+
+    /// Record each trait's supertraits by name alone, so a closure (and with it what
+    /// associated types a trait inherits) is known before any `Trait<Assoc = T>` binding in
+    /// a supertrait list is checked against it.
+    pub(crate) fn preregister_supertraits(&mut self, items: &[Item]) {
+        for item in items {
+            let Item::Trait(def) = item else { continue };
+            let names: Vec<BoundInfo> = def
+                .supertraits
+                .iter()
+                .map(|bound| BoundInfo {
+                    trait_name: bound.trait_name.name.clone(),
+                    assoc: Vec::new(),
+                })
+                .collect();
+            if let Some(info) = self.traits.get_mut(&def.name.name) {
+                info.supertraits = names;
+            }
+        }
+    }
+
+    /// Report each `Self::X` in a trait's method signatures that neither the trait nor
+    /// one of its supertraits declares. Runs once every supertrait list is resolved.
+    pub(crate) fn check_trait_assoc_names(&mut self, items: &[Item]) {
+        for item in items {
+            let Item::Trait(def) = item else { continue };
+            let visible = self.visible_assoc(&def.name.name);
+            let mut named = Vec::new();
+            for m in &def.methods {
+                for ty in signature_types(m) {
+                    collect_self_assoc(ty, &mut named);
+                }
+            }
+            for assoc in named {
+                if !visible.contains(&assoc.name) {
+                    self.record_error(TypeError::UnknownAssociatedType {
+                        trait_name: def.name.name.clone(),
+                        name: assoc.name.clone(),
+                        span: assoc.span,
+                    });
+                }
+            }
+        }
+    }
+
+    /// The associated types `trait_name` can name: its own, then each one a supertrait
+    /// declares that no other trait in its closure also declares. A subtrait's own
+    /// declaration of a name shadows a supertrait's, and two supertraits declaring one
+    /// name leave it to neither.
+    pub(crate) fn visible_assoc(&self, trait_name: &str) -> Vec<String> {
+        let mut visible = self
+            .traits
+            .get(trait_name)
+            .map(|info| info.assoc_types.clone())
+            .unwrap_or_default();
+        let own = visible.len();
+        let inherited: Vec<&String> = self
+            .trait_closure(trait_name)
+            .iter()
+            .skip(1)
+            .filter_map(|sup| self.traits.get(sup))
+            .flat_map(|info| &info.assoc_types)
+            .collect();
+        for name in &inherited {
+            if !visible[..own].contains(name)
+                && inherited.iter().filter(|n| n == &name).count() == 1
+            {
+                visible.push((*name).clone());
+            }
+        }
+        visible
     }
 
     /// Resolve a trait's `: A + B` list. A supertrait is a declared trait or one the
@@ -219,19 +283,30 @@ impl TypeChecker {
             subst.insert(SELF_TYPE_NAME.to_string(), Type::Generic(param.to_string()));
             // The bound may leave one of the subtrait's own associated types open, and the
             // type behind a binding through it is then not known here.
-            let declared = self
-                .traits
-                .get(&sub.trait_name)
-                .map(|info| info.assoc_types.clone())
-                .unwrap_or_default();
-            for name in declared {
+            let declared = self.visible_assoc(&sub.trait_name);
+            for name in &declared {
                 subst
                     .entry(format!("{SELF_ASSOC_PREFIX}{name}"))
                     .or_insert(Type::Unknown);
             }
+            let own = self
+                .traits
+                .get(&sub.trait_name)
+                .map(|info| info.assoc_types.clone())
+                .unwrap_or_default();
             for mut sup in self.supertraits_of(&sub.trait_name) {
                 for (_, ty) in &mut sup.assoc {
                     *ty = self.substitute_generic(ty, &subst, span);
+                }
+                // `T: Sub<Item = u32>` with `Item` inherited constrains the supertrait the
+                // name comes from: the binding passes down to the supertrait's bound.
+                for name in self.visible_assoc(&sup.trait_name) {
+                    if own.contains(&name) || sup.assoc.iter().any(|(n, _)| *n == name) {
+                        continue;
+                    }
+                    if let Some(pair) = sub.assoc.iter().find(|(n, _)| *n == name) {
+                        sup.assoc.push(pair.clone());
+                    }
                 }
                 match bounds.iter_mut().find(|b| b.trait_name == sup.trait_name) {
                     Some(seen) => {
@@ -242,6 +317,28 @@ impl TypeChecker {
                         }
                     }
                     None => bounds.push(sup),
+                }
+            }
+        }
+        // And back up: a subtrait's bound answers an inherited name with what the bound on
+        // the declaring supertrait says, however that one learned it.
+        for i in 0..bounds.len() {
+            for name in self.visible_assoc(&bounds[i].trait_name) {
+                if bounds[i].assoc.iter().any(|(n, _)| *n == name) {
+                    continue;
+                }
+                let found = bounds.iter().find_map(|owner| {
+                    let declares = self
+                        .traits
+                        .get(&owner.trait_name)
+                        .is_some_and(|info| info.assoc_types.contains(&name));
+                    if !declares || owner.trait_name == bounds[i].trait_name {
+                        return None;
+                    }
+                    owner.assoc.iter().find(|(n, _)| *n == name).cloned()
+                });
+                if let Some(pair) = found {
+                    bounds[i].assoc.push(pair);
                 }
             }
         }
@@ -343,6 +440,7 @@ impl TypeChecker {
         // Compare each impl method against its trait declaration. Collect diagnostics
         // first so the immutable borrow of `self.traits` is released before recording.
         let mut errors: Vec<TypeError> = Vec::new();
+        let visible = self.visible_assoc(trait_name);
 
         // The associated types: every declared one bound exactly once, and nothing bound
         // that was never declared. The bindings themselves are already in scope
@@ -376,7 +474,7 @@ impl TypeChecker {
                 });
                 continue;
             };
-            if let Some(detail) = self.trait_signature_mismatch(method, sig, &info.assoc_types) {
+            if let Some(detail) = self.trait_signature_mismatch(method, sig, &visible) {
                 errors.push(TypeError::TraitMethodSignatureMismatch {
                     trait_name: trait_name.to_string(),
                     type_name: struct_name.to_string(),
@@ -405,8 +503,7 @@ impl TypeChecker {
         // The bindings are in scope as `self_assoc` for exactly this block; recording
         // them keyed by the pair is what lets a `Trait<Assoc = T>` bound elsewhere ask
         // what this impl chose.
-        let bindings: HashMap<String, Type> = info
-            .assoc_types
+        let bindings: HashMap<String, Type> = visible
             .iter()
             .filter_map(|name| {
                 self.self_assoc

@@ -358,15 +358,25 @@ impl Lowerer {
             ),
 
             Expr::Instance {
-                callee, type_args, ..
+                callee,
+                type_args,
+                span,
             } => {
-                let Expr::Identifier(ident) = callee.as_ref() else {
-                    return Err(LoweringError::Malformed {
-                        detail: "an instantiated method or associated function as a value"
-                            .to_string(),
-                    });
+                let params = match callee.as_ref() {
+                    Expr::Identifier(ident) => {
+                        self.generic_instance_signature(&ident.name, type_args)?.0
+                    }
+                    Expr::Path {
+                        type_name, member, ..
+                    } => {
+                        self.assoc_instance_params(&type_name.name, &member.name, type_args, *span)?
+                    }
+                    _ => {
+                        return Err(LoweringError::Malformed {
+                            detail: "an instantiated method as a value".to_string(),
+                        });
+                    }
                 };
-                let (params, _) = self.generic_instance_signature(&ident.name, type_args)?;
                 self.lower_function_value(callee, type_args, params)
             }
 

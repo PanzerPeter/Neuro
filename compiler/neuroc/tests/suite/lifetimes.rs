@@ -166,3 +166,77 @@ func main() -> i32 {
         .expect("should compile and run");
     assert_eq!(exit, 9);
 }
+
+/// A use of a type names all of its lifetime arguments or none: `View<'a>`, `View<'_>` and
+/// `View` are the same type, and so is a type alias given the lifetime. Counted, then erased.
+#[test]
+fn every_lifetime_argument_or_none_compiles() {
+    let source = r#"
+struct View<'a> { r: &'a i32 }
+enum Pick<'a, T> { Borrowed(&'a T), Owned(T) }
+type V = View
+impl<'a> View<'a> {
+    func get(&self) -> i32 { *self.r }
+}
+func named<'a>(v: View<'a>) -> i32 { v.get() }
+func anonymous(v: View<'_>) -> i32 { v.get() }
+func mixed<'a>(p: Pick<'a, i32>) -> i32 {
+    match p {
+        Pick::Borrowed(r) => *r,
+        Pick::Owned(n) => n
+    }
+}
+func aliased<'a>(v: V<'a>) -> i32 { v.get() }
+func elided(v: View) -> i32 { v.get() }
+func main() -> i32 {
+    val x = 4
+    val w: View<'_> = View { r: &x }
+    return named(View { r: &x }) + anonymous(w) + mixed(Pick::Owned(1))
+        + elided(View { r: &x }) + aliased(View { r: &x })
+}
+"#;
+    assert_eq!(
+        crate::compile_harness::run("lifetime_counts.nr", source),
+        17
+    );
+}
+
+/// A written lifetime-argument list is as long as the declaration's, wherever the type is named:
+/// a parameter, an annotation, an `impl` header. A type that declares none takes none.
+#[test]
+fn a_wrong_lifetime_argument_count_is_refused() {
+    let decls = "struct View<'a> { r: &'a i32 }\nenum Pick<'a, T> { Borrowed(&'a T), Owned(T) }\n";
+    for (body, expected) in [
+        (
+            "func f<'a>(v: View<'a, 'a>) -> i32 { 0 }",
+            "`View` declares 1 lifetime parameter(s), but 2 lifetime argument(s) are written",
+        ),
+        (
+            "func f<'a, 'b>(p: Pick<'a, 'b, i32>) -> i32 { 0 }",
+            "`Pick` declares 1 lifetime parameter(s), but 2",
+        ),
+        (
+            "impl<'a> View<'a, 'a> {}",
+            "`View` declares 1 lifetime parameter(s), but 2",
+        ),
+        (
+            "func f<'a>(x: i32<'a>) -> i32 { x }",
+            "`i32` declares no lifetime parameter, so it takes no lifetime argument",
+        ),
+        (
+            "func f<'a, T>(t: T<'a>) -> i32 { 0 }",
+            "`T` declares no lifetime parameter",
+        ),
+        (
+            "func f<'a>(v: Vec<'a, i32>) -> i32 { 0 }",
+            "`Vec` declares no lifetime parameter",
+        ),
+        (
+            "func f() -> i32 {\n    val x = 1\n    val w: View<'_, '_> = View { r: &x }\n    0\n}",
+            "`View` declares 1 lifetime parameter(s), but 2",
+        ),
+    ] {
+        let source = format!("{decls}{body}\nfunc main() -> i32 {{ 0 }}\n");
+        crate::compile_harness::assert_check_error("lifetime_count.nr", &source, expected);
+    }
+}

@@ -14,7 +14,7 @@ mod places;
 mod returns;
 pub(crate) use returns::tail_expr;
 
-fn peel_parens(expr: &Expr) -> &Expr {
+pub(crate) fn peel_parens(expr: &Expr) -> &Expr {
     match expr {
         Expr::Paren(inner, _) => peel_parens(inner),
         other => other,
@@ -86,6 +86,21 @@ struct Carried {
     closures: Vec<shared_types::Span>,
     /// Each value `loop` in the value, with whatever borrows its `break`s carry out.
     loops: Vec<shared_types::Span>,
+    /// Each method call's receiver root, with the callee. The result holds what the
+    /// receiver holds (`live`), and a borrow of the receiver itself when the method's
+    /// signature says so, which only a reader with the signatures can tell.
+    receivers: Vec<(String, Expr)>,
+}
+
+impl Carried {
+    /// Count every method result as borrowing its receiver, the reading that needs no
+    /// signature.
+    fn receivers_as_places(mut self) -> Self {
+        let receivers = std::mem::take(&mut self.receivers);
+        self.places
+            .extend(receivers.into_iter().map(|(root, _)| (root, false)));
+        self
+    }
 }
 
 /// What `value`, of type `ty`, carries into a binding that holds it. A call returning a
@@ -203,7 +218,7 @@ fn tail_borrow_targets<'a>(
             if let Expr::FieldAccess { object, .. } = callee
                 && let Some(root) = TypeChecker::place_root_name(object)
             {
-                carried.places.push((root.clone(), false));
+                carried.receivers.push((root.clone(), callee.clone()));
                 carried.live.push(root);
             }
         }
@@ -295,6 +310,14 @@ impl TypeChecker {
         }
     }
 
+    /// Whether the result of the method call `callee` borrows its receiver: a method of a
+    /// declared type whose return type takes an elided lifetime from `self`. Any other
+    /// callee (a builtin method, a trait object's, a type parameter's) is assumed to.
+    fn result_borrows_receiver(&self, callee: &Expr) -> bool {
+        self.callee_key(callee)
+            .is_none_or(|key| self.self_borrowing_methods.contains(&key))
+    }
+
     /// Make `holder` hold the borrows `value`, of type `ty`, carries into it: a struct,
     /// enum, tuple or array built around a borrow, a call's result, a block, `if` or
     /// `match` value, a copied binding, or a closure. Each is a way for a borrow to
@@ -305,7 +328,14 @@ impl TypeChecker {
         if !self.may_hold_borrow(ty) {
             return;
         }
-        let carried = carried_by(value, ty);
+        let mut carried = carried_by(value, ty);
+        // `it.next()` yields what `it` holds, a borrow of its container, and borrows `it`
+        // itself only when the method's return type takes an elided lifetime from `self`.
+        for (root, callee) in std::mem::take(&mut carried.receivers) {
+            if self.result_borrows_receiver(&callee) {
+                carried.places.push((root, false));
+            }
+        }
         let from_loops = self.loop_borrows(&carried.loops);
         for (place, exclusive) in carried.places.into_iter().chain(from_loops) {
             self.symbols.attach_borrow(holder, &place, exclusive);
@@ -354,6 +384,7 @@ impl TypeChecker {
         };
         let mut carried = Carried::default();
         tail_borrow_targets(value, &mut Vec::new(), &mut Vec::new(), &mut carried);
+        let mut carried = carried.receivers_as_places();
         let from_loops = self.loop_borrows(&carried.loops);
         carried.places.extend(from_loops);
         // A place reached through a reference is a reborrow of what the reference points
@@ -464,7 +495,7 @@ impl TypeChecker {
             return;
         };
         self.refuse_dying_borrows(value, ty, floor);
-        let carried = carried_by(value, ty);
+        let carried = carried_by(value, ty).receivers_as_places();
         let mut borrows = carried.places;
         borrows.extend(self.loop_borrows(&carried.loops));
         for span in &carried.closures {
@@ -486,28 +517,6 @@ impl TypeChecker {
         });
         if let Some(ctx) = self.loop_target_mut(label) {
             ctx.break_borrows.extend(borrows);
-        }
-    }
-
-    /// Refuse a value leaving through a `break` while it holds a function value that
-    /// borrows anything: the loop's value is not walked, so its binding would hold nothing.
-    pub(crate) fn refuse_borrowing_break(&mut self, value: &Expr, ty: &Type) {
-        if !self.holds_function_value(ty) {
-            return;
-        }
-        let mut carried = Carried::default();
-        tail_borrow_targets(value, &mut Vec::new(), &mut Vec::new(), &mut carried);
-        let borrows = !carried.places.is_empty()
-            || carried
-                .closures
-                .iter()
-                .any(|span| self.borrowing_closures.contains_key(span))
-            || carried
-                .live
-                .iter()
-                .any(|name| self.symbols.borrow_count(name) > 0);
-        if borrows {
-            self.record_error(TypeError::BorrowingClosureInBreak { span: value.span() });
         }
     }
 
@@ -708,6 +717,9 @@ impl TypeChecker {
                 // and the two want opposite treatment below, so record which one it was.
                 let errors_before = self.errors.len();
                 let init_ty = if let Some(init_expr) = init {
+                    if ty.is_some() {
+                        self.written_type_sites.insert(init_expr.span());
+                    }
                     self.function_value_slot = function_value_position(init_expr);
                     let init_ty = self.check_expr(init_expr, declared_ty.as_ref());
                     self.function_value_slot = None;
@@ -834,6 +846,9 @@ impl TypeChecker {
                         self.hold_grad_call_borrows(&holder, &name.name, init_expr);
                     }
                 }
+                if ty.is_some() {
+                    self.symbols.mark_annotated(&holder);
+                }
                 self.symbols.commit_pending(&name.name);
 
                 Some(())
@@ -852,6 +867,11 @@ impl TypeChecker {
                 }
                 // Cloned to release the borrow on `self` before `check_expr`.
                 let expected_return = self.current_function_return_type.clone();
+                if let Some(expr) = value
+                    && self.return_type_written
+                {
+                    self.written_type_sites.insert(expr.span());
+                }
                 let return_ty = if let Some(expr) = value {
                     self.check_expr(expr, expected_return.as_ref())
                         .unwrap_or(Type::Unknown)
@@ -1014,7 +1034,8 @@ impl TypeChecker {
                     Type::Unknown => None,
                     ref known => Some(known.clone()),
                 };
-                let element_ty = self.check_loop_adapters(element_ty, adapters);
+                let walked: Vec<&Expr> = [start, end].into_iter().chain(step.as_deref()).collect();
+                let element_ty = self.check_loop_adapters(element_ty, adapters, &walked);
 
                 // As with `while`, body moves are not guaranteed straight-line;
                 // restore the move state after the loop. A `for` yields unit,
@@ -1112,7 +1133,7 @@ impl TypeChecker {
                     },
                 };
 
-                let element_ty = self.check_loop_adapters(element_ty, adapters);
+                let element_ty = self.check_loop_adapters(element_ty, adapters, &[iterable]);
                 // The item is bound even when the head failed to type, which has reported
                 // its own error: an unbound name would turn every use in the body into a
                 // second, misleading `UndefinedVariable`. A wrong shape is reported once, here.
@@ -1215,7 +1236,6 @@ impl TypeChecker {
                         &value_ty,
                         *span,
                     );
-                    self.refuse_borrowing_break(value_expr, &value_ty);
                     self.carry_break_borrows(label.as_ref(), value_expr, &value_ty);
                     if !matches!(value_ty, Type::Unknown) {
                         self.record_break_value(label.as_ref(), value_ty, *span);

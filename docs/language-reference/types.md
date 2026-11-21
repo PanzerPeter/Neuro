@@ -617,7 +617,6 @@ The one requirement is that equal keys hash equally. The integers, `bool`, `char
 ### Current limits
 
 - An element may not hold a reference or a function value.
-- A `string` does not meet a `Comparable` bound, so a generic `BTreeMap<K, V>` with `K: Comparable` cannot be instantiated at `string`, though `BTreeMap<string, V>` written directly works.
 - `Vec<T>` does not go through the [`Iterator` protocol](control-flow.md#the-iteration-protocol). `for x in v` lowers to a counted loop, as `for x in arr` does, and so does `for (i, x) in v.enumerate()`. The protocol is what a user-defined type implements to stand in a `for` head.
 
 ## Type Annotations and Inference

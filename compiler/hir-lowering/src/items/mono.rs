@@ -143,6 +143,9 @@ impl Lowerer {
         for imp in &impls {
             let impl_subst = self.build_impl_subst(imp, &base_generics, subst);
             let impl_subst = self.with_impl_assoc(imp, impl_subst)?;
+            let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
+            self.record_trait_assoc(imp, mangled);
+            self.type_subst = saved_ty;
             for method in &imp.methods {
                 if method.self_param == Some(ast_types::SelfParam::RefMut) {
                     self.mut_self_method_names.insert(method.name.name.clone());
@@ -432,7 +435,7 @@ impl Lowerer {
                 HirType::Newtype { inner, .. } => self.implements_derivable(inner, trait_name),
                 _ => integer || float || text || derives(&self.partial_eq_structs),
             },
-            COMPARABLE_TRAIT => integer || matches!(ty, HirType::Char),
+            COMPARABLE_TRAIT => integer || matches!(ty, HirType::Char | HirType::String),
             NUMERIC_TRAIT => integer || float,
             INTEGER_TRAIT => integer,
             FLOAT_TRAIT => float,
@@ -613,6 +616,7 @@ impl Lowerer {
                 &mut const_subst,
             );
         }
+        self.infer_from_bounds(&def.generics, &mut subst, &mut const_subst);
         let unbound = def
             .generics
             .iter()
@@ -754,7 +758,12 @@ impl Lowerer {
             self.define(param.name.clone(), param.ty.clone());
         }
         let mut body = self.bind_parameter_extents(&template.params, template.span)?;
-        body.extend(self.lower_function_body(&template.body, &return_type, target)?);
+        body.extend(self.lower_function_body(
+            &template.body,
+            &return_type,
+            template.return_type.as_ref(),
+            target,
+        )?);
         self.pop_scope();
 
         self.type_subst = saved_ty;

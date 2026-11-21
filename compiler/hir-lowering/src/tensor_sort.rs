@@ -14,7 +14,7 @@ use neuro_hir::{AxisNames, HirExpr, HirExprKind, HirSortKind, HirType};
 use shared_types::{Literal, Span};
 
 use crate::tensor_shape::const_integer;
-use crate::{Lowerer, LoweringError, malformed};
+use crate::{Lowerer, LoweringError, instance_check, malformed};
 
 pub(crate) const SORT_METHOD: &str = "sort";
 pub(crate) const ARGSORT_METHOD: &str = "argsort";
@@ -60,6 +60,9 @@ impl Lowerer {
             return self.lower_topk(receiver, *element, &shape, &names, args, span);
         }
         let axis = resolve_axis(shape.len(), &names, args.first(), method)?;
+        if shape[axis] == Some(0) {
+            return Err(empty_axis(method, span));
+        }
         let descending = match args.get(1) {
             Some(entry) => const_boolean(entry).ok_or_else(|| {
                 malformed(format!(
@@ -105,6 +108,21 @@ impl Lowerer {
             .and_then(|value| usize::try_from(value).ok())
             .ok_or_else(|| malformed("`.topk` reached lowering with a non-constant `k:`".into()))?;
         let axis = resolve_axis(shape.len(), names, args.get(1), TOPK_METHOD)?;
+        // The checker refuses both over a concrete extent; over an extent parameter or a
+        // splice the extent first exists here, at the instance.
+        match shape[axis] {
+            Some(0) => return Err(empty_axis(TOPK_METHOD, span)),
+            Some(extent) if k > extent => {
+                return Err(instance_check(
+                    format!(
+                        "`.topk(k: {k})` selects more elements than the sorted axis holds at \
+                         this instance ({extent}); pick `k` no larger than the axis"
+                    ),
+                    span,
+                ));
+            }
+            _ => {}
+        }
 
         // The selected axis holds `k` elements whatever its extent was; the others keep theirs.
         let mut selected = shape.to_vec();
@@ -179,4 +197,16 @@ fn const_boolean(expr: &Expr) -> Option<bool> {
         Expr::Paren(inner, _) => const_boolean(inner),
         _ => None,
     }
+}
+
+/// A selection over an empty axis at an instance. The checker refuses one over a concrete
+/// extent; over an extent parameter or a splice the axis length first exists here.
+fn empty_axis(method: &str, span: Span) -> LoweringError {
+    instance_check(
+        format!(
+            "`.{method}` orders an empty axis at this instance, which has no ordering; \
+             order a tensor whose sorted axis is non-empty"
+        ),
+        span,
+    )
 }

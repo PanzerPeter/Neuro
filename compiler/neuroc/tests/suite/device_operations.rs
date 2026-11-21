@@ -987,3 +987,51 @@ func main() -> i32 {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// An operation whose result has a run-time extent runs on its operand's GPU: an operator,
+/// a slice, a contraction, elementwise math, an axis reduction, a sort and an argsort, each
+/// sized from the operand and written straight into a device buffer. Each agrees with the
+/// same program on the host.
+#[cfg(unix)]
+#[test]
+fn a_dynamic_result_is_computed_on_the_device() {
+    const BODY: &str = r#"
+func main() -> i32 {
+    mut x = Tensor::<f32, [?B, 4]>::zeros(dims: [3])
+    for i in 0..3 {
+        for j in 0..4 {
+            x[i, j] = ((i * 7 + j * 5) % 11) as f32 * 0.25f32
+        }
+    }
+    val w: Tensor<f32, [4, 2]> = [[1.0, 2.0], [0.5, -1.0], [3.0, 0.0], [-2.0, 1.5]]
+    val g = x.DEVICE
+    val wg = w.DEVICE
+    val sum = (g.clone() + g.clone()).HOST
+    val column = g[.., 1].HOST
+    val product = (&g @ &wg).HOST
+    val grown = g.exp().HOST
+    val rows = g.max(axis: 1).HOST
+    val sorted = g.sort(axis: 0).HOST
+    val order = g.argsort(axis: 1).HOST
+    println("{sum.sum()} {column.sum()} {product.sum()} {grown.sum()} {rows.sum()} {sorted[0, 2]} {order[1, 0]}")
+    0
+}
+"#;
+    let device = BODY
+        .replace("DEVICE", "to(Device::GPU(0))")
+        .replace("HOST", "to(Device::CPU)");
+    let host = BODY.replace(".DEVICE", ".clone()").replace(".HOST", "");
+    let test = CompileTest::new();
+    let on_host = run(&test, "dynamic_host.nr", &host, false);
+    let on_device = run(&test, "dynamic_device.nr", &device, false);
+    if without_gpu(&on_device) {
+        return;
+    }
+    let expected = String::from_utf8_lossy(&on_host.stdout).into_owned();
+    assert!(
+        !expected.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&on_host.stderr)
+    );
+    assert_ran(&on_device, 0, &expected);
+}

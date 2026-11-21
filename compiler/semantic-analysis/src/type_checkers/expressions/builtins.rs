@@ -94,11 +94,13 @@ impl TypeChecker {
         // Every method below that counts or picks axes needs a rank, and a spliced shape
         // has none until it is instantiated. What is valid at every rank goes on to its
         // own check: a reshape or a whole flatten only counts elements, a traversal
-        // keeps the shape it walks, and a reduction finds its axis among the written ones.
+        // keeps the shape it walks, and a reduction or a sort finds its axis among the
+        // written ones.
         let rank_free = method == RESHAPE_METHOD
             || (method == FLATTEN_METHOD && args.is_empty())
             || is_reduce_method(method)
-            || is_apply_method(method);
+            || is_apply_method(method)
+            || is_sort_method(method);
         if let Type::Tensor { shape, .. } = recv.referent()
             && !rank_free
             && (is_shape_method(method)
@@ -365,7 +367,7 @@ impl TypeChecker {
             // is recorded. Unlike a reduction's axis, every argument here is a value.
             (Type::Tensor { element, shape }, m) if is_apply_method(m) => {
                 let (element, shape) = (element.clone(), shape.clone());
-                Some(self.check_tensor_apply(&element, &shape, m, args, call_span))
+                Some(self.check_tensor_apply(&element, &shape, m, object, args, call_span))
             }
             // The order-based selections read the receiver for the same reason the
             // reductions do: each allocates its own result and leaves the buffer it
@@ -737,17 +739,17 @@ impl TypeChecker {
             });
             return;
         }
-        if Self::is_bare_binding(object) {
-            if let Some((shared, exclusive)) = self.symbols.borrow_counts(&name)
-                && (shared > 0 || exclusive > 0)
-            {
-                self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
-                    name: name.clone(),
-                    span,
-                });
-            }
-            self.symbols.add_transient_borrow(&name, true);
+        // A borrow of a part borrows the whole binding, so `b.v.push(x)` is refused while
+        // anything borrows `b`, as `v.push(x)` is while anything borrows `v`.
+        if let Some((shared, exclusive)) = self.symbols.borrow_counts(&name)
+            && (shared > 0 || exclusive > 0)
+        {
+            self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
+                name: name.clone(),
+                span,
+            });
         }
+        self.symbols.add_transient_borrow(&name, true);
     }
 
     /// Type `.to_checked::<T>()`: exactly one turbofish type, an integer or a `T: Integer`,

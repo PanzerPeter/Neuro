@@ -10,6 +10,107 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.57.3] - 2026-11-21
+
+### Added
+
+- `neuroc test --std` runs the standard library's own `@test` functions, which a program's
+  `neuroc test` leaves out, and the suite runs it. `std::testing` carries the first of them.
+
+### Changed
+
+- `.mean()` on an integer tensor is `sum / count` in the element type, truncating toward zero as
+  integer `/` does, with the sum under the overflow check of `+`. It was refused.
+- `string` implements `Comparable` by byte order, and `<`, `>`, `<=` and `>=` compare two strings.
+  A generic body bounded by `Comparable`, including one building a `BTreeMap<K, V>`, instantiates
+  at `string`.
+- `std::prelude::Tensor::<f32, [2]>::zeros()` parses, as the bare `Tensor::<...>::` constructor
+  spelling does, including in a file that opts out of the prelude.
+- An alias of `Tensor` (`import std::prelude::{Tensor as T}`) reads every shape the bare word
+  does: `T<f32, S>`, `T<f32, [N]>`, `T<f32, [N + 1]>`, and the constructor spelling
+  `T::<f32, [2]>::zeros()`.
+- A turbofish after a type's name other than a tensor's (`Point::<i32>::new()`) is refused with a
+  diagnostic that points to the function's turbofish (`Point::new::<i32>()`).
+- A type's lifetime arguments are counted against its declaration: `View<'a, 'b>` for a struct
+  declaring one lifetime, or `i32<'a>`, is refused, in a parameter, an annotation and an `impl`
+  header. A lifetime argument after a type argument (`Pick<i32, 'a>`) is a parse error.
+- A generic call's argument coerces to its parameter once the turbofish, or an earlier argument,
+  has bound every type parameter the parameter names: `twice::<&dyn Named>(&thing)` and
+  `twice::<&[i32]>(&array)` compile, as do the same calls to an associated function or a generic
+  method.
+- A trait's provided generic method may share a type-parameter name with a generic `impl` that
+  inherits it (`func f<T>` into `impl<T> Tr for C<T>`): the copy in the impl renames its own
+  parameter. It was refused.
+- A type parameter named only in a bound's associated-type constraint is inferred from the
+  argument's impl: `func hold<V, T: Src<Item = V>>(s: &T) -> V` called as `hold(&c)` reads `V`
+  from `c`'s `type Item`, through a chain of bounds, a generic impl, a method, and a parameter
+  passed through from an enclosing bound. It was `GenericParamNotInferable`.
+- A subtrait inherits its supertraits' associated types. Its signatures and default bodies may
+  write `Self::Item`, and a bound on it may constrain one (`T: Peekable<Item = u32>`), which also
+  types the supertrait's methods. The subtrait's impl takes the type from the same type's
+  supertrait impl, wherever that impl is written. Both forms were refused.
+- `.sort`, `.argsort` and `.topk` work in a shape-generic body: over an extent parameter or a
+  splice the result is typed from the shape as written, the sorted axis is a written one counted
+  from its own side, and an empty axis or `k` past the extent is reported at the instance. They
+  were refused.
+- A program whose shape-generic instances fail several shape checks (a reshape count, an empty
+  reduction or sort, `k` past an axis) reports every failing instance in one run, in source
+  order, rather than the first one alone.
+- A reversed or stepped range (`x[(0..2).rev()]`, `x[(0..4).step(2)]`) slices a dynamic axis:
+  its constant bounds give a static extent and its end is checked at run time, as a plain range's
+  is. It was refused.
+- A tensor constructor with no turbofish reads a bound `?B` from the type the program writes for
+  it: a `val` or `mut` annotation, the return type it returns under (by `return` or as a function's
+  or method's tail), and the annotation of the binding it is assigned to.
+  `val t: Tensor<f32, [?B, 2]> = Tensor::ones()` sizes `B` from its value; it was refused.
+- A tensor built inside a generic body over an unbounded type parameter that an instance makes
+  non-scalar (`mk("hi")`) is reported at the call that made the instance, with a note at the
+  tensor. It had no file or line.
+- A shared borrow of a plain string literal (`&"text"`) lives for the whole program, so it may be
+  bound (`val r = &"hello"`), stored in a field, or handed back by a generic `&T`
+  (`id(&"text")`). Both were refused as borrows of a temporary.
+- An item an iterator hands out borrows its container, not the iterator, so two results of
+  `next()` may be held at once: `val a = it.next()` then `val b = it.next()` over `.iter()`, a
+  map's `.keys()` or `.values()`, `.lines()`, `.split(sep)`, and a program's iterator whose result
+  names its `impl`'s lifetime. The second call was refused as a borrow of `it`. The prelude's
+  borrowing iterators now declare their lifetime (`Iter<'a, T>`); a use may still leave it out.
+- A method whose result names a lifetime the method declares itself (`func pick<'b>(&self, x:
+  &'b T) -> &'b T`) is taken to borrow its receiver, as an elided one is.
+- A `break` value may hold a function value that borrows: `val f = loop { break |x: i32| s.len() }`
+  compiles, and `f` holds what the closure borrows, as the loop's binding does for any other
+  `break` value. It was `BorrowingClosureInBreak`, which is removed.
+- A closure literal that writes through a borrow may be written straight into a built-in's
+  function argument: `v.map(|x| { count += 1; x * 2 })` in a `for` head, and a tensor's `.map`,
+  `.zip` and `.reduce`. Only a write to what the built-in walks (the
+  iterable, a range's bounds, a traversal's operand) is refused, as a borrow conflict. It had to
+  be bound with `mut` first.
+- An instantiated generic associated function is a function value, `val make = Cell::new::<i32>`
+  or `val pass = Wrap::pass::<u8>`, with a generic type's parameters ahead of the function's own
+  in the turbofish, and it may be the first stage of `>>`. So may an instantiated generic bound
+  method (`p.convert::<u8> >> f`). Both were refused; a bound method stays a value only as an
+  operand of `|>` or `>>`.
+- A bound method types a composition as its first stage wherever its call would find it: through
+  a `&dyn Trait`, through a type parameter's bound, and as a generic method at its instance
+  (`s.pick::<i32> >> f`). Each was `ComposeParamUntyped`.
+- An operation on a GPU tensor whose result has a run-time extent runs on the device: an
+  operator, a slice, a contraction, elementwise math, an axis reduction, a sort and the rest of
+  the `linalg` path. The body writes its result straight into the buffer the caller sized from
+  the operand, where it used to allocate its own and copy it out on the host, so a device operand
+  panicked with "this tensor lives on a GPU". Compound assignment and `.map` / `.zip` /
+  `.reduce` over a dynamic axis still run on the host only.
+- A method of a non-generic inherent `impl` may return `impl Trait`: `func make(&self) -> impl
+  Shape` and `func unit() -> impl Shape` take the type their body produces, as a function does,
+  in any source order. A `self` method's result keeps the receiver borrowed. It was
+  `ImplTraitNotAllowedHere`, which a trait's method, a generic impl's and a generic method still
+  are.
+
+### Fixed
+
+- A builtin mutating method on a field (`b.v.push(x)`, `b.m.insert(k, v)`) is refused while
+  anything borrows `b`, including a reader on the field in the same statement
+  (`match b.v.get(0) { ... b.v.push(2) ... }`), as the same calls on a binding are. They went
+  through, leaving the borrow pointing at storage the mutation could reallocate.
+
 ## [5.57.2] - 2026-11-20
 
 ### Fixed

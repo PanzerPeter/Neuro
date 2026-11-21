@@ -55,19 +55,9 @@ impl TypeChecker {
             });
             return Type::Unknown;
         }
-        // A dynamic axis is ordered at run time, with `k` checked there, so only an extent
-        // parameter or a splice has to be a number here.
-        if let Some(symbolic) = shape
-            .iter()
-            .find(|axis| !matches!(axis.extent, ArrayLen::Fixed(_) | ArrayLen::Dynamic(_)))
-        {
-            self.record_error(TypeError::TensorShapeCastSymbolicExtent {
-                method: method.to_string(),
-                name: symbolic.extent.to_string(),
-                span: call_span,
-            });
-            return Type::Unknown;
-        }
+        // An extent parameter, a splice or a dynamic axis has no number here: an empty
+        // sorted axis and `k` past its extent are then checked at the instance or at run
+        // time, and only a concrete extent is checked now.
         if shape.is_empty() {
             self.record_error(TypeError::TensorSortRankZero {
                 method: method.to_string(),
@@ -190,7 +180,11 @@ impl TypeChecker {
         call_span: Span,
     ) -> Option<usize> {
         let Some(entry) = entry else {
-            return Some(shape.len() - 1);
+            // The last axis, which is `axis: -1`, and around a splice the same rule.
+            let last = shape.len() - 1;
+            return self
+                .axis_clear_of_splice(shape, -1, last, method, call_span)
+                .then_some(last);
         };
         if let Expr::Identifier(ident) = entry {
             let found = shape
@@ -217,14 +211,16 @@ impl TypeChecker {
         let rank = i128::try_from(shape.len()).ok()?;
         let resolved = if value < 0 { value + rank } else { value };
         let axis = usize::try_from(resolved).ok().filter(|a| *a < shape.len());
-        if axis.is_none() {
+        let Some(found) = axis else {
             self.record_error(TypeError::TensorAxisOutOfRange {
                 axis: value.unsigned_abs() as usize,
                 rank: shape.len(),
                 span: call_span,
             });
-        }
-        axis
+            return None;
+        };
+        self.axis_clear_of_splice(shape, value, found, method, entry.span())
+            .then_some(found)
     }
 
     /// A non-negative constant count written as an argument, which `k:` has to be: the

@@ -220,8 +220,8 @@ impl TypeChecker {
                 Some(Type::Bool)
             }
 
-            // Ordering operators: require numeric or `char` operands (this gives
-            // `char` a built-in total order), return bool.
+            // Ordering operators: require numeric, `char` or string operands (this gives
+            // `char` and `string` built-in total orders), return bool.
             BinaryOp::Less | BinaryOp::Greater | BinaryOp::LessEqual | BinaryOp::GreaterEqual => {
                 if !left_ty.is_compatible_with(&right_ty) {
                     self.record_error(TypeError::Mismatch {
@@ -236,7 +236,8 @@ impl TypeChecker {
                 // as a template, and each instance's real operator is found at lowering.
                 let ordered_param = matches!(left_ty.referent(), Type::Generic(_))
                     && self.satisfies_bound(left_ty.referent(), COMPARABLE_TRAIT);
-                if !self.is_arithmetic(&left_ty) && !left_ty.is_char() && !ordered_param {
+                let text = matches!(left_ty.referent(), Type::String);
+                if !self.is_arithmetic(&left_ty) && !left_ty.is_char() && !text && !ordered_param {
                     self.record_error(TypeError::InvalidBinaryOperator {
                         op: op.to_string(),
                         left: left_ty.clone(),

@@ -25,3 +25,20 @@ export func assert_close<T: Float>(actual: T, expected: T, tolerance: T) {
         panic("assert_close: {actual} is not within {tolerance} of {expected}")
     }
 }
+
+@test
+func is_close_measures_by_magnitude() {
+    assert(is_close(0.1, 0.10005, 0.001))
+    assert(is_close(1000.0, 1000.5, 0.001))
+    assert(!is_close(0.001, 0.002, 0.0001))
+}
+
+@test
+func is_close_treats_infinity_and_nan_by_identity() {
+    val inf = 1.0 / 0.0
+    val nan = inf - inf
+    assert(is_close(inf, inf, 0.0))
+    assert(!is_close(5.0, inf, 1.0))
+    assert(!is_close(-inf, inf, 1.0))
+    assert(!is_close(nan, nan, 1.0))
+}

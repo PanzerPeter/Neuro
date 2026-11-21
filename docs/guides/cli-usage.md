@@ -134,9 +134,11 @@ Compile a source file's `@test` functions and run each in its own process.
 
 ```bash
 neuroc test <file.nr> [options]
+neuroc test --std [options]
 ```
 
 **Options**:
+- `--std`: run the standard library's own tests instead of a program's. It takes no file.
 - `-O, --optimization <0-3>`: default `0`. Integer overflow fails a test at `-O0` and wraps above it. See [Optimization levels](#optimization-levels).
 - `--gpu-arch <CHIP>`: as for `compile`. See [Choosing a GPU](#choosing-a-gpu).
 

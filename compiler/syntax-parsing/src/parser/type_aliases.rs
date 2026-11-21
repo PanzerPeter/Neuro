@@ -201,6 +201,7 @@ fn impl_self_type(def: &ImplDef) -> Type {
             .cloned()
             .map(GenericArg::Type)
             .collect(),
+        lifetimes: Vec::new(),
         span: def.type_name.span,
     }
 }
@@ -316,7 +317,11 @@ fn type_names<'a>(ty: &'a Type, out: &mut Vec<&'a str>) {
                 type_names(element, out);
             }
         }
-        Type::Generic { args, .. } => {
+        Type::Generic { name, args, .. } => {
+            // Lifetimes applied to an alias substitute it, as the bare name does.
+            if args.is_empty() {
+                out.push(&name.name);
+            }
             for arg in args {
                 if let ast_types::GenericArg::Type(inner) = arg {
                     type_names(inner, out);
@@ -388,6 +393,38 @@ fn rewrite_type(ty: &mut Type, resolved: &HashMap<String, Type>) {
             for element in elements {
                 rewrite_type(element, resolved);
             }
+        }
+        // `V<'a>` for `type V = View`: the alias substitutes, and its target takes the lifetimes,
+        // which the checker then counts against the target's declaration.
+        Type::Generic {
+            name,
+            args,
+            lifetimes,
+            span,
+        } if args.is_empty() && resolved.contains_key(&name.name) => {
+            let (use_span, written) = (*span, std::mem::take(lifetimes));
+            let mut target = resolved[&name.name].clone();
+            match &mut target {
+                Type::Named(ident) => {
+                    target = Type::Generic {
+                        name: Identifier {
+                            name: ident.name.clone(),
+                            span: use_span,
+                        },
+                        args: Vec::new(),
+                        lifetimes: written,
+                        span: use_span,
+                    };
+                }
+                Type::Generic {
+                    lifetimes, span, ..
+                } if lifetimes.is_empty() => {
+                    *lifetimes = written;
+                    *span = use_span;
+                }
+                _ => {}
+            }
+            *ty = target;
         }
         Type::Generic { args, .. } => {
             for arg in args {
@@ -482,9 +519,9 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
             rewrite_type(&mut def.ty, resolved);
             rewrite_expr(&mut def.value, resolved);
         }
-        // A trait's method signatures may reference aliased types. Default bodies
-        // were already copied into the impls that omit them, which are rewritten on
-        // their own, and nothing downstream reads the trait's copy.
+        // A trait's method signatures may reference aliased types, and so may its default
+        // bodies: module resolution copies one into an impl in another module, or into an
+        // impl whose parameter names it shares, after this file's aliases are gone.
         Item::Trait(def) => {
             for (_, ty) in def
                 .supertraits
@@ -501,6 +538,9 @@ fn rewrite_item(item: &mut Item, resolved: &HashMap<String, Type>) {
                 }
                 if let Some(ret) = &mut method.return_type {
                     rewrite_type(ret, resolved);
+                }
+                if let Some(body) = &mut method.default_body {
+                    rewrite_block(body, resolved);
                 }
             }
         }

@@ -189,7 +189,7 @@ pub(crate) struct TypeChecker {
     /// How many lifetimes each struct and enum declares.
     pub(crate) declared_lifetimes: HashMap<String, usize>,
     /// The methods, by `functions` key, whose result borrows the receiver: an elided
-    /// lifetime in a `self` method's return type.
+    /// lifetime in a `self` method's return type, or one the method declares itself.
     pub(crate) self_borrowing_methods: HashSet<String>,
     /// The spans of the calls whose result borrows a temporary, which dies with its
     /// statement: `make().view()`.
@@ -208,6 +208,13 @@ pub(crate) struct TypeChecker {
     warnings: Vec<Warning>,
     /// Current function's return type (for validating return statements)
     current_function_return_type: Option<Type>,
+    /// Whether that return type is the one a function or method signature writes, which
+    /// lowering also reads; a closure's is not.
+    pub(crate) return_type_written: bool,
+    /// The spans of the expressions whose expected type is a type the program wrote and
+    /// lowering also sees: a `val` annotation, a function's return type, an annotated
+    /// binding assigned to. A tensor constructor there may be typed by a bound `?B`.
+    pub(crate) written_type_sites: HashSet<shared_types::Span>,
     /// Whether the body being checked is a `@kernel` function's, the only place
     /// `thread_id` and `block_id` exist.
     in_kernel: bool,
@@ -573,6 +580,8 @@ impl TypeChecker {
             errors: Vec::new(),
             warnings: Vec::new(),
             current_function_return_type: None,
+            return_type_written: false,
+            written_type_sites: HashSet::new(),
             in_kernel: false,
             kernel_outs: Vec::new(),
             kernel_out_scope: 0,
@@ -1216,18 +1225,26 @@ impl TypeChecker {
         }
         // Every trait is known now, which a supertrait's bindings are checked against and
         // an object-safety verdict reads through.
+        self.preregister_supertraits(items);
         for item in items {
             if let Item::Trait(def) = item {
                 self.register_supertraits(def);
             }
         }
         self.reject_supertrait_cycles(items);
+        self.check_trait_assoc_names(items);
         self.traits_registered = true;
         self.check_deferred_object_safety();
 
         // Pass 2: register impl method signatures (uses struct_defs from pass 1).
         for item in items {
             if let Item::Impl(def) = item {
+                // `impl<'a> View<'a>` names the type's lifetimes as a use of it does.
+                self.lifetime_args_match(
+                    &def.type_name.name,
+                    def.type_lifetimes.len(),
+                    def.type_name.span,
+                );
                 if def.generics.is_empty() && def.type_args.is_empty() {
                     let _ = self.register_impl(def);
                 } else {

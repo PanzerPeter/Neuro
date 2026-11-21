@@ -72,8 +72,9 @@ impl TypeChecker {
                 other => other.is_integer(),
             },
             PARTIAL_EQ_TRAIT => self.is_derived_comparable(ty),
-            // The built-in total orders. No float has one, because of `NaN`.
-            COMPARABLE_TRAIT => ty.is_integer() || ty.is_char(),
+            // The built-in total orders, a string's by its bytes. No float has one, because of
+            // `NaN`.
+            COMPARABLE_TRAIT => ty.is_integer() || ty.is_char() || matches!(ty, Type::String),
             family if is_numeric_family(family) => scalar_in_family(ty, family),
             _ => false,
         }

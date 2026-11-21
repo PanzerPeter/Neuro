@@ -429,6 +429,15 @@ fn apply_trait_defaults(
             if imp.methods.iter().any(|m| m.name.name == method.name.name) {
                 continue;
             }
+            // A provided `func f<T>` for an `impl<T>`: module resolution copies it with its
+            // `T` renamed, so the one name does not mean two parameters.
+            let clashes = method
+                .generics
+                .iter()
+                .any(|own| imp.generics.iter().any(|g| g.name.name == own.name.name));
+            if clashes {
+                continue;
+            }
             let Some(body) = &method.default_body else {
                 continue;
             };

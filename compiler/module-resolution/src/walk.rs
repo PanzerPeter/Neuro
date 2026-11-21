@@ -11,8 +11,8 @@
 
 use ast_types::{
     ClosureParam, EnumPatternPayload, Expr, GenericArg, GenericParam, GenericParamKind, InterpPart,
-    Item, MatchArm, MethodDef, Pattern, Place, Stmt, TensorIndexArg, TraitBound, Type,
-    VariantPayload,
+    Item, MatchArm, MethodDef, Pattern, Place, Stmt, TensorDim, TensorExtent, TensorIndexArg,
+    TraitBound, Type, VariantPayload,
 };
 use shared_types::Identifier;
 
@@ -246,18 +246,28 @@ impl Walker<'_> {
     fn ty(&mut self, ty: &mut Type) -> Result<(), ModuleError> {
         match ty {
             Type::Named(name) => self.type_name(name),
-            Type::Generic { name, args, span } => {
+            Type::Generic {
+                name,
+                args,
+                lifetimes,
+                span,
+            } => {
                 self.type_name(name)?;
                 // A path or an alias to the prelude's `Tensor` reaches it only now, so the
-                // tensor type the bare word parses as is built here.
+                // tensor type the bare word parses as is built here. The parser could not know
+                // the name was `Tensor`, so a bare shape name read as a type (`T<f32, S>`) and a
+                // one-name shape as a slice type (`T<f32, [N]>`): each is read as the bare word's
+                // shape would have been, `[..S]` and `[N]`.
+                // A lifetime argument stays for the checker to refuse: `Tensor` declares none.
                 if name.name == TENSOR
-                    && let [GenericArg::Type(element), GenericArg::Shape { dims, .. }] =
-                        args.as_mut_slice()
+                    && lifetimes.is_empty()
+                    && let [GenericArg::Type(element), shape] = args.as_mut_slice()
+                    && let Some(dims) = tensor_shape_arg(shape)
                 {
                     self.ty(element)?;
                     *ty = Type::Tensor {
                         element_type: Box::new(element.clone()),
-                        shape: std::mem::take(dims),
+                        shape: dims,
                         span: *span,
                     };
                     return Ok(());
@@ -537,8 +547,22 @@ impl Walker<'_> {
                 args,
                 ..
             } => {
+                // `std::prelude::Tensor::<f32, [2]>::zeros()` and `T::<f32, [2]>::zeros()` name
+                // `Tensor` by a path or an alias, which the callee resolves; the tensor type
+                // their turbofish became must not offer the bare word again, or a file opted out
+                // of the prelude is refused for it.
+                let tensor_path = matches!(
+                    (func.as_ref(), type_args.as_mut_slice()),
+                    (Expr::Path { type_name, .. }, [GenericArg::Type(Type::Tensor { .. })])
+                        if type_name.name != TENSOR
+                );
                 self.expr(func)?;
-                self.generic_args(type_args)?;
+                match type_args.as_mut_slice() {
+                    [GenericArg::Type(Type::Tensor { element_type, .. })] if tensor_path => {
+                        self.ty(element_type)?
+                    }
+                    type_args => self.generic_args(type_args)?,
+                }
                 for arg in args {
                     self.expr(arg)?;
                 }
@@ -723,4 +747,20 @@ impl Walker<'_> {
             None => Ok(()),
         }
     }
+}
+
+/// The shape an alias's or a path's second `Tensor` argument spells: a shape as written, a bare
+/// name as the splice `[..S]`, or a slice of one name as the extent `[N]`. `None` for anything
+/// that is no shape, left for the checker to refuse.
+fn tensor_shape_arg(arg: &mut GenericArg) -> Option<Vec<TensorDim>> {
+    let extent = match arg {
+        GenericArg::Shape { dims, .. } => return Some(std::mem::take(dims)),
+        GenericArg::Type(Type::Named(name)) => TensorExtent::Splice(name.clone()),
+        GenericArg::Type(Type::Slice { element, .. }) => match element.as_ref() {
+            Type::Named(name) => TensorExtent::Param(name.clone()),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(vec![TensorDim { name: None, extent }])
 }

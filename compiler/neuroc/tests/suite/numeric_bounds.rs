@@ -1,6 +1,6 @@
 // Generic tensor element types and the `Numeric` / `Integer` / `Float` bounds: a body
 // checked once against its bound, lowered per instance at the concrete scalar type.
-use crate::compile_harness::{assert_check_error, compile_rejected, stdout_of};
+use crate::compile_harness::{assert_check_error, assert_exit, compile_rejected, stdout_of};
 
 #[test]
 fn numeric_bounds_give_scalar_arithmetic_per_instance() {
@@ -175,15 +175,27 @@ fn an_operation_the_bound_does_not_promise_is_refused() {
             "func f<T>(t: Tensor<T, [2]>) -> T { t.sum() }",
             "`.sum()` reduces a tensor's elements",
         ),
-        (
-            "func f<T: Numeric>(t: &Tensor<T, [2]>) -> T { t.mean() }",
-            "`.mean()` averages T elements",
-        ),
     ];
     for (body, expected) in cases {
         let source = format!("{body}\nfunc main() -> i32 {{ 0 }}\n");
         assert_check_error("refused.nr", &source, expected);
     }
+}
+
+/// `.mean()` under a `Numeric` bound serves both families: an integer instance truncates
+/// toward zero, a float one does not.
+#[test]
+fn a_numeric_mean_serves_integers_and_floats() {
+    let source = r#"
+func avg<T: Numeric>(t: &Tensor<T, [4]>) -> T { t.mean() }
+func main() -> i32 {
+    val a: Tensor<i32, [4]> = [1, 2, 3, -7]
+    val b: Tensor<f32, [4]> = [1.0, 2.0, 3.0, 6.0]
+    if avg(&a) != 0 || avg(&b) != 3.0f32 { return 1 }
+    0
+}
+"#;
+    assert_exit("numeric_mean.nr", source, 0);
 }
 
 #[test]
@@ -219,6 +231,15 @@ fn a_non_scalar_tensor_element_is_refused_per_instance() {
     assert!(
         text.contains("this instance makes it `string`"),
         "unexpected diagnostic: {text}"
+    );
+    // Reported at the call that made the instance, with the tensor as a note.
+    assert!(
+        text.contains("body.nr:3:"),
+        "no location at the call: {text}"
+    );
+    assert!(
+        text.contains("checked here, in the instance `mk`") && text.contains("body.nr:1:"),
+        "no note at the tensor: {text}"
     );
 }
 

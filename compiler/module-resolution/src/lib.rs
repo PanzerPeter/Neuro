@@ -35,6 +35,7 @@ use std::path::Path;
 mod defaults;
 mod imports;
 mod loader;
+mod rename;
 mod rewriter;
 mod walk;
 

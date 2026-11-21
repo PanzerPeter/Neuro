@@ -15,9 +15,23 @@ use ast_types::{
 use shared_types::{Identifier, Span};
 
 use super::TypeChecker;
+use super::statements::function_value_position;
 use crate::errors::TypeError;
 use crate::symbol_table::MoveState;
 use crate::types::{FunctionMode, Type};
+
+/// The binding a built-in reads when it walks `expr`: `v` in `v`, `&v`, `v.items`,
+/// `v[0]` and `v.iter()`. `None` for a temporary, which nothing else can name.
+fn walked_root(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Paren(inner, _) | Expr::Reference { operand: inner, .. } => walked_root(inner),
+        Expr::Call { func, .. } => match super::statements::peel_parens(func) {
+            Expr::FieldAccess { object, .. } => walked_root(object),
+            _ => None,
+        },
+        _ => TypeChecker::place_root_name(expr),
+    }
+}
 
 impl TypeChecker {
     /// Type-check a closure literal, returning its [`Type::Function`] type.
@@ -107,6 +121,7 @@ impl TypeChecker {
         // enclosing function, so redirect the return-type context for the body check.
         let saved_return = self.current_function_return_type.take();
         self.current_function_return_type = ret_ty.clone();
+        let saved_written = std::mem::replace(&mut self.return_type_written, false);
         let saved_inferring =
             std::mem::replace(&mut self.inferring_closure_return, ret_ty.is_none());
 
@@ -167,6 +182,7 @@ impl TypeChecker {
 
         self.pop_scope();
         self.current_function_return_type = saved_return;
+        self.return_type_written = saved_written;
         self.inferring_closure_return = saved_inferring;
         self.loop_stack = saved_loops;
         self.jump_pool_floor = saved_pool_floor;
@@ -195,21 +211,30 @@ impl TypeChecker {
         }
     }
 
-    /// Refuse a closure literal holding a `&mut` borrow, written as the function a
-    /// built-in calls per element: its borrow starts after the built-in read its
-    /// receiver, so nothing stops it from writing what the built-in is walking.
-    /// `slot` is the argument's [`function_value_position`].
-    ///
-    /// [`function_value_position`]: super::statements::function_value_position
-    pub(crate) fn refuse_mutating_closure_literal(&mut self, slot: Option<Span>) {
-        if let Some(span) = slot
-            && self
-                .borrowing_closures
-                .get(&span)
-                .is_some_and(|borrows| borrows.iter().any(|(_, exclusive)| *exclusive))
-        {
-            self.record_error(TypeError::ScopeBoundClosureStored { span });
+    /// Check `callee`, the function a built-in calls per element while it walks `walked`,
+    /// in a function-value position. The binding each walked expression reads is lent for
+    /// the check, so a closure literal that writes one is a borrow conflict: its writes
+    /// would land while the built-in reads it (and a tensor traversal marks its operands
+    /// `noalias`). A literal writing anything else holds its `&mut` like a bound closure.
+    pub(crate) fn check_per_element_callee(
+        &mut self,
+        callee: &Expr,
+        context: &Type,
+        walked: &[&Expr],
+    ) -> Type {
+        let roots: Vec<String> = walked.iter().filter_map(|expr| walked_root(expr)).collect();
+        for root in &roots {
+            self.symbols.add_transient_borrow(root, false);
         }
+        self.function_value_slot = function_value_position(callee);
+        let ty = self
+            .check_expr(callee, Some(context))
+            .unwrap_or(Type::Unknown);
+        self.function_value_slot = None;
+        for root in &roots {
+            self.symbols.release_transient_borrow(root, false);
+        }
+        ty
     }
 
     /// Refuse a `once` function value given to a built-in that calls it per element: a

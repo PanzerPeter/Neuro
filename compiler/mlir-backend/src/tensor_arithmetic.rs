@@ -1178,7 +1178,7 @@ pub(crate) fn parse_attribute<'c>(
 #[cfg(test)]
 mod tests {
     use crate::{
-        bridge::tests::{assert_host_only_on_gpu, assert_launches_on_gpu, assert_lowered, mlir_of},
+        bridge::tests::{assert_launches_on_gpu, assert_lowered, mlir_of},
         lower::lower_program,
     };
 
@@ -1734,7 +1734,7 @@ mod tests {
         );
         assert!(ir.contains(r#""reduction""#), "{ir}");
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 
     /// A dynamic contracted axis has no size of its own in the destination, which `linalg` takes
@@ -1788,7 +1788,7 @@ mod tests {
             "{ir}"
         );
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 
     /// An element-wise operation over a dynamic axis sizes its destination from the operand that
@@ -1805,7 +1805,7 @@ mod tests {
             "{ir}"
         );
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 
     #[test]
@@ -1820,7 +1820,7 @@ mod tests {
         let ir = mlir_of(&program);
         assert!(ir.contains("affine_map<(d0) -> ()>"), "{ir}");
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 
     /// An integer division over a dynamic axis reports its element's position, which is a
@@ -1842,7 +1842,7 @@ mod tests {
             "a checked division reads its run-time position:\n{ir}"
         );
         assert_lowered(&program);
-        assert_host_only_on_gpu(&program);
+        assert_launches_on_gpu(&program);
     }
 
     /// `returns_binary` over a tensor of `ty`, which may be dynamic.

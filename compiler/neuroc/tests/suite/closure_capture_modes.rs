@@ -566,8 +566,51 @@ func main() -> i32 {
     assert_eq!(err.matches("cannot assign to 'lim'").count(), 1, "{err}");
 }
 
+/// A closure literal written straight into a built-in may write through a borrow, as the
+/// same closure bound with `mut` may: a `for` head's adapter, over an array or an `.iter()`,
+/// and a tensor traversal each see the writes land.
 #[test]
-fn a_mutating_closure_literal_is_not_handed_to_a_built_in_method() {
+fn a_writing_closure_literal_is_handed_to_a_built_in_method() {
+    let source = r#"
+func main() -> i32 {
+    val v = [1, 2, 3]
+    mut count = 0
+    mut s = 0
+    for x in v.map(|x: i32| {
+        count += 1
+        x * 2
+    }) {
+        s += x
+    }
+    val t: Tensor<i32, [3]> = [1, 2, 3]
+    mut c = "a" + "b"
+    val u = t.map(|e| {
+        c = c + "x"
+        e * 2
+    })
+    mut seen: Vec<string> = Vec::new()
+    val words = ["a".clone(), "bb".clone()]
+    mut n: u64 = 0
+    for w in words.iter().map(|w: &string| {
+        seen.push(w.clone())
+        w.len()
+    }) {
+        n += w
+    }
+    println("{s} {count} {c} {u[2]} {seen.len()} {n}")
+    0
+}
+"#;
+    assert_eq!(
+        stdout_of("builtin_writing_literal.nr", source),
+        "12 3 abxxx 6 2 3\n"
+    );
+}
+
+/// What the built-in walks stays off limits: a literal writing the iterable, a range bound
+/// or a tensor operand is a borrow conflict, since its write would land mid-walk.
+#[test]
+fn a_closure_literal_does_not_write_what_its_built_in_walks() {
     let err = rejected(
         "builtin_mutating_literal.nr",
         r#"
@@ -581,20 +624,30 @@ func main() -> i32 {
     }) {
         total += x
     }
-    val t: Tensor<i32, [3]> = [1, 2, 3]
-    mut c = "a" + "b"
+    mut n = 3
+    for i in (0..n).map(|i: i32| {
+        n += 1
+        i
+    }) {
+        total += i
+    }
+    mut t: Tensor<i32, [3]> = [1, 2, 3]
     val u = t.map(|e| {
-        c = "x" + "y"
+        t = [0, 0, 0]
         e
+    })
+    val a: Tensor<i32, [3]> = [1, 2, 3]
+    mut b: Tensor<i32, [3]> = [1, 2, 3]
+    val w = a.zip(b, |x, y| {
+        b = [0, 0, 0]
+        x + y
     })
     return total
 }
 "#,
     );
-    assert_eq!(
-        err.matches("a closure literal that writes through a borrow")
-            .count(),
-        2,
-        "{err}"
-    );
+    for name in ["v", "n", "t", "b"] {
+        let message = format!("cannot borrow '{name}' as mutable: it is already borrowed");
+        assert!(err.contains(&message), "{name}: {err}");
+    }
 }

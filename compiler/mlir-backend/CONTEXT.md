@@ -148,14 +148,17 @@ the GPU mapping writes; `gpu-to-llvm` turns each launch into calls to MLIR's GPU
 (`mgpuModuleLoad[JIT]`, `mgpuLaunchKernel`, `mgpuStream*`), which the IR declares and nothing in
 this crate defines.
 
-**Dynamic results stay on the host.** A body whose returned tensor has a run-time extent
-(`dynamic_result`) is not device code, on either path. Bufferization sizes such a result at run
-time, so it cannot be hoisted into the caller's out-parameter: it is copied there, and the copy is
-a host `llvm.memcpy` over device memory. Such a body keeps its host form alone, the fallback a
-body with no device form takes, so a device operand of it panics at run time. A body with dynamic
-inputs and a static result runs on the device, with its dynamic axes read at run time; the
-device path verified bit-exact on an RTX 5070 for a float sum and mean of dynamic length, a
-dynamic contraction, and a top-k. Its per-thread launchers (`kernel/mod.rs`) decline the same way.
+**Dynamic results are hoisted too.** `buffer-results-to-out-params` runs with
+`hoist-dynamic-allocs`, so a result with a run-time extent is written straight into the caller's
+out-param, which the LLVM backend sizes from the same operand extents (`result_extents`). Without
+it the body allocated its own buffer and copied it out with a host `llvm.memcpy`, which a device
+body cannot run; `assert_launches_on_gpu` checks no such copy is left. So a body with a dynamic
+result runs on the device like any other `linalg` body, its launches sized at run time. Verified
+bit-exact against the host on an RTX 5070 for an operator, a slice, a contraction, elementwise
+math, an axis reduction, a sort and an argsort, as well as the earlier dynamic-input cases (a sum
+and mean of dynamic length, a dynamic contraction, a top-k). The per-thread launchers
+(`kernel/mod.rs`) size their grid at compile time, so `follows_operands` keeps the host body for
+any signature with a run-time extent (`has_dynamic_tensor`).
 
 **Tiling, per function.** Tile sizes are read by loop axis from the outermost, so one list fits one
 rank; `tiling` picks a function's from its widest tensor and functions that differ lower as
@@ -251,7 +254,8 @@ the host too: each lane's partial then stays in a register through its rows, whi
 (the additive identity, signed zeros included), the run's first element for `.max()` / `.min()`,
 whose fold keeps the element when it is a number that sorts before the accumulator or the
 accumulator is NaN (the LLVM backend's sorting comparator). A mean divides by the run length in
-a third generic. A whole-tensor reduction arrives boxed in a one-element `TensorLiteral` (a GPU
+a third generic; an integer mean divides as integer `/` does, in 64 bits beside an `i64` count so a
+run longer than the element's range still divides by its true length, and narrows back. A whole-tensor reduction arrives boxed in a one-element `TensorLiteral` (a GPU
 body returns buffers only) and becomes a reduction into `tensor<1xT>` with one parallel axis of
 extent 1. An integer `.sum()` seeds 0, folds left to right with the overflow check
 and never in lanes, since the host folds an integer run in order and where an overflow is caught

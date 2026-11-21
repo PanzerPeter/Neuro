@@ -160,8 +160,9 @@ fn follows_operands(
     (guard, overflow): (GuardStyle, Overflow),
     math: &dyn Fn() -> bool,
 ) -> Option<(String, Vec<Guard>)> {
-    // A dynamic result is copied out of the device buffer on the host, as in `runs_on_gpu`.
-    if crate::gpu::dynamic_result(function) {
+    // A per-thread launch is sized when it is compiled: its grid and every index it computes
+    // come from static extents, so a tensor with a run-time extent keeps the host body.
+    if has_dynamic_tensor(function) {
         return None;
     }
     let mut params = parameters(function).ok()?;
@@ -191,6 +192,22 @@ fn follows_operands(
         launch_text(symbol, &params, blocks, threads, &region),
         guards,
     ))
+}
+
+/// Whether a tensor `function` takes or returns has a run-time extent.
+fn has_dynamic_tensor(function: &HirFunction) -> bool {
+    let dynamic = |ty: &HirType| {
+        match ty.referent() {
+        HirType::Tensor { shape, .. } => shape.iter().any(Option::is_none),
+        HirType::Tuple(parts) => parts
+            .iter()
+            .any(|part| matches!(part, HirType::Tensor { shape, .. } if shape.iter().any(Option::is_none))),
+        _ => false,
+    }
+    };
+    std::iter::once(&function.return_type)
+        .chain(function.params.iter().map(|param| &param.ty))
+        .any(dynamic)
 }
 
 /// Whether a region calls a math function, which only the vendor's device math library

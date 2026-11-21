@@ -302,7 +302,7 @@ func roster(teams: &BTreeMap<string, i32>) -> BTreeKeys<string, i32> {
 
 Each is an ordinary `Iterator`, so it takes the [adapter values](#the-iteration-protocol), a generic `I: Iterator<Item = &T>` parameter and every `for` head, `&mut it` included. The value borrows its container and copies nothing. While it lives, the container cannot be pushed to, inserted into or moved, and one over a function's own local cannot be returned. The receiver must be a binding, a part of one or a borrow: `make().iter()` would walk a value that dies with its statement, and is refused.
 
-A direct `it.next()` hands back a borrow the checker ties to `it` itself, so two results of `next` cannot be held at once. A `for` head and `while val Option::Some(x) = it.next()` take one at a time and are unaffected.
+An item borrows the container, not the iterator, so a direct `it.next()` leaves `it` free to step again and two results can be held at once: `val a = it.next()` then `val b = it.next()`. Each still keeps the container frozen while it lives.
 
 ### Pair Heads
 

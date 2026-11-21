@@ -139,8 +139,16 @@ enum Commands {
     /// Compile a Neuro source file's `@test` functions and run each in its own process
     Test {
         /// Input source file
-        #[arg(value_name = "FILE")]
-        input: PathBuf,
+        #[arg(
+            value_name = "FILE",
+            required_unless_present = "std",
+            conflicts_with = "std"
+        )]
+        input: Option<PathBuf>,
+
+        /// Run the standard library's own tests instead of a program's
+        #[arg(long)]
+        std: bool,
 
         #[command(flatten)]
         build: BuildArgs,
@@ -218,8 +226,9 @@ fn drive(cli: Cli) {
             Err(e) => report_failure("Run failed", &e),
         },
 
-        Commands::Test { input, build } => match test_file(
-            &input,
+        Commands::Test { input, std, build } => match test_file(
+            input.as_deref(),
+            std,
             build.optimization,
             &build.gpu_arch.unwrap_or_default(),
         ) {
@@ -293,12 +302,21 @@ fn run_file(
 
 /// Compile `input`'s tests into one executable in a temporary directory and run it once per
 /// test, printing each verdict and, for a failure, what the test wrote. Returns whether every
-/// test passed.
+/// test passed. With `library`, the tests are the standard library's own, compiled under an
+/// empty program in place of `input`.
 ///
 /// A test passes when its process exits 0. One that panics aborts only its own process, so
 /// the next test still runs and nothing needs unwinding.
-fn test_file(input: &Path, optimization: u8, gpu: &GpuArch) -> Result<bool> {
+fn test_file(input: Option<&Path>, library: bool, optimization: u8, gpu: &GpuArch) -> Result<bool> {
     let dir = tempfile::tempdir().context("Failed to create temporary directory")?;
+    let (input, entry) = match input {
+        Some(input) if !library => (input.to_path_buf(), Entry::Tests),
+        _ => {
+            let root = dir.path().join("std_tests.nr");
+            fs::write(&root, "").context("Failed to write the library's test root")?;
+            (root, Entry::LibraryTests)
+        }
+    };
     let stem = input.file_stem().unwrap_or_else(|| OsStr::new("tests"));
     let mut executable = dir.path().join(stem);
     if cfg!(target_os = "windows") {
@@ -306,12 +324,12 @@ fn test_file(input: &Path, optimization: u8, gpu: &GpuArch) -> Result<bool> {
     }
 
     let (_, tests) = compile_file(
-        input,
+        &input,
         Some(&executable),
         optimization,
         EmitKind::Exe,
         gpu,
-        Entry::Tests,
+        entry,
     )?;
 
     println!("running {} test(s)", tests.len());
@@ -351,15 +369,17 @@ fn test_file(input: &Path, optimization: u8, gpu: &GpuArch) -> Result<bool> {
     Ok(failures.is_empty())
 }
 
-/// The program's `@test` functions in declaration order, by the names the backend gives
-/// them. The standard library's are its own and never run with a program's.
-fn test_functions(items: &[syntax_parsing::Item]) -> Vec<String> {
+/// The `@test` functions in declaration order, by the names the backend gives them: the
+/// standard library's with `library`, else the program's. The two never run together, so a
+/// program's run reports its own tests alone.
+fn test_functions(items: &[syntax_parsing::Item], library: bool) -> Vec<String> {
     items
         .iter()
         .filter_map(|item| match item {
             syntax_parsing::Item::Function(def)
-                if def.module != ast_types::PRELUDE_MODULE
-                    && !def.name.name.starts_with("std::")
+                if (def.module == ast_types::PRELUDE_MODULE
+                    || def.name.name.starts_with("std::"))
+                    == library
                     && def
                         .attributes
                         .iter()
@@ -379,6 +399,8 @@ enum Entry {
     Main,
     /// The test its first argument names: see `llvm_backend::compile_tests`.
     Tests,
+    /// The same, over the standard library's own tests.
+    LibraryTests,
 }
 
 /// Validate that a file has the .nr extension
@@ -598,27 +620,41 @@ fn report_lowering_error(
             eprintln!("{}", render_diagnostic(sources, &error.to_string(), *span));
             anyhow::anyhow!("`@grad` function could not be differentiated")
         }
-        // Reported where the extents came from, as a violated `where` predicate is, with
-        // the operation that needed them as a note.
-        hir_lowering::LoweringError::InstanceShape {
-            span,
-            origin,
-            instance,
-            ..
-        } => {
-            eprintln!(
-                "{}",
-                render_diagnostic(sources, &error.to_string(), origin.unwrap_or(*span))
-            );
-            let note = match instance {
-                Some(instance) => format!("checked here, in the instance {instance}"),
-                None => "checked here".to_string(),
-            };
-            eprintln!("{}\n", render_labeled("note", sources, &note, *span));
-            anyhow::anyhow!("a shape check failed at one instance of a generic")
+        hir_lowering::LoweringError::InstanceCheck { .. } => {
+            report_instance_check(sources, error);
+            anyhow::anyhow!("a check failed at one instance of a generic")
+        }
+        hir_lowering::LoweringError::InstanceChecks(errors) => {
+            errors
+                .iter()
+                .for_each(|error| report_instance_check(sources, error));
+            anyhow::anyhow!("{} checks failed at instances of generics", errors.len())
         }
         _ => anyhow::anyhow!("HIR lowering error: {}", error),
     }
+}
+
+/// One shape check that failed at an instance, reported where the extents came from, as a
+/// violated `where` predicate is, with the operation that needed them as a note.
+fn report_instance_check(sources: &SourceMap, error: &hir_lowering::LoweringError) {
+    let hir_lowering::LoweringError::InstanceCheck {
+        span,
+        origin,
+        instance,
+        ..
+    } = error
+    else {
+        return;
+    };
+    eprintln!(
+        "{}",
+        render_diagnostic(sources, &error.to_string(), origin.unwrap_or(*span))
+    );
+    let note = match instance {
+        Some(instance) => format!("checked here, in the instance {instance}"),
+        None => "checked here".to_string(),
+    };
+    eprintln!("{}\n", render_labeled("note", sources, &note, *span));
 }
 
 /// Check a Neuro source file for syntax and type errors
@@ -688,7 +724,7 @@ fn print_warnings(sources: &SourceMap, warnings: &[semantic_analysis::Warning]) 
 /// input name with `.ll`. `gpu` is what `@gpu` bodies and device tensors are built for.
 /// `entry` is what the executable's entry point runs.
 /// Returns the path it wrote, which `run` needs and `compile` reports, and the tests the
-/// entry point indexes, empty unless `entry` is [`Entry::Tests`].
+/// entry point indexes, empty unless `entry` runs tests.
 fn compile_file(
     input: &Path,
     output: Option<&Path>,
@@ -794,7 +830,8 @@ fn compile_file(
 
     let tests = match entry {
         Entry::Main => Vec::new(),
-        Entry::Tests => test_functions(&ast),
+        Entry::Tests => test_functions(&ast, false),
+        Entry::LibraryTests => test_functions(&ast, true),
     };
     let object_code = match entry {
         // An object may be a library, so its functions stay callable; an executable is
@@ -805,7 +842,7 @@ fn compile_file(
         Entry::Main => {
             llvm_backend::compile_executable(&hir, optimization, &sources, &external, gpu.vendor)
         }
-        Entry::Tests => {
+        Entry::Tests | Entry::LibraryTests => {
             llvm_backend::compile_tests(&hir, optimization, &sources, &external, gpu.vendor, &tests)
         }
     }

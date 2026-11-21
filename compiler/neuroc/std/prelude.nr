@@ -520,16 +520,16 @@ impl Iterator for Chars {
 //
 // Both walk the text one code point at a time through a `Chars` cursor, so every offset
 // they cut at is a scalar boundary and `.slice` never lands inside one.
-export struct Lines {
-    source: &string,
+export struct Lines<'a> {
+    source: &'a string,
     start: u64
 }
 
-impl Iterator for Lines {
-    type Item = &string
+impl<'a> Iterator for Lines<'a> {
+    type Item = &'a string
     // A line ends at `\n`, and a `\r` just before it goes with it. Text that ends in a
     // newline has no empty line after it, so `"a\n"` is one line and `""` is none.
-    func next(&mut self) -> Option<&string> {
+    func next(&mut self) -> Option<&'a string> {
         val length = self.source.len()
         val first = self.start
         if first >= length {
@@ -556,16 +556,16 @@ impl Iterator for Lines {
 // Every piece between two occurrences of `separator`, empty ones included: `"a,,b"` split
 // on `","` is `"a"`, `""`, `"b"`, and `""` is one empty piece. `done` marks the last piece
 // handed out, which no offset can say once the text ends in a separator.
-export struct Split {
-    source: &string,
-    separator: &string,
+export struct Split<'a> {
+    source: &'a string,
+    separator: &'a string,
     start: u64,
     done: bool
 }
 
-impl Iterator for Split {
-    type Item = &string
-    func next(&mut self) -> Option<&string> {
+impl<'a> Iterator for Split<'a> {
+    type Item = &'a string
+    func next(&mut self) -> Option<&'a string> {
         if self.done {
             return Option::None
         }
@@ -607,14 +607,14 @@ impl Iterator for Split {
 // The borrow is what keeps the walk from copying or consuming the container, and what
 // keeps the container from changing while the iterator lives. As with `Chars`, the
 // fields are private and the compiler fills them in.
-export struct Iter<T> {
-    items: &[T],
+export struct Iter<'a, T> {
+    items: &'a [T],
     position: u64
 }
 
-impl<T> Iterator for Iter<T> {
-    type Item = &T
-    func next(&mut self) -> Option<&T> {
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T
+    func next(&mut self) -> Option<&'a T> {
         if self.position >= self.items.len() {
             return Option::None
         }
@@ -633,14 +633,14 @@ impl<T> Iterator for Iter<T> {
 // private to the prelude: `__slot_count()` is how many slots to visit, `__slot_live(i)`
 // whether hashed slot `i` holds an entry, and `__key_at(i)` / `__value_at(i)` borrow its
 // key or value.
-export struct HashKeys<K, V> {
-    map: &HashMap<K, V>,
+export struct HashKeys<'a, K, V> {
+    map: &'a HashMap<K, V>,
     slot: u64
 }
 
-impl<K, V> Iterator for HashKeys<K, V> {
-    type Item = &K
-    func next(&mut self) -> Option<&K> {
+impl<'a, K, V> Iterator for HashKeys<'a, K, V> {
+    type Item = &'a K
+    func next(&mut self) -> Option<&'a K> {
         while self.slot < self.map.__slot_count() {
             val at = self.slot
             self.slot = at + 1
@@ -652,14 +652,14 @@ impl<K, V> Iterator for HashKeys<K, V> {
     }
 }
 
-export struct HashValues<K, V> {
-    map: &HashMap<K, V>,
+export struct HashValues<'a, K, V> {
+    map: &'a HashMap<K, V>,
     slot: u64
 }
 
-impl<K, V> Iterator for HashValues<K, V> {
-    type Item = &V
-    func next(&mut self) -> Option<&V> {
+impl<'a, K, V> Iterator for HashValues<'a, K, V> {
+    type Item = &'a V
+    func next(&mut self) -> Option<&'a V> {
         while self.slot < self.map.__slot_count() {
             val at = self.slot
             self.slot = at + 1
@@ -671,14 +671,14 @@ impl<K, V> Iterator for HashValues<K, V> {
     }
 }
 
-export struct BTreeKeys<K, V> {
-    map: &BTreeMap<K, V>,
+export struct BTreeKeys<'a, K, V> {
+    map: &'a BTreeMap<K, V>,
     slot: u64
 }
 
-impl<K, V> Iterator for BTreeKeys<K, V> {
-    type Item = &K
-    func next(&mut self) -> Option<&K> {
+impl<'a, K, V> Iterator for BTreeKeys<'a, K, V> {
+    type Item = &'a K
+    func next(&mut self) -> Option<&'a K> {
         if self.slot >= self.map.__slot_count() {
             return Option::None
         }
@@ -688,14 +688,14 @@ impl<K, V> Iterator for BTreeKeys<K, V> {
     }
 }
 
-export struct BTreeValues<K, V> {
-    map: &BTreeMap<K, V>,
+export struct BTreeValues<'a, K, V> {
+    map: &'a BTreeMap<K, V>,
     slot: u64
 }
 
-impl<K, V> Iterator for BTreeValues<K, V> {
-    type Item = &V
-    func next(&mut self) -> Option<&V> {
+impl<'a, K, V> Iterator for BTreeValues<'a, K, V> {
+    type Item = &'a V
+    func next(&mut self) -> Option<&'a V> {
         if self.slot >= self.map.__slot_count() {
             return Option::None
         }

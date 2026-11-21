@@ -296,10 +296,23 @@ impl TypeChecker {
             }
             // Generic type application `Name<T1, ...>`: resolve the arguments
             // and monomorphize the generic struct into a distinct nominal instance.
-            ast_types::Type::Generic { name, args, span } => {
+            ast_types::Type::Generic {
+                name,
+                args,
+                lifetimes,
+                span,
+            } => {
                 if self.is_kernel_out(&name.name) {
                     self.refuse_kernel_out_type(*span);
                     return None;
+                }
+                if !self.lifetime_args_match(&name.name, lifetimes.len(), *span) {
+                    return None;
+                }
+                // `View<'a>` applies lifetimes only, which are erased: it is the named type.
+                if args.is_empty() {
+                    let named = ast_types::Type::Named(name.clone());
+                    return self.resolve_type_ctx(&named, behind_ref, names);
                 }
                 // The enums and collections a return type may hold a tensor in pass the
                 // freedom on to their arguments; a user generic does not.
@@ -439,6 +452,35 @@ impl TypeChecker {
                 })
             }
         }
+    }
+
+    /// Whether `written` lifetime arguments suit the type `name`: none at all (elided), or
+    /// exactly as many as it declares. A type that declares none (a builtin, a type parameter)
+    /// takes none. Records the error when they do not.
+    pub(crate) fn lifetime_args_match(
+        &mut self,
+        name: &str,
+        written: usize,
+        span: shared_types::Span,
+    ) -> bool {
+        let declared = self.declared_lifetimes.get(name).copied().unwrap_or(0);
+        if written == 0 || written == declared {
+            return true;
+        }
+        if declared == 0 {
+            self.record_error(TypeError::LifetimeArgumentsUndeclared {
+                name: name.to_string(),
+                span,
+            });
+            return false;
+        }
+        self.record_error(TypeError::LifetimeArgumentCount {
+            name: name.to_string(),
+            declared,
+            written,
+            span,
+        });
+        false
     }
 
     /// Resolve a written shape, axis by axis, refusing a dynamic name in it.

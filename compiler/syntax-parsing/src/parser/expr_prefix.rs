@@ -68,10 +68,12 @@ impl Parser {
                 // be followed by `(`; here it applies to the *type* that qualifies the
                 // constructor, so it is followed by another `::`. `Tensor` is the only
                 // name that takes this form, and the shape inside the turbofish is what
-                // claims it, so a module shadowing `Tensor` is unaffected.
-                if ident.name == TENSOR_TYPE_NAME
-                    && self.check(&TokenKind::ColonColon)
+                // claims it, so a module shadowing `Tensor` is unaffected. Any other name
+                // followed by `::<...>::` is an alias of `Tensor`, since no other type takes a
+                // turbofish of its own.
+                if self.check(&TokenKind::ColonColon)
                     && self.colon_colon_opens_turbofish()
+                    && (ident.name == TENSOR_TYPE_NAME || self.turbofish_qualifies_type())
                 {
                     return self.parse_tensor_qualified_call(ident);
                 }
@@ -103,6 +105,18 @@ impl Parser {
                                 span: member_token.span,
                             });
                         };
+                        // `std::prelude::Tensor::<f32, [2]>::zeros()`: a path to the standard
+                        // `Tensor`, or to an alias of it, takes the constructor spelling the
+                        // bare name does.
+                        if self.check(&TokenKind::ColonColon)
+                            && self.colon_colon_opens_turbofish()
+                            && (member.name == TENSOR_TYPE_NAME || self.turbofish_qualifies_type())
+                        {
+                            return self.parse_tensor_qualified_call(Identifier {
+                                name: format!("{}::{}", qualifier.name, member.name),
+                                span: qualifier.span.merge(member.span),
+                            });
+                        }
                         if !self.check(&TokenKind::ColonColon) || self.colon_colon_opens_turbofish()
                         {
                             break;

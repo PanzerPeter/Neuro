@@ -229,8 +229,11 @@ walkers.
   `ImplDef` / `MethodDef` and `lifetime: Option<Identifier>` on `Type::Reference` are kept apart
   from `generics` because lifetimes are a distinct namespace and do not drive monomorphization.
   Both are validated and then erased: a reference type's identity does not depend on its
-  lifetime. A lifetime argument in a type application (`View<'a>`) has no node: the parser
-  checks it and drops it, so `Type::Generic` carries type and const arguments only.
+  lifetime. A lifetime argument in a type application (`View<'a>`) is kept in
+  `Type::Generic::lifetimes` (and an `impl` header's in `ImplDef::type_lifetimes`), apart from
+  the type and const arguments, so the checker can count it against the declaration. An
+  application of lifetimes only is a `Type::Generic` with empty `args`, which stands for the
+  named type.
   `MethodDef::return_lifetimes` counts the names its return type wrote, which is what tells an
   elided lifetime, and so a result borrowing `self`, from one the `impl` declares.
 - **Attributes.** `Attribute { name, args, named, span }` on `FunctionDef` / `MethodDef` /
@@ -257,7 +260,9 @@ walkers.
 `None` for an inherent block, plus `assoc_types: Vec<(Identifier, Type)>` for `type Name = T`
 bindings: the operator traits' `type Output = T`, and the answer to whatever a user trait's
 `TraitDef.assoc_types: Vec<Identifier>` declares. The two sides sit on different nodes because a
-declaration carries a name only. `GenericParam.bounds: Vec<TraitBound>` is the third place the
+declaration carries a name only. `inherited_assoc` has the same shape and holds what a subtrait
+impl inherits from the same type's supertrait impls; the parser leaves it empty and module
+resolution fills it. `GenericParam.bounds: Vec<TraitBound>` is the third place the
 same `(name, type)` binding shape appears: a bound constrains an associated type
 (`T: Channel<Sample = i32>`) exactly as an impl answers it. An associated type is named in a
 signature as

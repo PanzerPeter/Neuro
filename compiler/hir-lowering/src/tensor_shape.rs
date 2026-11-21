@@ -27,7 +27,7 @@ use shared_types::{Literal, Span};
 use crate::extents::{
     binary, borrow, extent_read, guard, panic_with, shown, text, u64_value, variable,
 };
-use crate::{Lowerer, LoweringError, instance_shape, malformed};
+use crate::{Lowerer, LoweringError, instance_check, malformed};
 
 pub(crate) const TRANSPOSE_METHOD: &str = "t";
 pub(crate) const RESHAPE_METHOD: &str = "reshape";
@@ -541,7 +541,7 @@ fn reshape(
             continue;
         }
         let Some(value) = value.and_then(|value| usize::try_from(value).ok()) else {
-            return Err(instance_shape(
+            return Err(instance_check(
                 "a `.reshape` extent has no value at this instance: it divides by zero or is \
                  negative, and an axis has a non-negative extent"
                     .to_string(),
@@ -554,7 +554,7 @@ fn reshape(
     let known: usize = extents.iter().flatten().product();
     if let Some(position) = inferred_at {
         if known == 0 || !total.is_multiple_of(known) {
-            return Err(instance_shape(
+            return Err(instance_check(
                 format!(
                     "`-1` cannot be inferred at this instance: the other extents multiply to \
                      {known}, which does not divide the receiver's {total} elements"
@@ -568,7 +568,7 @@ fn reshape(
     let resolved: Vec<usize> = extents.into_iter().flatten().collect();
     let count: usize = resolved.iter().product();
     if count != total {
-        return Err(instance_shape(
+        return Err(instance_check(
             format!(
                 "`.reshape` would hold {count} elements at this instance but the receiver \
                  holds {total}; a reshape cannot change how many elements a tensor has"

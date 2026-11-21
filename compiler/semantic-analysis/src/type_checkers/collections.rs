@@ -286,7 +286,6 @@ impl TypeChecker {
         // receivers already do, so a mutation in the same statement (an arm of the
         // `match` it is the scrutinee of) cannot reallocate the slot it lent.
         if matches!(spec.result, ResultShape::OptionBorrow { mutable: false })
-            && Self::is_bare_binding(object)
             && let Some(root) = Self::place_root_name(object)
         {
             self.symbols.add_transient_borrow(&root, false);
