@@ -10,6 +10,24 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.57.4] - 2026-11-21
+
+### Fixed
+
+- Pruning an unused standard library function no longer leaves the IR builder positioned in one
+  of its freed blocks. When the last body emitted was a pruned one, the next pass read the freed
+  block, which glibc's allocator happened to leave intact and macOS's did not: every macOS
+  release build aborted in `neuroc compile`. The release smoke test now fills freed memory on
+  Linux too, so a read of this kind fails there as well.
+- The test for a dynamic math function on a GPU expected the device body on every machine. With
+  no vendor math library installed (CI's runners), the device path declines the body by design
+  and the host runs it, so the test now checks whichever applies.
+
+### Changed
+
+- `env_logger` 0.11.12. `clap` stays at 4.6.7: 4.6.9 needs `syn` 3.0.10, which `bindgen` 0.73.2 (the
+  newest, behind `mlir-sys`) does not compile against.
+
 ## [5.57.3] - 2026-11-21
 
 ### Added

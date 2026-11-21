@@ -204,6 +204,10 @@ jobs:
       # and the program must exit with exactly that value.
       - name: Run release smoke tests
         shell: bash
+        # glibc fills freed memory with this byte, so a read through a freed LLVM handle
+        # fails here as it does under macOS's allocator, instead of passing by luck.
+        env:
+          MALLOC_PERTURB_: "165"
         run: |
           ext='${{ runner.os == 'Windows' && '.exe' || '' }}'
           for case in function_call:8 factorial:120; do

@@ -303,6 +303,16 @@ impl<'ctx> CodegenContext<'ctx> {
                 break;
             }
             for function in unused {
+                // The builder may still sit in the last body emitted. Deleting that body frees
+                // its blocks, and a later `get_insert_block` would hand back a dangling one.
+                if self
+                    .builder
+                    .get_insert_block()
+                    .and_then(|block| block.get_parent())
+                    == Some(function)
+                {
+                    self.builder.clear_insertion_position();
+                }
                 if let Ok(name) = function.get_name().to_str() {
                     self.functions.remove(name);
                 }

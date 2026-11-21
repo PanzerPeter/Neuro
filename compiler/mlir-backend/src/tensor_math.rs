@@ -255,7 +255,8 @@ mod tests {
     };
 
     use crate::bridge::tests::{
-        assert_launches_on_gpu, assert_lowered, mlir_of, operand, outlined, tensor_of,
+        assert_host_only_on_gpu, assert_launches_on_gpu, assert_lowered, mlir_of, operand,
+        outlined, tensor_of,
     };
 
     use neuro_hir::{HirExpr, HirExprKind, HirMathOp, HirProgram, HirTarget, HirType};
@@ -349,6 +350,14 @@ mod tests {
             "{mlir}"
         );
         assert_lowered(&program);
-        assert_launches_on_gpu(&program);
+        // The device keeps the body only where the vendor math library is installed.
+        let target = GpuTarget::Nvidia {
+            chip: "sm_80".to_string(),
+        };
+        if device_math(&new_context(), &target, "isa") {
+            assert_launches_on_gpu(&program);
+        } else {
+            assert_host_only_on_gpu(&program);
+        }
     }
 }
