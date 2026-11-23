@@ -111,7 +111,7 @@ Reference issues with #issue-number.
 Signed-off-by: Your Name <your.email@example.com>
 ```
 
-**Scopes**: `lexer`, `parser`, `semantic`, `codegen`, `infra`, `tests`, `docs`, `build`, `ci`
+**Scopes**: `lexer`, `parser`, `semantic`, `codegen`, `infra`, `tests`, `examples`, `docs`, `build`, `ci`
 
 **Examples**:
 - `parser: add struct definition parsing`

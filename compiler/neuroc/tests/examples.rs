@@ -160,8 +160,16 @@ fn compile_example(examples_dir: &Path, rel: &str) -> Result<PathBuf, String> {
 }
 
 /// Run `exe` and return what it wrote to standard output together with its exit code.
+///
+/// `NEURO_EXAMPLE_PRELOAD` names a library preloaded into the example alone, never into
+/// `neuroc` or this harness: `tools/gates.sh --asan` sets it to `libasan.so`, so a leak or a
+/// bad free in generated code turns into an exit-code mismatch here.
 fn run_example(exe: &Path) -> Result<(i32, String), String> {
-    let output = Command::new(exe)
+    let mut command = Command::new(exe);
+    if let Some(preload) = std::env::var_os("NEURO_EXAMPLE_PRELOAD") {
+        command.env("LD_PRELOAD", preload);
+    }
+    let output = command
         .output()
         .map_err(|e| format!("failed to run {}: {}", exe.display(), e))?;
     let code = output

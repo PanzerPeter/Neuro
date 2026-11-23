@@ -95,7 +95,9 @@ cargo run -p neuroc -- compile examples/basics/hello.nr -O2 -o hello
 ```
 
 **Quality gates.** Every change must leave these green before it is called
-done. Run them; do not assume:
+done. Run them; do not assume. `tools/gates.sh` runs all five and exits
+non-zero if any fails (`--full` adds the release build and rustdoc, `--asan`
+runs every example under AddressSanitizer):
 
 ```bash
 cargo fmt --all -- --check
@@ -144,9 +146,9 @@ its entry point, public surface, or dependencies.
 
 **Commits.** Format: `scope: short summary` (50 chars or less), with an
 optional body explaining what and why. Valid scopes: `lexer`, `parser`,
-`semantic`, `codegen`, `infra`, `tests`, `docs`, `build`, `ci`. A contributed
-commit carries a `Signed-off-by:` trailer (`git commit -s`) per the DCO in
-CONTRIBUTING.md. The human committer adds it, so an agent never writes one into
+`semantic`, `codegen`, `infra`, `tests`, `examples`, `docs`, `build`, `ci`. A
+contributed commit carries a `Signed-off-by:` trailer (`git commit -s`) per the
+DCO in CONTRIBUTING.md. The human committer adds it, so an agent never writes one into
 a message. No co-author trailers.
 
 **Versioning.** The number lives once, in `[workspace.package].version`, and

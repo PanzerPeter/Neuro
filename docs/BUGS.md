@@ -5,7 +5,7 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
-## BUG-171: a `val` named like a size parameter does not shadow it
+## BUG-171: a binding named like a size parameter is accepted and reads the parameter
 
 - **Status**: open, confirmed
 - **Area**: `semantic-analysis` / `hir-lowering` (a size parameter read as a value)
@@ -33,9 +33,11 @@ consulted, so the binding is made and never read.
 
 **Workaround**: give the local another name.
 
-**Fix sketch**: resolve a name read as a value against the local scope first, as every other
-binding does, and only then as a size parameter, in both the checker and lowering. Alternatively
-refuse the shadowing in the checker, with the spec amended to say so.
+**Fix sketch**: ruled: the language refuses the binding. A size, shape or `const` parameter is
+a value and a type-level extent at once, so a local of the same name would split `N` from
+`[T; N]` in one body (Rust refuses the same shadow). The checker reports any binding (`val`,
+`mut`, pattern, loop or closure parameter) that takes a generic parameter's name, naming the
+parameter. Regression test: the repro above is rejected, for a size and a `const` parameter.
 
 ## BUG-170: reading a field of a temporary with a `Drop` impl skips its destructor
 
@@ -202,13 +204,14 @@ for `.exp()` and `.pow()` to the program's definitions.
 
 **Workaround**: rename the function.
 
-**Fix sketch**: emit every program function except the root `main` under a symbol no C name can
-take, such as a `neuro.fn.` prefix (a Neuro name holds no `.`). Calls already go through the
-backend's name-keyed function table, so only the declarations, the `neuroc test` entry's lookup
-of each test, and the runtime pruning's removal from that table change. The open question is
-`--emit obj`: `docs/guides/cli-usage.md` and both Python differential harnesses load root
-functions from the object by their bare names, so a library build needs an exported alias per
-root function, or the backend needs to know when it builds an executable.
+**Fix sketch**: ruled. Emit every program function, method and closure except the root `main`
+under a symbol no C name can take, a `neuro.fn.` prefix (a Neuro name holds no `.`), in every
+build. Calls already go through the backend's name-keyed function table, so only the
+declarations, the `neuroc test` entry's lookup of each test, and the runtime pruning's removal
+from that table change. `--emit obj` adds a bare-name alias per root-module function, so the
+tools and the CLI guide that load them by name keep working, and refuses a root function whose
+bare name is one the backend or LLVM's library calls reach (`malloc`, `free`, `write`, `abort`,
+the math library), with an error naming the clash.
 
 ## BUG-163: a `()` pattern does not parse
 

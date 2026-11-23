@@ -10,6 +10,23 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.58.1] - 2026-11-23
+
+### Added
+
+- `tools/gates.sh` runs the five quality gates with one exit code; `--full` adds the release build
+  and rustdoc, and `--asan` runs every example under AddressSanitizer with freed memory poisoned,
+  so a leak or a bad free in generated code fails the example's exit-code pin. It exports the
+  MLIR and TableGen prefixes from `LLVM_SYS_231_PREFIX` and, on a systemd machine outside CI, runs
+  cargo in a memory-capped scope.
+
+### Changed
+
+- BUG-164 and BUG-171 carry ruled fixes. A program's own functions take symbols no C name can
+  take, with bare-name aliases for root functions under `--emit obj` and an error for one named
+  like a C library function there. A binding that takes the name of a size, shape or `const`
+  parameter is refused instead of shadowing it.
+
 ## [5.58.0] - 2026-11-23
 
 ### Added
