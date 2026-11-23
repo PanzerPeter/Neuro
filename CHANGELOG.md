@@ -10,6 +10,17 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.58.0] - 2026-11-23
+
+### Added
+
+- `file.tensor(name)` reads into a tensor type with `?` axes, each taking the extent the file
+  stores: `val x: Tensor<f32, [?, 784]> = file.tensor("images")?`. A named axis such as `?N` binds
+  the stored extent for the rest of the scope, or, when already bound, is checked against it at
+  run time like any annotation. The rank and every literal extent are still compared, and a
+  mismatch is an `Err` whose message spells the expected shape with its `?`s.
+- `out.add(name, &t)` accepts a tensor with `?` axes and saves it at the extents it has when added.
+
 ## [5.57.4] - 2026-11-21
 
 ### Fixed

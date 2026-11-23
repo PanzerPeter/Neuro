@@ -248,11 +248,13 @@ result. On Windows the stored pair comes from `__p___argc` / `__p___argv`, becau
 untouched and links nothing.
 
 **Tensor bytes.** `codegen/expressions/tensor_bytes.rs` lowers the two intrinsics lowering emits
-for `std::safetensors`: `__tensor_from_bytes(&[u8])` allocates the call's result tensor and
-`memcpy`s the slice into it, and `__tensor_bytes(&Tensor)` `malloc`s a buffer of the tensor's size,
-copies the elements in (a device tensor through `device_download`, chosen by `split_on_home`) and
-returns it as a `Vec<u8>`. The library has checked the length, and every target is little-endian
-as the format is.
+for `std::safetensors`: `__tensor_from_bytes((&[u8], &[u64]))` allocates the call's result
+tensor, its `?` axes sized from the stored extents in the second slice, and `memcpy`s the bytes
+into it, and `__tensor_bytes(&Tensor)` `malloc`s a buffer of the tensor's size, copies the elements
+in (a device tensor through `device_download`, chosen by `split_on_home`) and returns it as a
+`Vec<u8>` paired with a `Vec<u64>` of every axis's extent (`handle_extent`; a scalar's is empty).
+The library has checked the length and the rank, and every target is little-endian as the format
+is.
 
 **The GPU runtime.** A module that defines `__neuro_gpu_panic` links `codegen/gpu_runtime.ll`
 for `GpuVendor::Nvidia` or `codegen/gpu_runtime_hip.ll` for `GpuVendor::Amd`
@@ -848,10 +850,8 @@ rounding to `DLPACK_DATA_ALIGN` cannot wrap (`alloc_host_buffer` pads at run tim
 length and folds to the same constant for a static one). A copy of an existing handle takes its
 byte length from the control block's `data_bytes`, which records the unpadded length at allocation
 (`dlpack_copy_length`), so `.clone()`, `.to(device)`, the byte read and write, and the staging
-copies never recompute a size. A clone's own dynamic axes come from the source's extents. The one
-refusal left is a read from bytes (`__tensor_from_bytes`) of a dynamic type: nothing binds its `?`
-axes, since the file that would is not read yet (LIM-046), so the backend reports it as
-unsupported.
+copies never recompute a size. A clone's own dynamic axes come from the source's extents, and a
+read from bytes takes them from the file's stored shape.
 
 `manager_ctx` carries the compiler's own per-tensor control block
 (`dlpack_control_block_type`), which trails the exchange structure inside the SAME `malloc`

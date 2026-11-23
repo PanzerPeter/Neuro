@@ -1002,11 +1002,13 @@ compiler bug, not a diagnostic.
   them to library bodies.
 - **`std::safetensors`'s compiler-known methods** (`safetensors.rs`), intercepted at the top of
   `lower_method_call`, which now takes the expected type. `file.tensor(name)` becomes a `Match` on
-  the library's private `std::safetensors::locate(&file, name, "F32", "[2, 3]")`, the dtype and
-  shape spelled as text the library compares, whose `Ok` arm wraps
-  `__tensor_from_bytes(bytes)` in a new `Result<Tensor<T, S>, IoError>` instance and whose other
-  arm forwards the error. `out.add(name, &t)` becomes
-  `std::safetensors::append(&mut out, name, dtype, shape, __tensor_bytes(&t))`. The two intrinsics
+  the library's private `std::safetensors::locate(&file, name, "F32", "[?, 3]")`, the dtype and
+  shape spelled as text the library compares (a `?` axis matching any extent), whose `Ok` arm
+  wraps `__tensor_from_bytes(stored)`, the stored bytes and extents, in a new
+  `Result<Tensor<T, S>, IoError>` instance and whose other arm forwards the error.
+  `out.add(name, &t)` becomes `std::safetensors::append(&mut out, name, dtype,
+  __tensor_bytes(&t))`, the intrinsic copying out the bytes and the extents the library spells
+  the shape from. The two intrinsics
   are the backend's and appear in no checker table. `lower_try` and `lower_null_coalesce` take
   the expected type and pass it to a `.tensor(...)` operand only, as the checker does.
 - **`__char_at(offset)`**: `lower_builtin_method` types the prelude's decode step as

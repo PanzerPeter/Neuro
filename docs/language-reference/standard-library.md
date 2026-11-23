@@ -101,9 +101,15 @@ that the byte ranges match each tensor's size and cover the data exactly. A file
 `file.tensor(name)` takes its tensor type from what it is bound to, through `?`, `??`, or a
 `val ... else` annotated with the whole `Result` (see
 [Control flow](control-flow.md#annotating-the-scrutinee)). With nothing to read a type from, it
-is a compile error. The stored dtype and shape must match that type exactly; otherwise the read is
-an `Err` that names the tensor and both layouts. A name the file does not hold is `NotFound`. The
-shape is fixed for now: a `?` extent is refused.
+is a compile error. The stored dtype and shape must match that type, a `?` axis taking whatever
+extent the file holds; otherwise the read is an `Err` that names the tensor and both layouts. A
+name the file does not hold is `NotFound`. A named axis such as `?N` binds the stored extent, or,
+when `N` is already bound, is checked against it at run time like any other annotation:
+
+```neuro
+val losses: Tensor<f32, [?N]> = file.tensor("losses")?
+println("{N} losses recorded")
+```
 
 The result is an ordinary tensor that owns its buffer, so it can be moved to a GPU with `.to`,
 updated in place, or trained. `out.add` reads a GPU tensor back before copying it. `save` writes

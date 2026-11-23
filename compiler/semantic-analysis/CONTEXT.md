@@ -412,11 +412,12 @@ a wrong count):
   reached from the struct-method path ahead of the impl lookup by the canonical receiver names
   `std::safetensors::File` and `std::safetensors::Writer`. `file.tensor(name)` is
   `Result<Tensor<T, S>, IoError>` with `Tensor<T, S>` read off the expectation, the tensor itself
-  or the whole `Result`; none is `TensorReadNeedsType`, and a `?` extent is refused through
-  `reject_dynamic_extent`. A `?` or `??` whose operand is a `.tensor(...)` call
+  or the whole `Result`; none is `TensorReadNeedsType`. A dynamic name the expectation writes is
+  made anonymous (`anonymize_dynamic`): the stored shape decides a `?` axis, and the annotation
+  binds the name or checks it as for any value. A `?` or `??` whose operand is a `.tensor(...)` call
   (`reads_tensor_by_context`) passes its own expectation down to it, and an annotated `val-else`
   checks its scrutinee against the annotation. `out.add(name, &t)` takes a `&mut` receiver and a
-  borrowed tensor of any element type and static shape (`TensorWriteNeedsBorrow` otherwise). The
+  borrowed tensor of any element type and shape (`TensorWriteNeedsBorrow` otherwise). The
   library declares neither method;
 - `string.__char_at(offset) -> char`, gated on `in_prelude()` (the declaration being checked
   carries `ast_types::PRELUDE_MODULE`). It is the decode step `Chars::next` is written against;
@@ -1085,8 +1086,8 @@ instantiation check each argument's kind against its parameter (`arg_kind`,
   keep their axis, a constant range takes its static extent with `end` checked at run time,
   reversed or stepped as well, since it reads at constant positions too). `.reshape` and
   `.flatten` are in the shape paragraph below. Unary `-` on a tensor is refused for static tensors
-  too (`InvalidOperator`), so it is not a dynamic gap. A literal, `Tensor::from`, a safetensors
-  read or write and a kernel parameter keep `reject_dynamic_extent` (`TensorDynamicExtent`).
+  too (`InvalidOperator`), so it is not a dynamic gap. A literal, `Tensor::from` and a kernel
+  parameter keep `reject_dynamic_extent` (`TensorDynamicExtent`).
   Run-time checks (the panics of R7) are emitted by lowering and the backends, not decided here.
 - *Narrowing* (R11, `check_as_shape` in `tensor_shape.rs`). `.as_shape::<[...]>()` takes an owned
   receiver (`TensorAsShapeBorrowed` otherwise) of equal rank (`TensorAsShapeRank`), and its axes

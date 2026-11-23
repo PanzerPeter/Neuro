@@ -87,19 +87,15 @@ impl TypeChecker {
             self.record_error(TypeError::TensorReadNeedsType { span });
             return Type::Unknown;
         };
-        let Type::Tensor { shape, .. } = &tensor else {
-            return Type::Unknown;
-        };
-        // A `?` extent binds from the stored shape, which is a later item's work.
-        if self.reject_dynamic_extent(&shape.clone(), "a safetensors read", &tensor, span) {
-            return Type::Unknown;
-        }
+        // The stored shape decides a `?` axis. A name the annotation writes is bound, or checked
+        // when already bound, at the annotation, as for any other value.
+        let tensor = self.anonymize_dynamic(&tensor, span);
         let error = Type::Struct(IO_ERROR.to_string());
         self.instantiate_generic_enum(RESULT_ENUM, &[tensor, error], span)
     }
 
     /// `out.add(name, &tensor)`: the writer is updated in place, and the tensor, of any
-    /// element type and static shape, is only read.
+    /// element type and shape, is only read.
     fn check_tensor_write(&mut self, object: &Expr, obj_ty: &Type, args: &[Expr], span: Span) {
         self.check_mut_self_receiver(object, obj_ty, span);
         let [name, tensor] = args else {
@@ -121,11 +117,7 @@ impl TypeChecker {
         );
         let found = self.check_expr(tensor, None).unwrap_or(Type::Unknown);
         match &found {
-            Type::Reference { inner, .. } if matches!(**inner, Type::Tensor { .. }) => {
-                if let Type::Tensor { shape, .. } = &**inner {
-                    self.reject_dynamic_extent(&shape.clone(), "a safetensors write", inner, span);
-                }
-            }
+            Type::Reference { inner, .. } if matches!(**inner, Type::Tensor { .. }) => {}
             Type::Unknown => {}
             _ => self.record_error(TypeError::TensorWriteNeedsBorrow {
                 found,

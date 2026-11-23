@@ -6,8 +6,10 @@
 //
 // `file.tensor(name)` and `out.add(name, &tensor)` are compiler-known: a tensor's element type
 // and shape are not yet a type parameter a library function can take, so the compiler reads both
-// off the call and calls `locate` and `append` below with the dtype and the shape spelled as text,
-// `"F32"` and `"[2, 3]"`. It copies the bytes into and out of the tensor itself.
+// off the call. A read calls `locate` below with the dtype and the expected shape spelled as text,
+// `"F32"` and `"[?, 3]"`, and sizes the tensor from the stored extents it hands back. A write
+// calls `append` with the dtype and the tensor's bytes and extents. The compiler copies the bytes
+// into and out of the tensor itself.
 
 // The header length, which comes first.
 const LENGTH_BYTES: u64 = 8
@@ -22,12 +24,14 @@ const TENTH_OF_MAX: u64 = 1844674407370955161
 // A header is padded with spaces to this multiple, so the data that follows starts aligned.
 const HEADER_ALIGN: u64 = 8
 
-// One tensor's header entry. `shape` is its canonical text, which is how the compiler spells the
-// shape a read expects; `begin` and `end` count from the start of the data.
+// One tensor's header entry. `shape` is its canonical text, which is what a read's expected shape
+// is compared with; `extents` size the tensor a read builds. `begin` and `end` count from the
+// start of the data.
 struct Stored {
     name: string,
     dtype: string,
     shape: string,
+    extents: Vec<u64>,
     begin: u64,
     end: u64
 }
@@ -337,7 +341,7 @@ impl Reader {
         if offsets[1] - offsets[0] != size {
             return Result::Err("the tensor `{name}` is {dtype} {text}, {size} bytes, but its `data_offsets` span {offsets[1] - offsets[0]}")
         }
-        Result::Ok(Stored { name: name, dtype: dtype, shape: text, begin: offsets[0], end: offsets[1] })
+        Result::Ok(Stored { name: name, dtype: dtype, shape: text, extents: shape, begin: offsets[0], end: offsets[1] })
     }
 
     // `[a, b, ...]` of non-negative integers.
@@ -526,13 +530,39 @@ func is_digit(byte: u8) -> bool {
     byte >= '0' as u8 && byte <= '9' as u8
 }
 
-// Called by `file.tensor(name)`: the stored bytes of `name`, after checking its dtype and shape
-// against the ones the read was annotated with.
-func locate(file: &File, name: &string, dtype: &string, shape: &string) -> Result<&[u8], IoError> {
+// Whether the stored shape text `[2, 784]` is the expected `[?, 784]`, a `?` standing for any one
+// extent. Both are the canonical text, so they agree byte for byte everywhere else.
+func shape_fits(stored: &string, expected: &string) -> bool {
+    mut have: Vec<u8> = Vec::new()
+    push_utf8(&mut have, stored)
+    mut want: Vec<u8> = Vec::new()
+    push_utf8(&mut want, expected)
+    mut at: u64 = 0
+    for index in 0..want.len() {
+        if want[index] == '?' as u8 {
+            if at >= have.len() || !is_digit(have[at]) {
+                return false
+            }
+            while at < have.len() && is_digit(have[at]) {
+                at += 1
+            }
+        } else {
+            if at >= have.len() || have[at] != want[index] {
+                return false
+            }
+            at += 1
+        }
+    }
+    at == have.len()
+}
+
+// Called by `file.tensor(name)`: the stored bytes and extents of `name`, after checking its dtype
+// and shape against the ones the read was annotated with.
+func locate(file: &File, name: &string, dtype: &string, shape: &string) -> Result<(&[u8], &[u64]), IoError> {
     for index in 0..file.tensors.len() {
         val stored = &file.tensors[index]
         if &stored.name == name {
-            if &stored.dtype != dtype || &stored.shape != shape {
+            if &stored.dtype != dtype || !shape_fits(&stored.shape, shape) {
                 return Result::Err(IoError {
                     kind: IoErrorKind::InvalidData,
                     message: "cannot read the tensor `{name}` from {file.path}: it is {stored.dtype} {stored.shape}, and the read expects {dtype} {shape}"
@@ -549,7 +579,8 @@ func locate(file: &File, name: &string, dtype: &string, shape: &string) -> Resul
                     }
                 }
             }
-            return Result::Ok(bytes)
+            val extents = file.tensors[index].extents.slice(0..stored.extents.len())
+            return Result::Ok((bytes, extents))
         }
     }
     Result::Err(IoError {
@@ -653,14 +684,15 @@ impl Writer {
     }
 }
 
-// Called by `out.add(name, &tensor)` with the tensor's bytes already copied. A name added again
-// replaces the earlier tensor, as an entry of a Python dict would.
-func append(out: &mut Writer, name: &string, dtype: &string, shape: &string, data: Vec<u8>) {
+// Called by `out.add(name, &tensor)` with the tensor's bytes and extents already copied out. A name
+// added again replaces the earlier tensor, as an entry of a Python dict would.
+func append(out: &mut Writer, name: &string, dtype: &string, parts: (Vec<u8>, Vec<u64>)) {
     mut index: u64 = 0
     while index < out.tensors.len() && &out.tensors[index].name != name {
         index += 1
     }
-    val pending = Pending { name: name.clone(), dtype: dtype.clone(), shape: shape.clone(), data: data }
+    val (data, extents) = parts
+    val pending = Pending { name: name.clone(), dtype: dtype.clone(), shape: shape_text(&extents), data: data }
     if index < out.tensors.len() {
         out.tensors[index] = pending
     } else {

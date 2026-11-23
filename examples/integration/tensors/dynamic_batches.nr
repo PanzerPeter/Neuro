@@ -1,7 +1,8 @@
 // Scoring batches whose size is known only at run time. Integration example: named dynamic
-// extents `?B` bound at a call, an annotation, a constructor and a struct literal, together
-// with a generic `Float` element, `@`, reductions with `axis:`, `.topk`, slicing, a closure
-// through `.map`, a `match` on `Option`, and `.as_shape` narrowing back to a static shape.
+// extents `?B` bound at a call, an annotation, a constructor, a struct literal and a
+// `std::safetensors` read, together with a generic `Float` element, `@`, reductions with
+// `axis:`, `.topk`, slicing, a closure through `.map`, a `match` on `Option`, `?` over
+// `IoError`, and `.as_shape` narrowing back to a static shape.
 
 // One batch of rows and the label of each row. The literal checks the two agree on `B`.
 struct Batch {
@@ -22,6 +23,20 @@ func make_batch(n: u64) -> Batch {
         i += 1
     }
     Batch { rows: rows, labels: labels }
+}
+
+// The batch goes through a weights file and back. The read of the rows binds `B` from the
+// stored shape, the read of the labels is checked against it, and so is the struct literal.
+func reload(batch: &Batch, path: &string) -> Result<Batch, IoError> {
+    mut out = std::safetensors::Writer::new()
+    out.add("rows", &batch.rows)
+    out.add("labels", &batch.labels)
+    out.save(path)?
+    val file = std::safetensors::open(path)?
+    val rows: Tensor<f32, [?B, 3]> = file.tensor("rows")?
+    val labels: Tensor<i32, [?B]> = file.tensor("labels")?
+    std::fs::remove_file(path)?
+    Result::Ok(Batch { rows: rows, labels: labels })
 }
 
 // Generic over the element, dynamic over the batch: one body per element type.
@@ -55,7 +70,8 @@ func main() -> i32 {
     mut n: u64 = 2
     while n <= 4 {
         println("batch of {n}:")
-        val batch = make_batch(n)
+        val made = make_batch(n)
+        val batch = reload(&made, "neuro_example_batch.safetensors") ?? panic("cannot reload the batch")
         total += summary(&batch, &w)
         n += 1
     }

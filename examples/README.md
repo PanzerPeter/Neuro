@@ -138,7 +138,7 @@ the full description.
 ### Tensors
 
 - [`tensors/batched_heads.nr`](integration/tensors/batched_heads.nr): Two attention heads as one batch: `einsum` with `...` over a shape parameter, batched `@` with a projection shared across heads, and a gradient that sums both heads.
-- [`tensors/dynamic_batches.nr`](integration/tensors/dynamic_batches.nr): Batches of several sizes scored by one body: `?B` bound at a call, an annotation, a constructor and a struct literal, with a `Float`-generic reduction, `@`, `.topk`, slicing and `.as_shape` narrowing back to a static shape.
+- [`tensors/dynamic_batches.nr`](integration/tensors/dynamic_batches.nr): Batches of several sizes scored by one body: `?B` bound at a call, an annotation, a constructor, a struct literal and a `std::safetensors` read, with a `Float`-generic reduction, `@`, `.topk`, slicing and `.as_shape` narrowing back to a static shape.
 - [`tensors/head_split.nr`](integration/tensors/head_split.nr): Attention scores written once over every size: a sized struct's generic methods split a projection into `D / H`-wide heads, a batched `@`, an `einsum` over the symbolic head width, and two head counts as two checked instances.
 - [`tensors/mixed_precision.nr`](integration/tensors/mixed_precision.nr): `bf16` updates that round back to their weight beside an `f32` master copy that moves, with `.topk` and `.to_checked` over `bf16` data.
 - [`tensors/model_shapes.nr`](integration/tensors/model_shapes.nr): A network's layer stack declared with real tensor parameters, where shapes are part of the types and a second owner of a tensor needs `.clone()`.

@@ -196,6 +196,222 @@ func main() -> i32 {
     );
 }
 
+/// One sum, 21, read into `?` axes through every form that hands a read its type, with the
+/// stored extents bound where a name is written.
+#[test]
+fn a_dynamic_extent_takes_the_stored_extent_in_every_form() {
+    let source = r#"
+func tail(file: &std::safetensors::File) -> Result<Tensor<f32, [?, 3]>, IoError> {
+    file.tensor("w")
+}
+
+func named(file: &std::safetensors::File) -> Result<f32, IoError> {
+    val w: Tensor<f32, [?B, ?C]> = file.tensor("w")?
+    if B * C != 6 {
+        return Result::Ok(-1.0)
+    }
+    Result::Ok(w.sum())
+}
+
+func argument(w: Tensor<f32, [?B, 3]>) -> f32 {
+    mut total: f32 = 0.0
+    for i in 0..B {
+        total += w[i, 0] + w[i, 1] + w[i, 2]
+    }
+    total
+}
+
+func passed(file: &std::safetensors::File) -> Result<f32, IoError> {
+    Result::Ok(argument(file.tensor("w")?))
+}
+
+func otherwise(file: &std::safetensors::File) -> f32 {
+    val w: Tensor<f32, [?, 3]> = file.tensor("w") ?? Tensor::<f32, [?, 3]>::zeros(dims: [1])
+    w.sum()
+}
+
+func guarded(file: &std::safetensors::File) -> f32 {
+    val Ok(w): Result<Tensor<f32, [?, ?]>, IoError> = file.tensor("w") else |e| {
+        return -1.0
+    }
+    w.sum()
+}
+
+func nested(file: &std::safetensors::File, deep: bool) -> f32 {
+    if deep {
+        match file.metadata("format") {
+            Option::Some(_) => {
+                val w: Tensor<f32, [2, ?]> = file.tensor("w") ?? panic("no w")
+                w.sum()
+            },
+            Option::None => -1.0
+        }
+    } else {
+        -1.0
+    }
+}
+
+func narrowed(path: &string) -> Result<f32, IoError> {
+    val w: Tensor<f32, [?, 3]> = std::safetensors::open(path)?.tensor("w")?
+    val Some(fixed) = w.as_shape::<[2, 3]>() else {
+        return Result::Ok(-1.0)
+    }
+    Result::Ok(fixed.sum())
+}
+
+func main() -> i32 {
+    val file = std::safetensors::open("sample.safetensors") ?? panic("cannot open")
+    val sums = [
+        (tail(&file) ?? Tensor::<f32, [?, 3]>::zeros(dims: [1])).sum(),
+        named(&file) ?? -1.0,
+        passed(&file) ?? -1.0,
+        otherwise(&file),
+        guarded(&file),
+        nested(&file, true),
+        narrowed("sample.safetensors") ?? -1.0
+    ]
+    for s in sums {
+        print("{s} ")
+    }
+    val b: Tensor<i64, [?N]> = file.tensor("b") ?? panic("no b")
+    println("N={N} b={b.sum()}")
+    0
+}
+"#;
+    let (code, stdout, _test, _dir) = run_with(source, &[("sample.safetensors", sample())]);
+    assert_eq!(code, 0, "{stdout}");
+    assert_eq!(stdout, "21.0 21.0 21.0 21.0 21.0 21.0 21.0 N=2 b=-1\n");
+}
+
+/// A `?` matches one extent of any size and nothing else: the rank and every literal extent
+/// are still compared, and the message spells the expected shape with its `?`s.
+#[test]
+fn a_dynamic_read_still_checks_the_rank_and_the_literal_extents() {
+    let source = r#"
+func show(read: Result<Tensor<f32, [?, 2]>, IoError>) {
+    match read {
+        Result::Ok(t) => println("read {t.sum()}"),
+        Result::Err(e) => println("{e.kind:?}: {e.message}")
+    }
+}
+
+func main() -> i32 {
+    val file = std::safetensors::open("sample.safetensors") ?? panic("cannot open")
+    show(file.tensor("w"))
+    show(file.tensor("wide"))
+    show(file.tensor("nothing"))
+    val flat: Result<Tensor<f32, [?]>, IoError> = file.tensor("w")
+    match flat {
+        Result::Ok(_) => println("read"),
+        Result::Err(e) => println("{e.message}")
+    }
+    val deep: Result<Tensor<f32, [?, ?, ?]>, IoError> = file.tensor("w")
+    match deep {
+        Result::Ok(_) => println("read"),
+        Result::Err(e) => println("{e.message}")
+    }
+    0
+}
+"#;
+    let mut data = Vec::new();
+    for value in 1..=18 {
+        data.extend_from_slice(&(value as f32).to_le_bytes());
+    }
+    let wide = r#"{"w":{"dtype":"F32","shape":[2,3],"data_offsets":[0,24]},"wide":{"dtype":"F32","shape":[6,2],"data_offsets":[24,72]}}"#;
+    let (code, stdout, _test, _dir) =
+        run_with(source, &[("sample.safetensors", safetensors(wide, &data))]);
+    assert_eq!(code, 0, "{stdout}");
+    assert_eq!(
+        stdout,
+        "InvalidData: cannot read the tensor `w` from sample.safetensors: it is F32 [2, 3], and the read expects F32 [?, 2]\n\
+         read 150.0\n\
+         NotFound: cannot read the tensor `nothing` from sample.safetensors: the file has no tensor of that name\n\
+         cannot read the tensor `w` from sample.safetensors: it is F32 [2, 3], and the read expects F32 [?]\n\
+         cannot read the tensor `w` from sample.safetensors: it is F32 [2, 3], and the read expects F32 [?, ?, ?]\n"
+    );
+}
+
+/// A name already bound is checked where the annotation binds it, as for any other value.
+#[test]
+fn a_read_into_a_bound_name_panics_on_another_extent() {
+    let source = r#"
+func main() -> i32 {
+    val file = std::safetensors::open("sample.safetensors") ?? panic("cannot open")
+    val w: Tensor<f32, [?B, 3]> = file.tensor("w") ?? panic("no w")
+    val m: Tensor<bool, [?B]> = file.tensor("m") ?? panic("no m")
+    val b: Tensor<i64, [?B]> = file.tensor("b") ?? panic("no b")
+    println("{B} {b.sum()}")
+    val long = std::safetensors::open("long.safetensors") ?? panic("cannot open long")
+    val n: Tensor<f32, [?B, 3]> = long.tensor("w") ?? panic("no long w")
+    println("not reached")
+    0
+}
+"#;
+    let mut long = Vec::new();
+    for value in 0..9 {
+        long.extend_from_slice(&(value as f32).to_le_bytes());
+    }
+    let long = safetensors(
+        r#"{"w":{"dtype":"F32","shape":[3,3],"data_offsets":[0,36]}}"#,
+        &long,
+    );
+    let test = CompileTest::new();
+    let path = test.write_source("main.nr", source);
+    let dir = path.parent().expect("a directory").to_path_buf();
+    std::fs::write(dir.join("sample.safetensors"), sample()).expect("write the sample");
+    std::fs::write(dir.join("long.safetensors"), long).expect("write the long file");
+    let exe = test.compile(&path).expect("compiles");
+    let output = Command::new(&exe)
+        .current_dir(&dir)
+        .output()
+        .expect("run the program");
+    assert_ne!(output.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "2 -1\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("dynamic extent `B` is 2 but `n` has 3"),
+        "{stderr}"
+    );
+}
+
+/// A tensor with `?` axes is saved with the extents it has when it is added, and a scalar with
+/// none; both read back.
+#[test]
+fn a_dynamic_tensor_is_saved_with_its_run_time_shape() {
+    let source = r#"
+func main() -> i32 {
+    val n: u64 = 2
+    mut w = Tensor::<f32, [?, 3]>::zeros(dims: [n])
+    for i in 0..n {
+        for j in 0..3 as u64 {
+            w[i, j] = (i * 3 + j + 1) as f32
+        }
+    }
+    val s: Tensor<i32, []> = Tensor::scalar(-7)
+    mut out = std::safetensors::Writer::new()
+    out.add("w", &w)
+    out.add("s", &s)
+    out.save("out.safetensors") ?? panic("cannot save")
+    val back = std::safetensors::open("out.safetensors") ?? panic("cannot open")
+    val again: Tensor<f32, [?, ?]> = back.tensor("w") ?? panic("no w")
+    val t: Tensor<i32, []> = back.tensor("s") ?? panic("no s")
+    println("{again.sum()} {t.item()}")
+    0
+}
+"#;
+    let (code, stdout, _test, dir) = run_with(source, &[]);
+    assert_eq!(code, 0, "{stdout}");
+    assert_eq!(stdout, "21.0 -7\n");
+    let header = r#"{"w":{"dtype":"F32","shape":[2, 3],"data_offsets":[0,24]},"s":{"dtype":"I32","shape":[],"data_offsets":[24,28]}}"#;
+    let padded = format!("{header}{}", " ".repeat((8 - header.len() % 8) % 8));
+    let mut data = Vec::new();
+    for value in [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0] {
+        data.extend_from_slice(&value.to_le_bytes());
+    }
+    data.extend_from_slice(&(-7i32).to_le_bytes());
+    assert_eq!(read(&dir, "out.safetensors"), safetensors(&padded, &data));
+}
+
 /// Every header check, each on a file that breaks only it.
 #[test]
 fn malformed_and_truncated_files_are_invalid_data() {
@@ -491,7 +707,9 @@ fn a_device_tensor_is_read_back_when_added() {
 func main() -> i32 {
     val w: Tensor<f32, [2]> = [1.5, -2.0]
     val g = w.to(Device::GPU(0))
+    val d = Tensor::<f32, [?]>::ones(dims: [3]).to(Device::GPU(0))
     mut out = std::safetensors::Writer::new()
+    out.add("d", &d)
     out.add("g", &g)
     out.save("gpu.safetensors") ?? panic("cannot save")
     0
@@ -510,6 +728,8 @@ func main() -> i32 {
     }
     assert_eq!(output.status.code(), Some(0));
     let file = read(&dir, "gpu.safetensors");
+    let header = String::from_utf8_lossy(&file);
+    assert!(header.contains(r#""d":{"dtype":"F32","shape":[3],"data_offsets":[0,12]}"#));
     let data = &file[file.len() - 8..];
     assert_eq!(
         data,
@@ -534,8 +754,11 @@ func round(path: &string, out_path: &string) -> Result<f32, IoError> {
     }
     val wrong: Result<Tensor<f32, [6]>, IoError> = file.tensor("w")
     val missing: Result<Tensor<f32, [6]>, IoError> = file.tensor("none")
+    val d: Tensor<f32, [?B, ?]> = file.tensor("w")?
+    val wrong_rank: Result<Tensor<f32, [?]>, IoError> = file.tensor("w")
     mut out = std::safetensors::Writer::new()
     out.add("w", &w)
+    out.add("d", &d)
     out.add("w", &w)
     out.add("m", &m)
     out.add_metadata("k", "v")
@@ -543,6 +766,7 @@ func round(path: &string, out_path: &string) -> Result<f32, IoError> {
     out.save(out_path)?
     val again = std::safetensors::open(out_path)?
     val back: Tensor<f32, [2, 3]> = again.tensor("w")?
+    val dynamic: Tensor<f32, [?, ?]> = again.tensor("d")?
     val k = again.metadata("k") ?? "none"
     Result::Ok(back.sum())
 }
@@ -588,17 +812,6 @@ func main() -> i32 {
 }
 "#,
         "expected Tensor<f32, [2]>, found Result<Tensor<f32, [2]>, IoError>",
-    );
-    assert_check_error(
-        "dynamic.nr",
-        r#"
-func main() -> i32 {
-    val file = std::safetensors::open("x") ?? panic("no")
-    val w: Tensor<f32, [?, 2]> = file.tensor("w") ?? panic("no w")
-    0
-}
-"#,
-        "a safetensors read",
     );
 }
 

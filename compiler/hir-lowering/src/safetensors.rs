@@ -1,16 +1,17 @@
 //! `std::safetensors`'s two compiler-known methods, mirroring the checker.
 //!
 //! A read desugars to the library's `locate`, which checks the stored dtype and shape against
-//! the annotated ones (both passed as text), and a copy of the bytes it hands back:
+//! the annotated ones (both passed as text, a `?` axis matching any extent), and a copy of the
+//! bytes it hands back, sized by the stored extents handed back with them:
 //!
 //! ```text
-//! match std::safetensors::locate(&file, name, "F32", "[2, 3]") {
+//! match std::safetensors::locate(&file, name, "F32", "[?, 3]") {
 //!     Ok(__tensor_read_N) => Ok(__tensor_from_bytes(__tensor_read_N)),
 //!     __tensor_read_err_N => Err(__tensor_read_err_N)
 //! }
 //! ```
 //!
-//! A write copies the tensor's bytes out first: `append(&mut out, name, "F32", "[2, 3]",
+//! A write copies the tensor's bytes and extents out first: `append(&mut out, name, "F32",
 //! __tensor_bytes(&t))`. The two intrinsics are the backend's; only this desugar emits them,
 //! so no checker table names them.
 
@@ -83,23 +84,18 @@ fn dtype(element: &HirType) -> Result<&'static str, LoweringError> {
     Ok(name)
 }
 
-/// The dtype and the shape as the library compares them: `"F32"` and `"[2, 3]"`.
+/// The dtype and the shape a read expects, as the library compares them: `"F32"` and
+/// `"[?, 3]"`, a `?` for each axis the stored shape decides.
 fn layout_text(tensor: &HirType) -> Result<(&'static str, String), LoweringError> {
     let HirType::Tensor { element, shape, .. } = tensor else {
         return Err(LoweringError::Malformed {
             detail: format!("a safetensors call over `{tensor}`, which is not a tensor"),
         });
     };
-    let extents = shape
+    let extents: Vec<String> = shape
         .iter()
-        .map(|extent| {
-            extent
-                .map(|e| e.to_string())
-                .ok_or_else(|| LoweringError::Malformed {
-                    detail: "a safetensors call over a tensor with a `?` extent".to_string(),
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|extent| extent.map_or_else(|| "?".to_string(), |e| e.to_string()))
+        .collect();
     Ok((dtype(element)?, format!("[{}]", extents.join(", "))))
 }
 
@@ -287,7 +283,8 @@ impl Lowerer {
         };
         let name = self.lower_expr(name, Some(&text()))?;
         let tensor = self.lower_expr(tensor, None)?;
-        let (dtype, shape) = layout_text(tensor.ty.referent())?;
+        // The library spells the shape from the extents `__tensor_bytes` copies out.
+        let (dtype, _) = layout_text(tensor.ty.referent())?;
         let (params, ret) = self.functions.get(APPEND_FN).cloned().ok_or_else(|| {
             LoweringError::UnresolvedBinding {
                 name: APPEND_FN.to_string(),
@@ -314,7 +311,6 @@ impl Lowerer {
                 borrow(out, true),
                 name,
                 text_literal(dtype.to_string(), span),
-                text_literal(shape, span),
                 data,
             ],
             span,
@@ -345,8 +341,13 @@ mod tests {
     }
 
     #[test]
-    fn a_dynamic_extent_or_a_non_tensor_has_no_layout() {
-        assert!(layout_text(&tensor(HirType::F32, vec![None, Some(4)])).is_err());
+    fn a_dynamic_extent_is_spelled_as_a_question_mark() {
+        let (_, shape) = layout_text(&tensor(HirType::F32, vec![None, Some(4)])).expect("a tensor");
+        assert_eq!(shape, "[?, 4]");
+    }
+
+    #[test]
+    fn a_non_tensor_has_no_layout() {
         assert!(layout_text(&HirType::F32).is_err());
     }
 }

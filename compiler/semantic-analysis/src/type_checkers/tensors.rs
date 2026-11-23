@@ -54,8 +54,8 @@ impl TypeChecker {
 
     /// Report `operation` when any axis of `shape` is dynamic, and answer whether it did.
     ///
-    /// The operations that build a buffer from literal data (a tensor literal, `Tensor::from`,
-    /// a safetensors read or write) need every extent as a number, and funnel through here. A
+    /// The operations that build a buffer from literal data (a tensor literal, `Tensor::from`)
+    /// need every extent as a number, and funnel through here. A
     /// dynamic axis is otherwise read at run time, and widening a static tensor into a
     /// `?`-shaped type is what the axis is for, so that stays legal.
     pub(crate) fn reject_dynamic_extent(

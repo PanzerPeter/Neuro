@@ -783,7 +783,7 @@ func scores(x: &Tensor<f32, [?B, 3]>, w: &Tensor<f32, [3, 2]>) -> Tensor<f32, [?
 **Where a name gets its value.** A name is bound the first time a value meets it:
 
 - at a call, from the arguments in parameter order. A later argument with the same name and a different extent panics before the body runs, naming both values;
-- at a `val` or `mut` annotation, `val x: Tensor<f32, [?B, 784]> = load()`, from the value;
+- at a `val` or `mut` annotation, `val x: Tensor<f32, [?B, 784]> = load()`, from the value, a [`std::safetensors`](standard-library.md#weights-stdsafetensors) read included, whose `?` axes take the stored extents;
 - at a constructor, from `dims:` (below);
 - at a struct literal. A field's type may name an extent, and every field naming `?B` must agree when the value is built. The name belongs to the value, not to the struct type, so one `Batch` type holds batches of every size, and a field read sees `?`;
 - at `.as_shape`, from the receiver (below).
