@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn a_dynamic_tensor_takes_its_shape_block_from_run_time_extents() {
         let ir = fill_module();
-        let body = definition(&ir, "fill");
+        let body = definition(&ir, "neuro.fn.fill");
         // The size trap panics through the module's outlined thunk, not the body itself.
         assert!(ir.contains("tensor size overflows"), "{ir}");
 
@@ -510,11 +510,11 @@ mod tests {
         );
 
         // The handle is loaded from the borrow's cell, then axis 0's extent from its shape array.
-        let dynamic_body = definition(&ir, "dynamic_axis");
+        let dynamic_body = definition(&ir, "neuro.fn.dynamic_axis");
         position(dynamic_body, "dlpack.axis.slot");
         position(dynamic_body, "dlpack.axis");
         // A static axis is the type's own extent, read from no handle.
-        let static_body = definition(&ir, "static_axis");
+        let static_body = definition(&ir, "neuro.fn.static_axis");
         assert!(static_body.contains("ret i64 4"), "{static_body}");
         assert!(!static_body.contains("dlpack"), "{static_body}");
     }
@@ -543,7 +543,7 @@ mod tests {
             )],
             &[],
         );
-        let body = definition(&ir, "zeros");
+        let body = definition(&ir, "neuro.fn.zeros");
         assert!(
             body.contains(&format!("call ptr @{ALIGNED_ALLOC_FN}(i64 64, i64 64)")),
             "{body}"
@@ -562,7 +562,7 @@ mod tests {
     #[test]
     fn a_fill_with_run_time_dims_loops_over_the_run_time_count() {
         let ir = fill_module();
-        let body = definition(&ir, "fill");
+        let body = definition(&ir, "neuro.fn.fill");
         // The loop's bound is the run-time count, not a constant.
         position(body, "%tensor.fill.more = icmp ult i64 %tensor.fill.idx, %");
     }
@@ -585,7 +585,7 @@ mod tests {
             )],
             &[],
         );
-        let body = definition(&ir, "identity");
+        let body = definition(&ir, "neuro.fn.identity");
         position(body, "udiv i64");
         position(body, "urem i64");
     }
@@ -610,7 +610,7 @@ mod tests {
             )],
             &[],
         );
-        let body = definition(&ir, "widen");
+        let body = definition(&ir, "neuro.fn.widen");
         // One axis, so two `i64`s.
         position(body, "call ptr @malloc(i64 16)");
         position(body, "store i64 6, ptr %dlpack.shape.slot");
@@ -640,7 +640,7 @@ mod tests {
             )],
             &[],
         );
-        let body = definition(&ir, "narrow");
+        let body = definition(&ir, "neuro.fn.narrow");
         // The receiver's block is released and its control field cleared.
         position(body, "call void @__neuro_release(ptr %dlpack.shape.block");
         position(body, "store ptr null, ptr %dlpack.field");
@@ -674,7 +674,7 @@ mod tests {
             )],
             &[],
         );
-        let body = definition(&ir, "double");
+        let body = definition(&ir, "neuro.fn.double");
         let read = position(body, "dlpack.axis");
         let freed = position(body, "call void @__neuro_release(ptr %dlpack.shape.block");
         assert!(
@@ -707,7 +707,7 @@ mod tests {
             )],
             &[],
         );
-        let body = definition(&ir, "at");
+        let body = definition(&ir, "neuro.fn.at");
         // The bound on axis 0 is the handle's extent, loaded, not a constant.
         position(body, "icmp ult i64 %");
         position(body, "dlpack.axis");
@@ -831,7 +831,7 @@ mod tests {
             vec![scale],
             &[wrapped("scale_dyn", "ext_dyn", DYNAMIC_BODY)],
         );
-        let body = definition(&ir, "scale_dyn");
+        let body = definition(&ir, "neuro.fn.scale_dyn");
 
         // The operand's extents and strides are read from its handle, not from constants.
         let call = position(body, "call void @ext_dyn(");
@@ -864,7 +864,7 @@ mod tests {
             }
         "#;
         let ir = module_ir(vec![grow], &[wrapped("grow_dyn", "ext_grow", body_ir)]);
-        let body = definition(&ir, "grow_dyn");
+        let body = definition(&ir, "neuro.fn.grow_dyn");
         // `k` widens as unsigned, and the sum is a run-time add.
         position(body, "zext i32");
         position(body, "add i64");

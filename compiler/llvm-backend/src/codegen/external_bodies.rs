@@ -783,7 +783,7 @@ mod tests {
     #[test]
     fn a_borrowed_tensor_is_passed_by_descriptor_and_kept() {
         let ir = host_ir();
-        let scale = body(&ir, "scale");
+        let scale = body(&ir, "neuro.fn.scale");
         assert!(
             scale.contains(
                 "call void @ext_scale(ptr %dlpack.data, ptr %dlpack.data, i64 0, i64 2, i64 1, float %1"
@@ -803,7 +803,7 @@ mod tests {
     #[test]
     fn an_owned_tensor_is_released_after_the_call() {
         let ir = host_ir();
-        let consume = body(&ir, "consume");
+        let consume = body(&ir, "neuro.fn.consume");
         let call = consume
             .find("call void @ext_consume(")
             .unwrap_or_else(|| panic!("expected the linked body to be called:\n{consume}"));
@@ -824,7 +824,7 @@ mod tests {
     #[test]
     fn a_device_body_stages_a_host_operand_and_passes_a_device_one_as_it_is() {
         let ir = device_ir(SOURCE);
-        let scale = body(&ir, "scale");
+        let scale = body(&ir, "neuro.fn.scale");
 
         // The call's device is settled before its first allocation: the stream and the
         // arena are the current device's.
@@ -890,7 +890,7 @@ mod tests {
     #[test]
     fn a_device_operand_leaves_the_result_on_the_device() {
         let ir = device_ir(SOURCE);
-        let scale = body(&ir, "scale");
+        let scale = body(&ir, "neuro.fn.scale");
 
         let choice = position(
             scale,
@@ -956,7 +956,7 @@ mod tests {
         .to_string();
 
         let start = ir
-            .find("define void @fill(")
+            .find("define void @neuro.fn.fill(")
             .unwrap_or_else(|| panic!("a kernel is a void function:\n{ir}"));
         let fill = &ir[start..start + ir[start..].find("\n}").unwrap_or(0)];
         let call = position(fill, "call void @ext_fill(", 0);
@@ -976,7 +976,7 @@ mod tests {
     #[test]
     fn a_host_body_refuses_a_device_tensor() {
         let ir = host_ir();
-        let consume = body(&ir, "consume");
+        let consume = body(&ir, "neuro.fn.consume");
         let guard = position(consume, "%dlpack.on_host = icmp eq i32", 0);
         position(consume, "call void @ext_consume(ptr %dlpack.data", guard);
         assert!(
@@ -1113,10 +1113,10 @@ enum ParseError { Empty, Invalid, OutOfRange }
             GpuVendor::Nvidia,
         );
         assert!(
-            body(&ir, "scale").contains("call void @ext_scale(ptr %device.operand"),
+            body(&ir, "neuro.fn.scale").contains("call void @ext_scale(ptr %device.operand"),
             "the device body is handed device buffers:\n{ir}"
         );
-        let consume = body(&ir, "consume");
+        let consume = body(&ir, "neuro.fn.consume");
         assert!(
             consume.contains("call void @ext_consume(ptr %dlpack.data")
                 && !consume.contains("mgpu"),
@@ -1168,7 +1168,7 @@ enum ParseError { Empty, Invalid, OutOfRange }
 {ir}"
         );
         assert!(
-            body(&ir, "scale")
+            body(&ir, "neuro.fn.scale")
                 .contains("insertvalue { i32, i32 } { i32 10, i32 0 }, i32 %device.index, 1"),
             "a result left on an AMD GPU is a kDLROCM tensor:
 {ir}"
@@ -1193,7 +1193,7 @@ enum ParseError { Empty, Invalid, OutOfRange }
     fn a_fallback_function_chooses_its_device_or_host_body_per_run() {
         let fallback = "@gpu(fallback: true)";
         let ir = fallback_ir(&attributed(fallback, fallback));
-        let scale = body(&ir, "scale");
+        let scale = body(&ir, "neuro.fn.scale");
         let probe = position(scale, "call i32 @__neuro_gpu_usable()", 0);
         position(scale, "call ptr @scale.gpu(", probe);
         position(scale, "call ptr @scale.host(", probe);
@@ -1223,8 +1223,14 @@ enum ParseError { Empty, Invalid, OutOfRange }
             ir.contains("@__neuro_gpu_fallback = internal constant i8 0"),
             "{ir}"
         );
-        assert!(!body(&ir, "scale").contains("__neuro_gpu_usable"), "{ir}");
-        assert!(body(&ir, "consume").contains("__neuro_gpu_usable"), "{ir}");
+        assert!(
+            !body(&ir, "neuro.fn.scale").contains("__neuro_gpu_usable"),
+            "{ir}"
+        );
+        assert!(
+            body(&ir, "neuro.fn.consume").contains("__neuro_gpu_usable"),
+            "{ir}"
+        );
     }
 
     #[test]
@@ -1277,7 +1283,7 @@ enum ParseError { Empty, Invalid, OutOfRange }
             .module
             .print_to_string()
             .to_string();
-            let consume = body(&ir, "consume");
+            let consume = body(&ir, "neuro.fn.consume");
             let filled = position(consume, "store i64 -1, ptr %external.status", 0);
             let called = position(consume, "call void @ext_consume(", filled);
             let read = position(consume, "load i64, ptr %external.status", called);

@@ -170,7 +170,7 @@ fn a_pool_sweeps_its_registrations_before_reclaiming_the_arena() {
         "one registration per owned value:\n{body}"
     );
     assert_eq!(
-        body.matches("call void @Handle__register_with_pool")
+        body.matches("call void @neuro.fn.Handle__register_with_pool")
             .count(),
         2,
         "the type's own hook runs at each construction:\n{body}"
@@ -750,7 +750,7 @@ fn a_question_mark_leaving_a_pool_restores_the_mark() {
         }
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
-    for name in ["pick", "parse"] {
+    for name in ["neuro.fn.pick", "neuro.fn.parse"] {
         let body = function_body(&ir, name);
         assert_eq!(
             body.matches("call void @__neuro_arena_release(").count(),
@@ -783,7 +783,7 @@ fn a_tensor_compound_assignment_allocates_nothing() {
         }
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
-    let body = function_body(&ir, "step");
+    let body = function_body(&ir, "neuro.fn.step");
     // One allocation for `zeros()`, and none for either update.
     assert_eq!(
         body.matches(&format!("call ptr @{ALIGNED_ALLOC_FN}"))
@@ -1226,7 +1226,7 @@ fn optimization_levels_run_an_ir_pipeline() {
         OptimizationLevelSetting::O3,
     ] {
         let ir = optimized_ir(source, level);
-        let body = function_body(&ir, "total");
+        let body = function_body(&ir, "neuro.fn.total");
         assert!(
             !body.contains("alloca"),
             "{:?} left a stack slot unpromoted, so no IR pipeline ran:\n{}",
@@ -1239,7 +1239,7 @@ fn optimization_levels_run_an_ir_pipeline() {
     // must stay exactly where codegen emitted them.
     let unoptimized = optimized_ir(source, OptimizationLevelSetting::O0);
     assert!(
-        function_body(&unoptimized, "total").contains("alloca"),
+        function_body(&unoptimized, "neuro.fn.total").contains("alloca"),
         "-O0 must hand the IR to instruction selection untouched:\n{}",
         unoptimized
     );
@@ -1264,7 +1264,7 @@ fn an_inclusive_range_ending_at_the_type_maximum_terminates() {
     "#;
 
     let ir = optimized_ir(source, OptimizationLevelSetting::O2);
-    let body = function_body(&ir, "count");
+    let body = function_body(&ir, "neuro.fn.count");
     assert!(
         body.contains("ret i32 9"),
         "both loops must stop after their last value:\n{}",
@@ -2060,7 +2060,9 @@ fn an_owned_argument_to_a_reading_parameter_is_released_after_the_call() {
     "#;
     let ir = module_ir(reads, OptimizationLevelSetting::O0);
     let body = function_body(&ir, "main");
-    let call = body.find("call void @show").expect("the call is emitted");
+    let call = body
+        .find("call void @neuro.fn.show")
+        .expect("the call is emitted");
     let release = body[call..]
         .find("call void @__neuro_release(")
         .expect("the argument is released after the call");
@@ -2357,7 +2359,7 @@ fn regression_a_long_array_binding_is_planned_without_listing_its_elements() {
     assert!(
         ir.contains("[4294967295 x i32]"),
         "the parameter keeps its full length:\n{}",
-        function_body(&ir, "f")
+        function_body(&ir, "neuro.fn.f")
     );
 }
 
@@ -2460,7 +2462,7 @@ fn a_closure_environment_is_counted_on_the_heap() {
         }
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
-    let maker = function_body(&ir, "make_adder");
+    let maker = function_body(&ir, "neuro.fn.make_adder");
     assert!(
         maker.contains("call ptr @malloc") && maker.contains("store i64 1, ptr %closure.count"),
         "the environment is allocated with a count of one:\n{maker}"
@@ -2477,7 +2479,7 @@ fn a_closure_environment_is_counted_on_the_heap() {
         "each of the three bindings gives its count back:\n{main}"
     );
     assert!(
-        main.contains("{ ptr @__closure_1, ptr null }"),
+        main.contains("{ ptr @neuro.fn.__closure_1, ptr null }"),
         "a closure with no captures has a null environment:\n{main}"
     );
     let release = function_body(&ir, "__closure_0.env.drop");
@@ -2510,15 +2512,18 @@ fn test_entry_replaces_main_and_keeps_the_program_main_callable() {
     .to_string();
     assert!(ir.contains("define i32 @main(i32 "), "{ir}");
     assert!(ir.contains("define i32 @neuro.program_main()"), "{ir}");
-    let check_main = function_body(&ir, "check_main");
+    let check_main = function_body(&ir, "neuro.fn.check_main");
     assert!(
         check_main.contains("call i32 @neuro.program_main()"),
         "{check_main}"
     );
     let entry = function_body(&ir, "main");
     assert!(entry.contains("call i32 @atoi("), "{entry}");
-    assert!(entry.contains("call void @check_main()"), "{entry}");
-    assert!(entry.contains("call void @prints()"), "{entry}");
+    assert!(
+        entry.contains("call void @neuro.fn.check_main()"),
+        "{entry}"
+    );
+    assert!(entry.contains("call void @neuro.fn.prints()"), "{entry}");
     // The entry's own exits drain what a test printed; the renamed body no longer does.
     assert_eq!(
         entry.matches("ret i32").count(),
@@ -2535,11 +2540,17 @@ fn an_executable_exports_main_alone_and_a_library_everything() {
                           func helper(x: i32) -> i32 { x + 1 }\n\
                           func main() -> i32 { helper(41) }";
     let library = optimized_ir_exporting(SOURCE, OptimizationLevelSetting::O2, Exports::All);
-    assert!(library.contains("define i32 @unused("), "{library}");
-    assert!(library.contains("define i32 @helper("), "{library}");
+    assert!(
+        library.contains("define i32 @neuro.fn.unused("),
+        "{library}"
+    );
+    assert!(
+        library.contains("define i32 @neuro.fn.helper("),
+        "{library}"
+    );
     let executable = optimized_ir_exporting(SOURCE, OptimizationLevelSetting::O2, Exports::Main);
-    assert!(!executable.contains("@unused("), "{executable}");
-    assert!(!executable.contains("@helper("), "{executable}");
+    assert!(!executable.contains("@neuro.fn.unused("), "{executable}");
+    assert!(!executable.contains("@neuro.fn.helper("), "{executable}");
     assert!(
         executable.contains("define noundef i32 @main()"),
         "{executable}"
@@ -2557,7 +2568,7 @@ fn element_accesses_are_tagged_only_where_the_slot_holds_numbers() {
          func cells(t: &mut Tensor<f32, [4]>, i: i64) { t[i] = 2.0f32 }",
         OptimizationLevelSetting::O0,
     );
-    let numbers = function_body(&ir, "numbers");
+    let numbers = function_body(&ir, "neuro.fn.numbers");
     let stores: Vec<_> = numbers
         .lines()
         .filter(|l| l.contains("store double"))
@@ -2572,13 +2583,13 @@ fn element_accesses_are_tagged_only_where_the_slot_holds_numbers() {
             .any(|l| l.contains("%vec.len = load") && l.contains("!tbaa")),
         "{numbers}"
     );
-    let nested = function_body(&ir, "nested");
+    let nested = function_body(&ir, "neuro.fn.nested");
     let slot = nested
         .lines()
         .find(|l| l.contains("store { ptr, i64, i64, i64 }") && l.contains("%vec.slot"))
         .unwrap_or_else(|| panic!("no slot write in:\n{nested}"));
     assert!(!slot.contains("!tbaa"), "{slot}");
-    let cells = function_body(&ir, "cells");
+    let cells = function_body(&ir, "neuro.fn.cells");
     assert!(
         cells
             .lines()

@@ -170,49 +170,6 @@ above.
 `build_expression`, so fusion has nothing to do; or leave `linalg-fuse-elementwise-ops` out of the
 pipeline for checked bodies, which costs a buffer per operation but stays linear.
 
-## BUG-164: a function named like a C library function takes its place
-
-- **Status**: open, confirmed
-- **Area**: `llvm-backend` (`declare_function`, `declare_method` in `codegen/functions.rs`)
-- **Severity**: critical. A float method silently returns the wrong value; other names fail
-  LLVM verification or panic the compiler
-
-**Minimal repro**
-
-```neuro
-func exp(x: f64) -> f64 { 100.0 }
-
-func main() -> i32 {
-    val y: f64 = 1.0
-    (y.exp() * 1000.0) as i32
-}
-```
-
-Expected: exit code 158 (2718 modulo 256). Observed: exit code 160 (100000 modulo 256), because
-`y.exp()` ran the program's `exp`. `func pow(x: f64, y: f64) -> f64 { 0.0 }` makes `2.0.pow(3.0)`
-return 0. `func free(x: i32) -> i32` or `func write(a: i32, b: i32, c: i32) -> i32` beside a
-string concatenation or a `println` fails with `module verification failed: "Call parameter type
-does not match function signature!"`. `func malloc(n: u64) -> u64` panics `neuroc` in
-`format_helpers.rs` (`expected PointerValue variant`). `func abort() -> i32` turns an index panic
-into a segmentation fault.
-
-**Root cause**: confirmed in the code. A function, method or closure of the root module is
-emitted under its bare name (`@exp`, `@free`; a module's items are `@"geo::make"`). The backend
-finds the C functions it calls (`malloc`, `free`, `write`, `abort`) by name with `get_function`
-and gets the program's function instead, and the linker binds the math library calls LLVM emits
-for `.exp()` and `.pow()` to the program's definitions.
-
-**Workaround**: rename the function.
-
-**Fix sketch**: ruled. Emit every program function, method and closure except the root `main`
-under a symbol no C name can take, a `neuro.fn.` prefix (a Neuro name holds no `.`), in every
-build. Calls already go through the backend's name-keyed function table, so only the
-declarations, the `neuroc test` entry's lookup of each test, and the runtime pruning's removal
-from that table change. `--emit obj` adds a bare-name alias per root-module function, so the
-tools and the CLI guide that load them by name keep working, and refuses a root function whose
-bare name is one the backend or LLVM's library calls reach (`malloc`, `free`, `write`, `abort`,
-the math library), with an error naming the clash.
-
 ## BUG-163: a `()` pattern does not parse
 
 - **Status**: open, confirmed

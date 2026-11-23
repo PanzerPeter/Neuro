@@ -91,6 +91,8 @@ lib.make_batch.restype = ctypes.c_void_p
 
 `tools/grad_differential.py` links the same way and takes gradients of compiled scalar functions by central differences. Run it with `python tools/grad_differential.py --neuroc target/debug/neuroc`, or through `cargo test -p neuroc --test grad_differential`.
 
+Each function of the root module, and each instance of a root generic, is exported under its source name (`make_batch` above); functions of other modules are not. The bodies themselves sit under `neuro.fn.`-prefixed symbols, so a program's own `exp` or `free` never replaces the C library's. A root function whose name is a C library symbol (`malloc`, `free`, `write`, `abort`, or a math function such as `exp` or `powf`) cannot be exported under it, so `--emit obj` and `--emit llvm-ir` refuse it with an error naming the function. Rename it, or move it into a module. An executable exports only `main`, so `--emit exe` accepts such a function.
+
 `neuroc` does not link the shared library itself: `-shared` is the platform C compiler's job, and on Windows a DLL additionally needs an export list.
 
 #### Emitting LLVM IR

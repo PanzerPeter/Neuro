@@ -152,7 +152,7 @@ fn gpu_bodies_launch_kernels_and_host_bodies_stay_on_the_host() {
 
     let body = |name: &str| {
         let start = ir
-            .find(&format!("define ptr @{name}("))
+            .find(&format!("define ptr @neuro.fn.{name}("))
             .unwrap_or_else(|| panic!("no `{name}`:\n{ir}"));
         let rest = &ir[start..];
         rest[..rest.find("\n}").unwrap_or(rest.len())].to_string()

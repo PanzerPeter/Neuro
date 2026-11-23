@@ -86,9 +86,9 @@ impl<'ctx> CodegenContext<'ctx> {
 
         let mut cases = Vec::with_capacity(tests.len());
         for (position, name) in tests.iter().enumerate() {
-            let test = self
-                .module
-                .get_function(name)
+            let test = *self
+                .functions
+                .get(name)
                 .ok_or_else(|| CodegenError::UndefinedFunction(name.clone()))?;
             let block = self.context.append_basic_block(entry, "test");
             self.builder.position_at_end(block);

@@ -313,9 +313,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 {
                     self.builder.clear_insertion_position();
                 }
-                if let Ok(name) = function.get_name().to_str() {
-                    self.functions.remove(name);
-                }
+                self.functions.retain(|_, held| *held != function);
                 // SAFETY: the function has no use left in the module, and its handle was just
                 // dropped from `functions`, the only place a later pass could find it by.
                 unsafe { function.delete() };

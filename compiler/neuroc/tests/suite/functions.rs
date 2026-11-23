@@ -147,3 +147,80 @@ fn test_bug_084_main_must_be_declared_without_parameters_returning_i32() {
         );
     }
 }
+
+/// A program function named like a C library function stays the program's own. Before
+/// BUG-164 the root module's functions took their bare names as symbols, so `y.exp()` and
+/// `2.0.pow(3.0)` ran the program's `exp` and `pow` instead of the math library's, and the
+/// backend's own `malloc`, `free` and `write` resolved to the program's. Each form below
+/// is computed by hand: the library values, then the program's functions called directly,
+/// through a closure, through a generic and as a call argument.
+#[test]
+fn regression_bug_164_a_c_library_name_stays_the_programs_own() {
+    let source = r#"
+func exp(x: f64) -> f64 { 100.0 }
+func pow(x: f64, y: f64) -> f64 { 0.0 }
+func free(x: i32) -> i32 { x + 1 }
+func write(a: i32, b: i32, c: i32) -> i32 { a + b + c }
+func malloc(n: u64) -> u64 { n * 2 }
+
+func through<T>(value: T, f: (T) -> T) -> T { f(value) }
+
+func main() -> i32 {
+    val y: f64 = 1.0
+    if (y.exp() * 1000.0) as i32 != 2718 { return 1 }
+    if 2.0.pow(3.0) as i32 != 8 { return 2 }
+    if exp(y) as i32 != 100 { return 3 }
+    val f = |x: f64| exp(x) + pow(x, x)
+    if f(y) as i32 != 100 { return 4 }
+    if through(y, |x: f64| exp(x)) as i32 != 100 { return 5 }
+    if free(write(1, 2, 3)) != 7 { return 6 }
+    val head = "ab"
+    val text = head + "cd"
+    println(text)
+    val doubled = malloc(21)
+    println("{doubled}")
+    0
+}
+"#;
+    for level in ["0", "2"] {
+        let exe =
+            crate::compile_harness::compile_tagged(source, &format!("bug_164_O{level}"), level);
+        let output = std::process::Command::new(&exe).output().expect("run");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "-O{level}: stderr {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "abcd\n42\n",
+            "-O{level}"
+        );
+    }
+}
+
+/// A program's `abort` is not the one a panic calls: the panic still aborts the process
+/// with its message, where BUG-164 returned into the program's function and crashed.
+#[cfg(unix)]
+#[test]
+fn regression_bug_164_a_program_abort_leaves_panics_alone() {
+    use std::os::unix::process::ExitStatusExt;
+    let source = r#"
+func abort() -> i32 { 7 }
+
+func main() -> i32 {
+    val v = [1, 2, 3]
+    val i = abort() - 2
+    v[i]
+}
+"#;
+    let exe = crate::compile_harness::compile_tagged(source, "bug_164_abort", "0");
+    let output = std::process::Command::new(&exe).output().expect("run");
+    assert_eq!(output.status.signal(), Some(6), "{:?}", output.status);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("index out of bounds"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

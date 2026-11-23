@@ -406,8 +406,8 @@ fn a_program_without_io_links_no_runtime_and_keeps_its_main() {
         "__neuro_read_text",
         "__neuro_arg",
         "__neuro_errno_location",
-        "@\"std::fs::read_to_string\"(",
-        "@\"std::env::args\"(",
+        "@\"neuro.fn.std::fs::read_to_string\"(",
+        "@\"neuro.fn.std::env::args\"(",
         "neuro.stdin.sync",
     ] {
         assert!(
@@ -419,7 +419,7 @@ fn a_program_without_io_links_no_runtime_and_keeps_its_main() {
     assert!(reader.contains("define i32 @main(i32"), "{reader}");
     assert!(reader.contains("neuro.program_main"), "{reader}");
     assert!(
-        !reader.contains("@\"std::fs::read_to_string\"("),
+        !reader.contains("@\"neuro.fn.std::fs::read_to_string\"("),
         "unused library functions survived"
     );
 }

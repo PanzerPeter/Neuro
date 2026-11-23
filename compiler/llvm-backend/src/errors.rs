@@ -33,6 +33,12 @@ pub enum CodegenError {
         "constant expression overflows {ty}: `{op}` produces a value outside the range of {ty}"
     )]
     ConstOverflow { op: &'static str, ty: &'static str },
+
+    #[error(
+        "function `{0}` cannot be exported under its own name: `{0}` is a symbol the C library or the compiled code uses, \
+         and the export would take its place for every caller. Rename the function"
+    )]
+    ExportClash(String),
 }
 
 /// Every `inkwell` builder call answers `Result<_, BuilderError>`, and a builder

@@ -15,6 +15,18 @@ use super::drops::is_pure_place;
 /// in a body can be bound under it.
 const SELF_BINDING: &str = "self";
 
+/// The symbol a program function, method or closure is emitted under: its name behind a
+/// prefix holding a `.`, which no Neuro name and no C function can. A program's `exp` or
+/// `free` so never stands in for the C one the backend or LLVM's library calls reach. The
+/// root `main` keeps its name, since the C runtime enters the program there.
+pub(crate) fn program_symbol(name: &str) -> String {
+    if name == "main" {
+        name.to_string()
+    } else {
+        format!("neuro.fn.{name}")
+    }
+}
+
 /// Whether `method` takes a `&self` receiver of `self_ty` by address. A newtype over a
 /// scalar stays by value, since `Type::from_hir` erased it to a type with no place to lend.
 fn self_shared_by_pointer(method: &HirMethod, self_ty: Option<&Type>) -> bool {
@@ -314,7 +326,9 @@ impl<'ctx> CodegenContext<'ctx> {
             ret_basic_type.fn_type(&llvm_param_types, false)
         };
 
-        let function = self.module.add_function(&mangled, llvm_ret_type, None);
+        let function = self
+            .module
+            .add_function(&program_symbol(&mangled), llvm_ret_type, None);
         self.functions.insert(mangled.clone(), function);
         Ok(())
     }
@@ -466,9 +480,9 @@ impl<'ctx> CodegenContext<'ctx> {
             ret_basic_type.fn_type(&llvm_param_types, false)
         };
 
-        let function = self
-            .module
-            .add_function(&func_def.name, llvm_ret_type, None);
+        let function =
+            self.module
+                .add_function(&program_symbol(&func_def.name), llvm_ret_type, None);
         self.functions.insert(func_def.name.clone(), function);
         Ok(())
     }

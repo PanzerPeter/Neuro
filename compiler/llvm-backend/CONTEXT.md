@@ -63,6 +63,21 @@ so does anything not plainly external: the soft-float builtins are `weak_odr` be
 selection calls them after the pipeline has run. At `-O0` nothing would act on it, so nothing
 changes. `compile` and `compile_to_ir` (an object or a module may be a library) export everything.
 
+## Symbol Names
+Every program function, method and closure is emitted under `neuro.fn.` plus its name
+(`program_symbol` in `codegen/functions.rs`); the root `main` alone keeps its own. No Neuro name
+and no C function holds a `.`, so a program's `exp` or `free` never takes the place of the C
+symbol the backend calls (`malloc`, `free`, `write`, `abort`) or that LLVM lowers a math
+intrinsic to. Calls go through the name-keyed `functions` table, never through the symbol.
+
+`compile` and `compile_to_ir` then give each root-module function, and each instance of a root
+generic, its source name as a symbol: `export_root_functions` in `lib.rs` adds an external
+function under that name that tail-calls the body, so C and the `ctypes` harnesses load it by
+name. inkwell has no alias API, which is why it is a forwarding function rather than an LLVM
+alias. A name the module already uses or one in `C_LIBRARY_SYMBOLS` (or its `f`-suffixed float
+form) is refused with `CodegenError::ExportClash`, since the export would bind every call to
+that symbol. Module items, outlined tensor operations and `main` get no export.
+
 ## Alias Classes
 `codegen/alias.rs` tags the loads and stores whose memory is certain with LLVM type-based alias
 metadata (`!tbaa`), so a store to one class never forces a reload from another. The classes are
@@ -1253,7 +1268,8 @@ the stdout output that led up to it.
 when there is one, is renamed `neuro.program_main`; calls already emitted hold the function value,
 not its name, so a test calling `main()` still reaches it. The new `main(argc, argv)` reads
 `atoi(argv[1])` and switches on it to `tests[i]`, returning 0 once the test returns and 2 for an
-index that names no test or no argument at all. Its returns are `@main`'s, so the drain above
+index that names no test or no argument at all. Each test is found in the `functions` table by its
+HIR name, not by symbol. Its returns are `@main`'s, so the drain above
 covers whatever a test printed, and a test that panics aborts its own process only: the harness
 runs the executable once per index. The argument is read through the C runtime's `argv`, which a
 Windows fallback link with `/ENTRY:main` skips; only the `clang` link passes it.

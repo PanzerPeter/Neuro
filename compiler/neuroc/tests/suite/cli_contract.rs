@@ -616,3 +616,78 @@ fn regression_lim_208_byte_order_mark_is_skipped() {
     assert!(!output.status.success());
     assert!(stderr.contains("bom_bad.nr:1:22"), "{stderr}");
 }
+
+/// `--emit obj` exports each root-module function under its bare name, so C links
+/// against it, while the body sits under a symbol no C name can take (BUG-164).
+#[cfg(unix)]
+#[test]
+fn emit_obj_exports_root_functions_by_bare_name() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let source_path = write_source(
+        &temp_dir,
+        "twice.nr",
+        "func twice(value: i32) -> i32 {\n    return value * 2\n}\n",
+    );
+    let object_path = temp_dir.path().join("twice.o");
+    let output = Command::new(neuroc_path())
+        .args(["compile", "--emit", "obj", "-o"])
+        .arg(&object_path)
+        .arg(&source_path)
+        .output()
+        .expect("Failed to execute neuroc compile");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let driver = temp_dir.path().join("driver.c");
+    fs::write(
+        &driver,
+        "int twice(int);\nint main(void) { return twice(21); }\n",
+    )
+    .expect("write driver");
+    let exe = temp_dir.path().join("driver");
+    let status = Command::new("cc")
+        .arg("-o")
+        .arg(&exe)
+        .arg(&driver)
+        .arg(&object_path)
+        .status()
+        .expect("cc should start");
+    assert!(status.success(), "the driver should link against `twice`");
+    let run = Command::new(&exe).status().expect("run driver");
+    assert_eq!(run.code(), Some(42));
+}
+
+/// A bare-name export that is also a C symbol the program reaches would bind every call
+/// to it, the backend's and LLVM's library calls included, so `--emit obj` and
+/// `--emit llvm-ir` refuse it by name (BUG-164). An executable needs no export and builds.
+#[test]
+fn emit_obj_refuses_a_root_function_named_like_a_c_symbol() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    for (name, source) in [
+        ("exp", "func exp(x: f64) -> f64 {\n    x\n}\n"),
+        ("malloc", "func malloc(n: u64) -> u64 {\n    n\n}\n"),
+        ("free", "func free(n: i32) -> i32 {\n    n\n}\n"),
+    ] {
+        let source_path = write_source(&temp_dir, &format!("{name}.nr"), source);
+        for emit in ["obj", "llvm-ir"] {
+            let output = Command::new(neuroc_path())
+                .args(["compile", "--emit", emit, "-o"])
+                .arg(temp_dir.path().join(format!("{name}.out")))
+                .arg(&source_path)
+                .output()
+                .expect("Failed to execute neuroc compile");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                !output.status.success(),
+                "`{name}` --emit {emit} must be refused"
+            );
+            assert!(
+                stderr.contains(&format!("`{name}`")) && stderr.contains("C library"),
+                "the error must name `{name}`, got: {stderr}"
+            );
+        }
+    }
+}

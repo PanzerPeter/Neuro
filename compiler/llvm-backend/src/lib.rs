@@ -170,6 +170,7 @@ pub fn compile(
         gpu,
         None,
     )?;
+    export_root_functions(&codegen_ctx, program)?;
     emit_object_code(&codegen_ctx, optimization, Exports::All)
 }
 
@@ -253,6 +254,7 @@ pub fn compile_to_ir(
         gpu,
         None,
     )?;
+    export_root_functions(&codegen_ctx, program)?;
     // The target machine is built for its data layout and triple as much as for the
     // passes: IR without them is re-interpreted against the consumer's defaults.
     let (target_machine, target_triple) = host_target_machine(optimization)?;
@@ -735,6 +737,130 @@ enum Exports {
     All,
     /// The C `main` alone: the object is linked straight into an executable.
     Main,
+}
+
+/// C symbols a bare-name export must not take: what the backend calls, and what LLVM's
+/// library calls lower to. A `float` form of a math function (`expf`) is matched by its
+/// `f`-less name.
+const C_LIBRARY_SYMBOLS: &[&str] = &[
+    "abort",
+    "atoi",
+    "calloc",
+    "exit",
+    "free",
+    "malloc",
+    "memcmp",
+    "memcpy",
+    "memmove",
+    "memset",
+    "bcmp",
+    "realloc",
+    "snprintf",
+    "write",
+    "acos",
+    "acosh",
+    "asin",
+    "asinh",
+    "atan",
+    "atan2",
+    "atanh",
+    "cbrt",
+    "ceil",
+    "copysign",
+    "cos",
+    "cosh",
+    "erf",
+    "exp",
+    "exp10",
+    "exp2",
+    "expm1",
+    "fabs",
+    "floor",
+    "fma",
+    "fmax",
+    "fmin",
+    "fmod",
+    "frexp",
+    "hypot",
+    "ldexp",
+    "lgamma",
+    "llrint",
+    "llround",
+    "log",
+    "log10",
+    "log1p",
+    "log2",
+    "lrint",
+    "lround",
+    "modf",
+    "nearbyint",
+    "pow",
+    "remainder",
+    "rint",
+    "round",
+    "roundeven",
+    "sin",
+    "sincos",
+    "sinh",
+    "sqrt",
+    "tan",
+    "tanh",
+    "tgamma",
+    "trunc",
+];
+
+/// Give each root-module function of a library build its source name as a symbol: an
+/// external function under that name forwarding to the body, which codegen emits under
+/// `program_symbol`. The tools and C code that load a `--emit obj` function by name keep
+/// working. A name the module already uses, or a C library symbol, is refused rather than
+/// exported, since the export would bind every call to that symbol, the backend's and
+/// LLVM's library calls included.
+fn export_root_functions(
+    codegen_ctx: &CodegenContext<'_>,
+    program: &HirProgram,
+) -> CodegenResult<()> {
+    let builder = codegen_ctx.context.create_builder();
+    for item in &program.items {
+        let HirItem::Function(function) = item else {
+            continue;
+        };
+        let name = function.name.as_str();
+        // `main` is emitted under its own name, a module item (`geo::make`) is not the root
+        // module's, and a tensor operation outlined by lowering is no function the source
+        // declared. A root generic's instance (`id$g_i32`, a `$` no source name holds) is
+        // exported too: the differential harnesses load instances by name.
+        let declared = name.split('$').next().unwrap_or(name);
+        if name == "main"
+            || function.target.outlined()
+            || !declared.chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            continue;
+        }
+        let Some(&body) = codegen_ctx.functions.get(name) else {
+            continue;
+        };
+        let module = &codegen_ctx.module;
+        if module.get_function(name).is_some()
+            || module.get_global(name).is_some()
+            || C_LIBRARY_SYMBOLS.contains(&name)
+            || name
+                .strip_suffix('f')
+                .is_some_and(|double| C_LIBRARY_SYMBOLS.contains(&double))
+        {
+            return Err(CodegenError::ExportClash(name.to_string()));
+        }
+        let export = module.add_function(name, body.get_type(), None);
+        builder.position_at_end(codegen_ctx.context.append_basic_block(export, "entry"));
+        let args: Vec<inkwell::values::BasicMetadataValueEnum<'_>> =
+            export.get_param_iter().map(Into::into).collect();
+        let call = builder.build_call(body, &args, "")?;
+        call.set_tail_call(true);
+        match call.try_as_basic_value().basic() {
+            Some(value) => builder.build_return(Some(&value))?,
+            None => builder.build_return(None)?,
+        };
+    }
+    Ok(())
 }
 
 /// Give every function and global `module` defines internal linkage, except `main`.

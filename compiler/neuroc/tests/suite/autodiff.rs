@@ -188,9 +188,10 @@ func main() -> i32 {
     let ir = std::fs::read_to_string(&ir_path).expect("read IR");
     let derivatives = ir
         .lines()
-        // An instance's symbol holds `$`, so LLVM prints it quoted: `@"f$g_i32__rev"(`.
+        // An instance's symbol holds `$`, so LLVM prints it quoted:
+        // `@"neuro.fn.f$g_i32__rev"(`. The bare-name export beside it forwards to it.
         .filter(|line| {
-            line.starts_with("define") && (line.contains("__rev(") || line.contains("__rev\"("))
+            line.starts_with("define") && line.contains("@\"neuro.fn.") && line.contains("__rev\"(")
         })
         .count();
     assert_eq!(derivatives, 2, "one derivative per instance:\n{ir}");

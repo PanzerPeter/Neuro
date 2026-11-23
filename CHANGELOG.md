@@ -10,6 +10,18 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.58.2] - 2026-11-23
+
+### Fixed
+
+- A function named like a C library function stays the program's own and no longer replaces the
+  C one (BUG-164). `func exp` made `y.exp()` return the program's value, `func free` or
+  `func write` failed LLVM verification beside a string or a `println`, `func malloc` crashed the
+  compiler, and `func abort` turned a panic into a segmentation fault. Program functions, methods
+  and closures are now emitted under `neuro.fn.`-prefixed symbols, the root `main` excepted.
+  `--emit obj` and `--emit llvm-ir` still export each root function under its source name, and
+  refuse one whose name is a C library symbol, with an error naming it.
+
 ## [5.58.1] - 2026-11-23
 
 ### Added

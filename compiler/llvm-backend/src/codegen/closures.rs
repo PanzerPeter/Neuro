@@ -46,7 +46,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 .fn_type(&llvm_params, false)
         };
 
-        let function = self.module.add_function(&closure.name, fn_type, None);
+        let function = self.module.add_function(
+            &super::functions::program_symbol(&closure.name),
+            fn_type,
+            None,
+        );
         self.functions.insert(closure.name.clone(), function);
         let drop_ty = self.context.void_type().fn_type(&[ptr_ty.into()], false);
         let env_drop = self.module.add_function(
