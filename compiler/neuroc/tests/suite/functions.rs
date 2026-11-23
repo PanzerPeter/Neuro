@@ -193,7 +193,7 @@ func main() -> i32 {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
             "abcd\n42\n",
             "-O{level}"
         );

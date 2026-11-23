@@ -10,6 +10,13 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.58.4] - 2026-11-23
+
+### Fixed
+
+- The suite test for a program function named like a C library function no longer fails on
+  Windows, where the program's stdout carries `\r\n`.
+
 ## [5.58.3] - 2026-11-23
 
 ### Fixed
