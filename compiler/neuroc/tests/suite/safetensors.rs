@@ -366,7 +366,10 @@ func main() -> i32 {
         .output()
         .expect("run the program");
     assert_ne!(output.status.code(), Some(0));
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "2 -1\n");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        "2 -1\n"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("dynamic extent `B` is 2 but `n` has 3"),
