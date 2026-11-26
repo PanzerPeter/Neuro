@@ -16,6 +16,7 @@ use ast_types::Expr;
 /// The borrow a call holds of one function value until it returns.
 pub(super) struct Lend {
     name: String,
+    path: String,
     exclusive: bool,
 }
 
@@ -55,7 +56,7 @@ impl TypeChecker {
     pub(super) fn end_lends(&mut self, lends: Vec<Lend>) {
         for lend in lends {
             self.symbols
-                .release_transient_borrow(&lend.name, lend.exclusive);
+                .release_transient_borrow_at(&lend.name, &lend.path, lend.exclusive);
         }
     }
 
@@ -72,7 +73,8 @@ impl TypeChecker {
             _ if self.is_borrowable_sub_place(place) => Self::place_root_name(place)?,
             _ => return None,
         };
-        let (shared, held_exclusive) = self.symbols.borrow_counts(&name)?;
+        let path = Self::borrow_path(place);
+        let (shared, held_exclusive) = self.symbols.borrow_counts_at(&name, &path)?;
         if exclusive {
             // A borrowed `self` carries its borrow in the binding's mutability, not its type.
             let through_shared = match self
@@ -103,8 +105,13 @@ impl TypeChecker {
                 span: place.span(),
             });
         }
-        self.symbols.add_transient_borrow(&name, exclusive);
-        Some(Lend { name, exclusive })
+        self.symbols
+            .add_transient_borrow_at(&name, &path, exclusive);
+        Some(Lend {
+            name,
+            path,
+            exclusive,
+        })
     }
 }
 

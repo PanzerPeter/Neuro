@@ -223,19 +223,35 @@ fn a_value_that_borrows_a_parameter_may_leave_with_it() {
     }
 }
 
-/// A reference that came in through a parameter does not leave inside a closure, because a
-/// caller lending it beside a holder of function values gives that holder none of its borrow.
+/// A reference that came in through a parameter may leave inside a closure, as it may on its
+/// own (LIM-264). It may not be stored where a caller lending it does not keep it: a holder of
+/// function values only takes none of a `&` argument's borrow.
 #[test]
-fn a_closure_over_a_parameter_reference_stays_in_its_call() {
+fn a_closure_over_a_parameter_reference_leaves_its_call_but_not_into_a_function_holder() {
+    let exit = run(
+        "returned_borrow.nr",
+        r#"
+struct H { f: () -> u64 }
+func len_of(s: &string) -> () -> u64 { || s.len() }
+func block_len(s: &string) -> () -> u64 {
+    val g = {
+        val r = s
+        move || r.len()
+    }
+    g
+}
+func held(s: &string) -> H { H { f: move || s.len() + 1 } }
+func main() -> i32 {
+    val text = "four"
+    val f = len_of(&text)
+    val g = block_len(&text)
+    val h = held(&text)
+    (f() + g() + (h.f)()) as i32
+}
+"#,
+    );
+    assert_eq!(exit, 4 + 4 + 5);
     for (name, item) in [
-        (
-            "returned_borrow.nr",
-            "func len_of(s: &string) -> () -> u64 { || s.len() }",
-        ),
-        (
-            "returned_block_borrow.nr",
-            "func len_of(s: &string) -> () -> u64 {\n    val g = {\n        val r = s\n        move || r.len()\n    }\n    g\n}",
-        ),
         (
             "stored_reference.nr",
             "struct H { f: () -> u64 }\nfunc keep(h: &mut H, s: &string) { h.f = move || s.len() }",
@@ -246,6 +262,9 @@ fn a_closure_over_a_parameter_reference_stays_in_its_call() {
         ),
     ] {
         let err = rejected(name, &format!("{item}\nfunc main() -> i32 {{ 0 }}\n"));
-        assert!(err.contains("stays in the call"), "{name}: {err}");
+        assert!(
+            err.contains("cannot store a borrow carried by parameter"),
+            "{name}: {err}"
+        );
     }
 }

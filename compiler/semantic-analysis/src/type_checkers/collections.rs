@@ -58,11 +58,10 @@ impl TypeChecker {
     /// Whether a value of `ty` can live inside a collection's buffer.
     ///
     /// A slot owns what it holds, so any sized value qualifies: a scalar, a `string`, a
-    /// struct, a tensor, another collection. A reference is excluded because the borrow
-    /// checker cannot see through a heap buffer to verify the referent outlives the
-    /// collection, and a function value because its environment count is not released
-    /// slot by slot. A type parameter answers for its instances, which are checked
-    /// where they are written.
+    /// struct, a tensor, another collection, a reference or a function value. A collection
+    /// holding a reference is a holder: the binding behind it holds each borrow inserted
+    /// into it (`hold_inserted_borrows`), as a struct with a reference field does. A type
+    /// parameter answers for its instances, which are checked where they are written.
     fn check_storable(&mut self, kind: CollectionKind, ty: &Type, span: Span) -> Option<()> {
         let storable = !matches!(
             ty,
@@ -72,8 +71,7 @@ impl TypeChecker {
                 | Type::Void
                 | Type::DynObject(_)
                 | Type::Unknown
-        ) && !self.type_holds_reference(ty)
-            && !self.holds_function_value(ty);
+        );
         if storable {
             return Some(());
         }
@@ -206,6 +204,21 @@ impl TypeChecker {
         }
     }
 
+    /// Whether a collection method's result borrows its receiver: only a lookup's
+    /// `Option<&V>` does, while `pop` and `remove` move their element out. `None` when
+    /// `object` is not a collection or `method` is none of its table's.
+    pub(crate) fn collection_result_borrows_receiver(
+        &self,
+        object: &Expr,
+        method: &str,
+    ) -> Option<bool> {
+        let Type::Collection { kind, .. } = self.projection_type(object)?.referent().clone() else {
+            return None;
+        };
+        let spec = collection_method(kind, method)?;
+        Some(matches!(spec.result, ResultShape::OptionBorrow { .. }))
+    }
+
     /// Resolve a method call on a collection receiver, returning its result type, or
     /// `None` when the method is not part of the collection's surface (the caller then
     /// reports `MethodNotFound`).
@@ -275,9 +288,10 @@ impl TypeChecker {
         // moved into the slot like one passed by value.
         if spec.params.contains(&ParamSlot::Value) {
             self.check_pool_collection_store(object, method, args, &expected_args, span);
-            for (arg, slot) in args.iter().zip(spec.params) {
+            for ((arg, slot), ty) in args.iter().zip(spec.params).zip(&expected_args) {
                 if matches!(slot, ParamSlot::Key | ParamSlot::Value) {
                     self.record_move(arg);
+                    self.hold_inserted_borrows(object, arg, ty, span);
                 }
             }
         }
@@ -288,7 +302,8 @@ impl TypeChecker {
         if matches!(spec.result, ResultShape::OptionBorrow { mutable: false })
             && let Some(root) = Self::place_root_name(object)
         {
-            self.symbols.add_transient_borrow(&root, false);
+            self.symbols
+                .add_transient_borrow_at(&root, &Self::borrow_path(object), false);
         }
 
         Some(spec.result.resolve_result(self, &params, span))
@@ -532,7 +547,7 @@ mod tests {
         let errs = errors(
             r#"
             func main() -> i32 {
-                mut v: Vec<&i32> = Vec::new()
+                mut v: Vec<void> = Vec::new()
                 return 0
             }
             "#,
@@ -776,19 +791,83 @@ mod tests {
         assert!(errs.is_empty(), "expected no errors, got {errs:?}");
     }
 
+    /// A reference and a function value are sized values, so a collection holds them
+    /// (LIM-241), and the collection's binding holds what each inserted value borrows.
     #[test]
-    fn a_reference_element_is_refused() {
+    fn regression_a_reference_or_function_element_is_held() {
+        let errs = errors(
+            r#"
+            func main() -> i32 {
+                val s = "abc"
+                val k = 2
+                mut v: Vec<&string> = Vec::new()
+                mut m: HashMap<i32, &string> = HashMap::new()
+                mut f: Vec<(i32) -> i32> = Vec::new()
+                v.push(&s)
+                m.insert(1, &s)
+                f.push(|x: i32| x + k)
+                return v[0].len() as i32 + f[0](1)
+            }
+            "#,
+        );
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+        for (held, frees) in [
+            ("v.push(&s)", "val t = s"),
+            ("m.insert(1, &s)", "val t = s"),
+            ("v[0] = &s", "val t = s"),
+            ("f.push(|x: i32| x + s.len() as i32)", "val t = s"),
+        ] {
+            let errs = errors(&format!(
+                r#"
+            func main() -> i32 {{
+                val keep = "keep".clone()
+                val s = "abc".clone()
+                mut v: Vec<&string> = Vec::new()
+                v.push(&keep)
+                mut m: HashMap<i32, &string> = HashMap::new()
+                mut f: Vec<(i32) -> i32> = Vec::new()
+                {held}
+                {frees}
+                return v.len() as i32 + m.len() as i32 + f.len() as i32
+            }}
+            "#
+            ));
+            assert!(
+                errs.iter().any(|e| e.contains("cannot move out of 's'")),
+                "{held}: {errs:?}"
+            );
+        }
+        // A collection outliving the borrowee cannot take it.
         let errs = errors(
             r#"
             func main() -> i32 {
                 mut v: Vec<&string> = Vec::new()
-                return 0
+                {
+                    val inner = "inner".clone()
+                    v.push(&inner)
+                }
+                return v.len() as i32
             }
             "#,
         );
         assert!(
-            errs.iter().any(|e| e.contains("cannot be stored")),
-            "expected the element error, got {errs:?}"
+            errs.iter().any(|e| e.contains("does not live long enough")),
+            "{errs:?}"
+        );
+        // Nor may one reached through a parameter take a local.
+        let errs = errors(
+            r#"
+            func fill(v: &mut Vec<&string>) {
+                val local = "local".clone()
+                v.push(&local)
+            }
+            func main() -> i32 { 0 }
+            "#,
+        );
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("cannot store a borrow of 'local'")),
+            "{errs:?}"
         );
     }
 

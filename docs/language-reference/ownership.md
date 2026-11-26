@@ -173,7 +173,7 @@ func main() -> i32 {
 - `&T` is itself `Copy`: passing or re-borrowing a reference duplicates the pointer.
 - Method calls and field reads auto-deref through any number of `&` and `&mut`. `r.len()` works on a `&string`, `r.method()` on a `&Struct` or a `&&Struct`, `r.abs()` on a `&f64`, and `r.field` on a `&Struct`. A field write goes through one `&mut`.
 - A borrow of a borrow is written `&&T` in a type. In an expression, borrow a binding that holds the reference (`val rr = &r`), because `&&x` does not borrow a place.
-- Only a **place** can be borrowed: a `val`, `mut` or parameter binding, or a field, a tuple element, or an array, slice or `Vec` element reached from one (`&p.name`, `&arr[i]`, `&v[i]`). A borrow of a part borrows the whole binding, so `p` may not be moved while `&p.name` is live. A `const` and a tensor element are not places, and `&` on them is refused with ``cannot borrow this expression: `&` requires a place``.
+- Only a **place** can be borrowed: a `val`, `mut` or parameter binding, or a field, a tuple element, or an array, slice or `Vec` element reached from one (`&p.name`, `&arr[i]`, `&v[i]`). A borrow of a part borrows that part: `&mut p.a` and `&mut p.b` may be live together, and so may `&p.name` and a write to `p.age`, but `p` itself may not be moved, borrowed mutably or replaced while `&p.name` is live. A run-time index names no particular element, so `&mut v[i]` borrows all of `v`. A `const` and a tensor element are not places, and `&` on them is refused with ``cannot borrow this expression: `&` requires a place``.
 - A **temporary** (a literal, an operator or call result, a struct literal) lives until the end of its statement. A shared borrow of one can therefore be passed straight to a call: `id(&1)`, `size(&(a + b))`, `first(&make())`. The statement releases what the temporary owns. A borrow of a temporary cannot be bound (`val r = &5` is refused). A call that could keep the borrow, in its result or through a `&mut` argument, refuses it too.
 - A method's result can borrow a temporary receiver the same way. `make().view().len()` reads it in place, and `val r = make().view()` is refused, as is storing or returning it. A result borrows the receiver when its return type elides a lifetime; one that names the `impl`'s lifetime (`-> &'a string`) returns what the receiver borrows instead.
 
@@ -328,6 +328,22 @@ func longest<'a>(a: &'a string, b: &'a string) -> &'a string {
 
 Every lifetime used on a reference must be declared in the enclosing `<...>` list (an undeclared `'b` is an `undeclared lifetime` error). The annotation is then **erased**, so `&'a T` and `&T` are the same type. Explicit lifetimes never change which values a signature accepts. Lifetime parameters may be mixed with type and const parameters (`func f<'a, T>(...)`). Lifetime bounds (`'a: 'b`) are not supported.
 
+What explicit lifetimes do decide is what a call keeps. When a return type names every lifetime it has, the result holds only the arguments whose types name one of them:
+
+```neuro
+func first<'a>(keep: &'a string, probe: &string) -> &'a string { keep }
+
+func main() -> i32 {
+    val outer = "outer"
+    mut probe = "p"
+    val r = first(&outer, &probe)
+    probe = "q"          // fine: `r` does not hold `probe`
+    r.len() as i32
+}
+```
+
+The body is held to the same promise. `first` returning `probe` is ``cannot return a borrow carried by parameter 'probe'``, since its type names no lifetime of the result. An argument whose type may carry a borrow without naming a lifetime for it (a struct that declares none, a function value, a trait object, a type parameter) is always kept, as under elision. Generic functions, and methods of generic types, are judged as under elision whatever they write.
+
 ### References held in values
 
 A struct field, an enum or `Option` payload, and a tuple or array element may hold a reference. The struct or enum declares lifetime parameters for it, and so may an `impl` block for the type:
@@ -347,7 +363,7 @@ func view<'a>(text: &'a string, from: u64) -> View<'a> {
 
 A use of the type names its lifetimes before its type arguments (`View<'a>`, `Pick<'a, i32>`), writes `'_`, or leaves them out. Written ones must number exactly what the declaration declares: `View<'a, 'b>` is `` `View` declares 1 lifetime parameter(s), but 2 lifetime argument(s) are written ``, and `i32<'a>` is refused as a type that declares none.
 
-The binding that holds such a value holds its borrows, just as `val r = &s` holds one. While it lives, the borrowee cannot be moved, assigned or borrowed `&mut`. The value takes the borrows written into it, the borrows of the holder it was copied from or is part of (including a `match` or `for` binding), and, for a call's result, the borrows of every argument and the receiver, since under elision the result may hold any of them. A holder keeps its borrows until its own scope ends, even after its value has moved on, so two holders of `&mut x` need separate blocks.
+The binding that holds such a value holds its borrows, just as `val r = &s` holds one. While it lives, the borrowee cannot be moved, assigned or borrowed `&mut`. The value takes the borrows written into it, the borrows of the holder it was copied from or is part of (including a `match` or `for` binding), and, for a call's result, the borrows of every argument and the receiver, since under elision the result may hold any of them (explicit lifetimes narrow that, [above](#explicit-lifetime-annotations)). A holder keeps its borrows until its own scope ends, even after its value has moved on, so two holders of `&mut x` need separate blocks.
 
 Three stores are refused:
 
@@ -355,9 +371,9 @@ Three stores are refused:
 |---|---|
 | A borrow put into a binding declared outside the borrowee's scope: `r = &s`, `h = H { r: &s }`, `h.r = &s`, or `set(&mut h, &s)` from an inner block | `'s' does not live long enough` |
 | A value holding a borrow of a local, returned | `cannot return a reference to 's'` |
-| The same value stored through a `&mut` parameter or `self` | `cannot store a borrow of 's' through a reference` |
+| The same value stored through a `&mut` parameter or `self`, directly or by a call handed both | `cannot store a borrow of 's' through a reference` |
 
-A call is judged conservatively: a signature does not say what the callee keeps, so a `&mut` argument whose type can hold a reference takes every borrow the call's other arguments carry. [`borrowed_records.nr`](../../examples/integration/ownership/borrowed_records.nr) shows these rules working together.
+A call is judged conservatively unless its signature says otherwise: a `&mut` argument whose type can hold a reference takes every borrow the call's other arguments carry. When the referent's type names every lifetime it has (`h: &mut H<'a>`), it takes only the arguments whose types name one of them, so `func set<'a>(h: &mut H<'a>, r: &'a i32, n: &i32)` keeps `r` in `h` and not `n`, and a body storing `n` there is ``cannot store a borrow carried by parameter 'n'``. [`borrowed_records.nr`](../../examples/integration/ownership/borrowed_records.nr) shows these rules working together.
 
 ## Destructors (`impl Drop`)
 

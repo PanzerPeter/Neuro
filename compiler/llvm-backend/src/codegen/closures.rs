@@ -103,23 +103,9 @@ impl<'ctx> CodegenContext<'ctx> {
             self.variables.insert(cap.name.clone(), field_ptr);
             self.variable_types.insert(cap.name.clone(), llvm_ty);
             self.type_env.insert(cap.name.clone(), sem_ty.clone());
-            if let Some((flag_index, target)) = env.owned_flag(i) {
-                let flag_ptr = self.builder.build_struct_gep(
-                    env.struct_ty,
-                    env_ptr,
-                    flag_index,
-                    "capture.owns.ptr",
-                )?;
-                self.captured_drop_entries.insert(
-                    cap.name.clone(),
-                    DropEntry {
-                        name: cap.name.clone(),
-                        storage_ptr: field_ptr,
-                        flag_ptr,
-                        target,
-                        held: Vec::new(),
-                    },
-                );
+            let bound = (cap.name.as_str(), field_ptr);
+            if let Some(entry) = self.capture_drop_entry(&env, env_ptr, i, bound, &sem_ty)? {
+                self.captured_drop_entries.insert(cap.name.clone(), entry);
             }
         }
 
@@ -155,6 +141,44 @@ impl<'ctx> CodegenContext<'ctx> {
         self.define_env_drop(closure, &env)
     }
 
+    /// The drop entry of capture `index` in the environment at `env_ptr`, stored at
+    /// `storage_ptr`, or `None` when the environment does not own it: the plan a binding
+    /// of `ty` gets, with the whole flag and each owning position's flag fields of the
+    /// environment, in plan order. A move finds the entry by `storage_ptr`, so it must be
+    /// the pointer the capture's name is bound to.
+    fn capture_drop_entry(
+        &mut self,
+        env: &EnvLayout<'ctx>,
+        env_ptr: PointerValue<'ctx>,
+        index: usize,
+        (name, storage_ptr): (&str, PointerValue<'ctx>),
+        ty: &Type,
+    ) -> CodegenResult<Option<DropEntry<'ctx>>> {
+        let Some((flag_index, target)) = env.owned_flag(index) else {
+            return Ok(None);
+        };
+        let struct_ty = env.struct_ty;
+        let flag_ptr =
+            self.builder
+                .build_struct_gep(struct_ty, env_ptr, flag_index, "capture.owns.ptr")?;
+        let mut next = flag_index + 1;
+        let mut held = Vec::new();
+        self.plan_held_drops_flagged(storage_ptr, ty, &mut Vec::new(), &mut held, &mut |this| {
+            let field = next;
+            next += 1;
+            Ok(this
+                .builder
+                .build_struct_gep(struct_ty, env_ptr, field, "capture.part.owns.ptr")?)
+        })?;
+        Ok(Some(DropEntry {
+            name: name.to_string(),
+            storage_ptr,
+            flag_ptr,
+            target,
+            held,
+        }))
+    }
+
     /// Emit `<closure>.env.drop(env)`: release each capture the environment still owns,
     /// then the environment itself. The last copy of the closure's value calls it.
     fn define_env_drop(
@@ -177,22 +201,20 @@ impl<'ctx> CodegenContext<'ctx> {
             })?
             .into_pointer_value();
         for (i, cap) in closure.captures.iter().enumerate() {
-            let Some((flag_index, target)) = env.owned_flag(i) else {
-                continue;
-            };
+            let ty = Type::from_hir(&cap.ty);
             let field_ptr = self.builder.build_struct_gep(
                 env.struct_ty,
                 env_ptr,
                 env.capture_field(i),
                 &cap.name,
             )?;
-            let flag_ptr = self.builder.build_struct_gep(
-                env.struct_ty,
-                env_ptr,
-                flag_index,
-                "capture.owns.ptr",
-            )?;
-            self.emit_one_drop(field_ptr, flag_ptr, &target)?;
+            let bound = (cap.name.as_str(), field_ptr);
+            let Some(entry) = self.capture_drop_entry(env, env_ptr, i, bound, &ty)? else {
+                continue;
+            };
+            for (storage_ptr, flag_ptr, target) in Self::snapshot_entry(&entry) {
+                self.emit_one_drop(storage_ptr, flag_ptr, &target)?;
+            }
         }
         let free = self.get_or_declare_free();
         self.builder.build_call(free, &[env_ptr.into()], "")?;
@@ -201,8 +223,9 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The layout of a closure's captured environment: the count and the release, one
-    /// field per capture in order, then one `i1` ownership flag per capture that owns
-    /// something. The definition site, the value site and the release must agree on it.
+    /// field per capture in order, then, for each capture that owns something, an `i1`
+    /// ownership flag for the whole and one per owning position inside it, so a body
+    /// moving one part out leaves the release the rest. The definition site, the value site and the release must agree on it.
     fn closure_env_layout(&self, captures: &[HirCapture]) -> CodegenResult<EnvLayout<'ctx>> {
         let ptr_ty = self.context.ptr_type(AddressSpace::default());
         let mut field_tys: Vec<BasicTypeEnum<'ctx>> =
@@ -215,14 +238,11 @@ impl<'ctx> CodegenContext<'ctx> {
                 continue;
             }
             if let Some(target) = self.captured_drop_target(&ty) {
-                owned.push((i, target));
+                owned.push((i, target, self.held_owner_count(&ty)));
             }
         }
-        field_tys.extend(
-            owned
-                .iter()
-                .map(|_| BasicTypeEnum::from(self.context.bool_type())),
-        );
+        let flags: usize = owned.iter().map(|(_, _, held)| 1 + held).sum();
+        field_tys.extend((0..flags).map(|_| BasicTypeEnum::from(self.context.bool_type())));
         Ok(EnvLayout {
             struct_ty: self.context.struct_type(&field_tys, false),
             capture_count: captures.len(),
@@ -325,18 +345,22 @@ impl<'ctx> CodegenContext<'ctx> {
                 self.codegen_identifier(&cap.name)?
             };
             self.builder.build_store(field_ptr, value)?;
-            let Some((flag_index, _)) = env.owned_flag(i) else {
+            let bound = (cap.name.as_str(), field_ptr);
+            let Some(entry) = self.capture_drop_entry(&env, env_ptr, i, bound, &ty)? else {
                 continue;
             };
+            // The environment takes over what the source owns now, part by part.
             let owns = self.capture_ownership(&cap.name, &ty)?;
+            let mut parts = Vec::with_capacity(entry.held.len());
+            for held in &entry.held {
+                let part = self.owns_position_now(&cap.name, &held.path)?;
+                parts.push(self.builder.build_and(owns, part, "closure.part.owns")?);
+            }
             self.mark_moved_for_drop(&source)?;
-            let flag_ptr = self.builder.build_struct_gep(
-                env.struct_ty,
-                env_ptr,
-                flag_index,
-                "closure.owns",
-            )?;
-            self.builder.build_store(flag_ptr, owns)?;
+            self.builder.build_store(entry.flag_ptr, owns)?;
+            for (held, part) in entry.held.iter().zip(parts) {
+                self.builder.build_store(held.flag_ptr, part)?;
+            }
         }
         Ok(env_ptr)
     }
@@ -433,8 +457,9 @@ impl<'ctx> CodegenContext<'ctx> {
 struct EnvLayout<'ctx> {
     struct_ty: inkwell::types::StructType<'ctx>,
     capture_count: usize,
-    /// Each owning capture's index, with how its value is released, in field order.
-    owned: Vec<(usize, DropTarget)>,
+    /// Each owning capture's index, with how its value is released and how many owning
+    /// positions it holds, in field order.
+    owned: Vec<(usize, DropTarget, usize)>,
 }
 
 impl EnvLayout<'_> {
@@ -443,18 +468,17 @@ impl EnvLayout<'_> {
         ENV_HEADER_FIELDS + index as u32
     }
 
-    /// The field index of capture `index`'s ownership flag, with its release, when the
-    /// capture owns its value.
+    /// The field index of capture `index`'s ownership flag (its positions' flags follow
+    /// it), with its release, when the capture owns its value.
     fn owned_flag(&self, index: usize) -> Option<(u32, DropTarget)> {
-        self.owned
-            .iter()
-            .position(|(owned, _)| *owned == index)
-            .map(|slot| {
-                (
-                    ENV_HEADER_FIELDS + (self.capture_count + slot) as u32,
-                    self.owned[slot].1.clone(),
-                )
-            })
+        let mut field = ENV_HEADER_FIELDS + self.capture_count as u32;
+        for (owned, target, held) in &self.owned {
+            if *owned == index {
+                return Some((field, target.clone()));
+            }
+            field += 1 + *held as u32;
+        }
+        None
     }
 }
 

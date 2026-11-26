@@ -12,6 +12,9 @@ use crate::types::Type;
 #[derive(Debug, Clone, PartialEq)]
 struct BorrowProvenance {
     place: String,
+    /// The sub-place of `place` borrowed, keyed as [`MoveState`] keys a move: empty for
+    /// the whole binding.
+    path: String,
     /// Index of the scope that defined `place` when the borrow was taken. The release
     /// goes to that binding, not to whatever the name resolves to later: once an inner
     /// shadow dies, its name resolves to the outer binding, whose borrow must survive.
@@ -105,6 +108,48 @@ pub(crate) enum GradLoss {
     Done,
 }
 
+/// The borrows live against one sub-place of a binding.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct BorrowCounts {
+    /// Held by a reference binding (`val r = &x`) until it leaves scope.
+    shared_persistent: u32,
+    exclusive_persistent: u32,
+    /// Live only for the current statement (call arguments, conditions, return values).
+    /// Cleared at the end of every statement so a transient borrow never leaks past the
+    /// statement taking it.
+    shared_transient: u32,
+    exclusive_transient: u32,
+}
+
+impl BorrowCounts {
+    fn add(&mut self, other: &BorrowCounts) {
+        self.shared_persistent = self
+            .shared_persistent
+            .saturating_add(other.shared_persistent);
+        self.exclusive_persistent = self
+            .exclusive_persistent
+            .saturating_add(other.exclusive_persistent);
+        self.shared_transient = self.shared_transient.saturating_add(other.shared_transient);
+        self.exclusive_transient = self
+            .exclusive_transient
+            .saturating_add(other.exclusive_transient);
+    }
+
+    fn persistent(&mut self, exclusive: bool) -> &mut u32 {
+        match exclusive {
+            true => &mut self.exclusive_persistent,
+            false => &mut self.shared_persistent,
+        }
+    }
+
+    fn transient(&mut self, exclusive: bool) -> &mut u32 {
+        match exclusive {
+            true => &mut self.exclusive_transient,
+            false => &mut self.shared_transient,
+        }
+    }
+}
+
 /// Information about a symbol (variable)
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SymbolInfo {
@@ -112,15 +157,10 @@ pub(crate) struct SymbolInfo {
     pub(crate) mutable: bool,
     /// What this binding has given away. Drives use-after-move detection.
     pub(crate) moves: MoveState,
-    /// Borrows taken against this binding's place that outlive a single statement:
-    /// each one held by a reference binding (`val r = &x`) until it leaves scope.
-    shared_persistent: u32,
-    exclusive_persistent: u32,
-    /// Borrows against this place that live only for the current statement (call
-    /// arguments, conditions, return values). Cleared at the end of every
-    /// statement so a transient borrow never leaks past the statement taking it.
-    shared_transient: u32,
-    exclusive_transient: u32,
+    /// The borrows taken against this binding, keyed by the sub-place each one
+    /// borrows (`""` for the whole binding, `"a"` for `x.a`). Two borrows conflict only
+    /// when one path contains the other, so `&mut x.a` and `&mut x.b` coexist.
+    borrowed: BTreeMap<String, BorrowCounts>,
     /// The borrows this binding holds: the one place a reference binding borrows
     /// (`val r = &x`), or every differentiated argument of the `@grad` call a loss came
     /// from. Released when this binding dies.
@@ -145,16 +185,30 @@ impl SymbolInfo {
             ty,
             mutable,
             moves: MoveState::default(),
-            shared_persistent: 0,
-            exclusive_persistent: 0,
-            shared_transient: 0,
-            exclusive_transient: 0,
+            borrowed: BTreeMap::new(),
             borrows: Vec::new(),
             grad_loss: None,
             scope_bound: false,
             block_referent: None,
             annotated: false,
         }
+    }
+
+    /// The counts kept for the sub-place `path`, created empty on first use.
+    fn counts_at(&mut self, path: &str) -> &mut BorrowCounts {
+        self.borrowed.entry(path.to_string()).or_default()
+    }
+
+    /// Every borrow that touches the sub-place `path`: one of it, of a part of it, or of
+    /// a place containing it.
+    fn borrows_touching(&self, path: &str) -> BorrowCounts {
+        let mut total = BorrowCounts::default();
+        for (borrowed, counts) in &self.borrowed {
+            if is_path_related(borrowed, path) {
+                total.add(counts);
+            }
+        }
+        total
     }
 }
 
@@ -178,12 +232,22 @@ pub(crate) fn is_frame_slot(place: &str) -> bool {
     frame_slot_binding(place).is_some()
 }
 
-/// One binding's transient borrow counts, captured so alternative paths (the arms of a
-/// `match`) can each start from the same state.
+/// Where a [`SymbolTable::hold_param_origin`] place starts. `'` is in no source name.
+const PARAM_ORIGIN_PREFIX: &str = "'param ";
+
+/// The parameter whose borrows a [`SymbolTable::hold_param_origin`] place stands for, if
+/// `place` is one.
+pub(crate) fn param_origin(place: &str) -> Option<&str> {
+    place.strip_prefix(PARAM_ORIGIN_PREFIX)
+}
+
+/// One binding's transient borrow counts at one sub-place, captured so alternative paths
+/// (the arms of a `match`) can each start from the same state.
 #[derive(Debug, Clone)]
 pub(crate) struct TransientBorrow {
     scope: usize,
     name: String,
+    path: String,
     shared: u32,
     exclusive: u32,
 }
@@ -318,15 +382,24 @@ impl SymbolTable {
         None
     }
 
-    /// Total borrows currently active against `place` (persistent plus
-    /// transient) as `(shared, exclusive)`. `None` when the name is not a live
-    /// binding (e.g. a constant or an undefined name). Drives the
-    /// coexistence checks at each borrow site.
+    /// Total borrows currently active against the whole of `place` (persistent plus
+    /// transient) as `(shared, exclusive)`, a borrow of any part of it included. `None`
+    /// when the name is not a live binding (e.g. a constant or an undefined name). Drives
+    /// the coexistence checks at each borrow site.
     pub(crate) fn borrow_counts(&self, place: &str) -> Option<(u32, u32)> {
-        let info = self.lookup(place)?;
+        self.borrow_counts_at(place, "")
+    }
+
+    /// [`borrow_counts`] for the sub-place `path` of `place`: the borrows of it, of a
+    /// part of it, and of a place containing it. A borrow of a disjoint sibling does not
+    /// count.
+    ///
+    /// [`borrow_counts`]: SymbolTable::borrow_counts
+    pub(crate) fn borrow_counts_at(&self, place: &str, path: &str) -> Option<(u32, u32)> {
+        let counts = self.lookup(place)?.borrows_touching(path);
         Some((
-            info.shared_persistent + info.shared_transient,
-            info.exclusive_persistent + info.exclusive_transient,
+            counts.shared_persistent + counts.shared_transient,
+            counts.exclusive_persistent + counts.exclusive_transient,
         ))
     }
 
@@ -337,8 +410,19 @@ impl SymbolTable {
     ///
     /// [`borrow_counts`]: SymbolTable::borrow_counts
     pub(crate) fn persistent_borrow_counts(&self, place: &str) -> Option<(u32, u32)> {
-        let info = self.lookup(place)?;
-        Some((info.shared_persistent, info.exclusive_persistent))
+        self.persistent_borrow_counts_at(place, "")
+    }
+
+    /// [`persistent_borrow_counts`] for the sub-place `path` of `place`.
+    ///
+    /// [`persistent_borrow_counts`]: SymbolTable::persistent_borrow_counts
+    pub(crate) fn persistent_borrow_counts_at(
+        &self,
+        place: &str,
+        path: &str,
+    ) -> Option<(u32, u32)> {
+        let counts = self.lookup(place)?.borrows_touching(path);
+        Some((counts.shared_persistent, counts.exclusive_persistent))
     }
 
     /// Register a borrow of `place` that lives only for the current statement
@@ -347,25 +431,34 @@ impl SymbolTable {
     ///
     /// [`clear_transient_borrows`]: SymbolTable::clear_transient_borrows
     pub(crate) fn add_transient_borrow(&mut self, place: &str, exclusive: bool) {
+        self.add_transient_borrow_at(place, "", exclusive);
+    }
+
+    /// [`add_transient_borrow`] of the sub-place `path` of `place`.
+    ///
+    /// [`add_transient_borrow`]: SymbolTable::add_transient_borrow
+    pub(crate) fn add_transient_borrow_at(&mut self, place: &str, path: &str, exclusive: bool) {
         if let Some(info) = self.lookup_mut(place) {
-            if exclusive {
-                info.exclusive_transient = info.exclusive_transient.saturating_add(1);
-            } else {
-                info.shared_transient = info.shared_transient.saturating_add(1);
-            }
+            let count = info.counts_at(path).transient(exclusive);
+            *count = count.saturating_add(1);
         }
     }
 
-    /// End one transient borrow of `place` before its statement does: a function value
-    /// lent to a call, or borrowed by its own call, is free again once the call returns.
-    pub(crate) fn release_transient_borrow(&mut self, place: &str, exclusive: bool) {
+    /// End one transient borrow of the sub-place `path` of `place` before its statement
+    /// does: a function value lent to a call, or borrowed by its own call, is free again
+    /// once the call returns.
+    pub(crate) fn release_transient_borrow_at(&mut self, place: &str, path: &str, exclusive: bool) {
         if let Some(info) = self.lookup_mut(place) {
-            if exclusive {
-                info.exclusive_transient = info.exclusive_transient.saturating_sub(1);
-            } else {
-                info.shared_transient = info.shared_transient.saturating_sub(1);
-            }
+            let count = info.counts_at(path).transient(exclusive);
+            *count = count.saturating_sub(1);
         }
+    }
+
+    /// [`release_transient_borrow_at`] of the whole of `place`.
+    ///
+    /// [`release_transient_borrow_at`]: SymbolTable::release_transient_borrow_at
+    pub(crate) fn release_transient_borrow(&mut self, place: &str, exclusive: bool) {
+        self.release_transient_borrow_at(place, "", exclusive);
     }
 
     /// Promote the transient borrow of `place` taken while checking an
@@ -374,14 +467,26 @@ impl SymbolTable {
     ///
     /// [`pop_scope`]: SymbolTable::pop_scope
     pub(crate) fn attach_borrow(&mut self, holder: &str, place: &str, exclusive: bool) {
+        self.attach_borrow_at(holder, place, "", exclusive);
+    }
+
+    /// [`attach_borrow`] of the sub-place `path` of `place` (`val holder = &place.a`), so
+    /// that `holder` freezes that part and leaves its siblings free.
+    ///
+    /// [`attach_borrow`]: SymbolTable::attach_borrow
+    pub(crate) fn attach_borrow_at(
+        &mut self,
+        holder: &str,
+        place: &str,
+        path: &str,
+        exclusive: bool,
+    ) {
         if let Some(info) = self.lookup_mut(place) {
-            if exclusive {
-                info.exclusive_transient = info.exclusive_transient.saturating_sub(1);
-                info.exclusive_persistent = info.exclusive_persistent.saturating_add(1);
-            } else {
-                info.shared_transient = info.shared_transient.saturating_sub(1);
-                info.shared_persistent = info.shared_persistent.saturating_add(1);
-            }
+            let counts = info.counts_at(path);
+            let transient = counts.transient(exclusive);
+            *transient = transient.saturating_sub(1);
+            let persistent = counts.persistent(exclusive);
+            *persistent = persistent.saturating_add(1);
         }
         let Some(scope) = self.defining_depth(place) else {
             return;
@@ -389,6 +494,7 @@ impl SymbolTable {
         if let Some(info) = self.lookup_mut(holder) {
             info.borrows.push(BorrowProvenance {
                 place: place.to_string(),
+                path: path.to_string(),
                 scope,
                 exclusive,
             });
@@ -404,6 +510,22 @@ impl SymbolTable {
         if let Some(info) = self.lookup_mut(holder) {
             info.borrows.push(BorrowProvenance {
                 place: format!("{FRAME_SLOT_PREFIX}{binding}"),
+                path: String::new(),
+                scope: 0,
+                exclusive: false,
+            });
+        }
+    }
+
+    /// Mark `param`, a parameter, as carrying whatever its caller lent it. The mark is a
+    /// place no binding has, so it freezes nothing, and a copy of the parameter, or a value
+    /// built from one, inherits it like any borrow: it is how the escape rules see that a
+    /// value came in through `param`, which a body held to its signature's lifetimes needs.
+    pub(crate) fn hold_param_origin(&mut self, param: &str) {
+        if let Some(info) = self.lookup_mut(param) {
+            info.borrows.push(BorrowProvenance {
+                place: format!("{PARAM_ORIGIN_PREFIX}{param}"),
+                path: String::new(),
                 scope: 0,
                 exclusive: false,
             });
@@ -451,7 +573,8 @@ impl SymbolTable {
     /// is checked per call. Released when `holder` dies or runs its `.backward()`.
     pub(crate) fn hold_reborrow(&mut self, holder: &str, place: &str) {
         if let Some(info) = self.lookup_mut(place) {
-            info.exclusive_persistent = info.exclusive_persistent.saturating_add(1);
+            let count = info.counts_at("").persistent(true);
+            *count = count.saturating_add(1);
         }
         let Some(scope) = self.defining_depth(place) else {
             return;
@@ -459,6 +582,7 @@ impl SymbolTable {
         if let Some(info) = self.lookup_mut(holder) {
             info.borrows.push(BorrowProvenance {
                 place: place.to_string(),
+                path: String::new(),
                 scope,
                 exclusive: true,
             });
@@ -481,11 +605,8 @@ impl SymbolTable {
                 .get_mut(prov.scope)
                 .and_then(|scope| scope.get_mut(&prov.place));
             if let Some(info) = target {
-                if prov.exclusive {
-                    info.exclusive_persistent = info.exclusive_persistent.saturating_add(1);
-                } else {
-                    info.shared_persistent = info.shared_persistent.saturating_add(1);
-                }
+                let count = info.counts_at(&prov.path).persistent(prov.exclusive);
+                *count = count.saturating_add(1);
             }
         }
         if let Some(info) = self.lookup_mut(holder) {
@@ -586,11 +707,8 @@ impl SymbolTable {
             .get_mut(prov.scope)
             .and_then(|scope| scope.get_mut(&prov.place));
         if let Some(info) = target {
-            if prov.exclusive {
-                info.exclusive_persistent = info.exclusive_persistent.saturating_sub(1);
-            } else {
-                info.shared_persistent = info.shared_persistent.saturating_sub(1);
-            }
+            let count = info.counts_at(&prov.path).persistent(prov.exclusive);
+            *count = count.saturating_sub(1);
         }
     }
 
@@ -601,33 +719,37 @@ impl SymbolTable {
     pub(crate) fn clear_transient_borrows(&mut self) {
         for scope in &mut self.scopes {
             for info in scope.values_mut() {
-                info.shared_transient = 0;
-                info.exclusive_transient = 0;
+                for counts in info.borrowed.values_mut() {
+                    counts.shared_transient = 0;
+                    counts.exclusive_transient = 0;
+                }
             }
         }
     }
 
-    /// Every live transient borrow, as the scope index and name it counts against plus
-    /// its `(shared, exclusive)` counts.
+    /// Every live transient borrow, as the scope index, name and sub-place it counts
+    /// against plus its `(shared, exclusive)` counts.
     pub(crate) fn transient_borrows(&self) -> Vec<TransientBorrow> {
-        self.scopes
-            .iter()
-            .enumerate()
-            .flat_map(|(scope, bindings)| {
-                bindings
-                    .iter()
-                    .filter(|(_, info)| info.shared_transient > 0 || info.exclusive_transient > 0)
-                    .map(move |(name, info)| TransientBorrow {
-                        scope,
-                        name: name.clone(),
-                        shared: info.shared_transient,
-                        exclusive: info.exclusive_transient,
-                    })
-            })
-            .collect()
+        let mut found = Vec::new();
+        for (scope, bindings) in self.scopes.iter().enumerate() {
+            for (name, info) in bindings {
+                for (path, counts) in &info.borrowed {
+                    if counts.shared_transient > 0 || counts.exclusive_transient > 0 {
+                        found.push(TransientBorrow {
+                            scope,
+                            name: name.clone(),
+                            path: path.clone(),
+                            shared: counts.shared_transient,
+                            exclusive: counts.exclusive_transient,
+                        });
+                    }
+                }
+            }
+        }
+        found
     }
 
-    /// Replace every transient borrow with `borrows`. A binding listed more than once
+    /// Replace every transient borrow with `borrows`. A place listed more than once
     /// takes the largest count any entry gives it, so a set gathered from several
     /// alternative paths holds what the worst of them holds.
     pub(crate) fn set_transient_borrows(&mut self, borrows: &[TransientBorrow]) {
@@ -638,8 +760,9 @@ impl SymbolTable {
                 .get_mut(borrow.scope)
                 .and_then(|scope| scope.get_mut(&borrow.name));
             if let Some(info) = target {
-                info.shared_transient = info.shared_transient.max(borrow.shared);
-                info.exclusive_transient = info.exclusive_transient.max(borrow.exclusive);
+                let counts = info.counts_at(&borrow.path);
+                counts.shared_transient = counts.shared_transient.max(borrow.shared);
+                counts.exclusive_transient = counts.exclusive_transient.max(borrow.exclusive);
             }
         }
     }

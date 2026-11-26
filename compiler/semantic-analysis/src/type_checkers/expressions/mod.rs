@@ -58,6 +58,7 @@ impl TypeChecker {
                 self.in_sub_place = !outermost;
                 if outermost {
                     self.report_place_move(expr);
+                    self.check_chain_read(expr);
                 }
                 ty
             }
@@ -79,6 +80,26 @@ impl TypeChecker {
         let value = f(self);
         self.in_sub_place = outer;
         value
+    }
+
+    /// Judge the read of `place`, a chain of fields and elements, against the borrows of
+    /// its root binding that overlap it. Its root, read as the chain's base, skipped the
+    /// check, since only the whole chain knows which part is read. A chain on anything
+    /// but a binding (`(*r).a`, a call) reads its base on its own terms.
+    pub(crate) fn check_chain_read(&mut self, place: &Expr) {
+        let mut base = place;
+        loop {
+            match base {
+                Expr::Paren(inner, _) => base = inner,
+                Expr::FieldAccess { object, .. }
+                | Expr::TupleIndex { object, .. }
+                | Expr::Index { object, .. } => base = object,
+                _ => break,
+            }
+        }
+        if let Expr::Identifier(root) = base {
+            self.check_borrowee_read(&root.name, &Self::borrow_path(place), root.span);
+        }
     }
 
     /// Report reading a place whose storage an earlier move gave away, naming the
@@ -185,7 +206,9 @@ impl TypeChecker {
                     if scope_bound && self.function_value_slot != Some(ident.span) {
                         self.record_error(TypeError::ScopeBoundClosureStored { span: ident.span });
                     }
-                    self.check_borrowee_read(&ident.name, ident.span);
+                    if !self.in_sub_place {
+                        self.check_borrowee_read(&ident.name, "", ident.span);
+                    }
                     if self.in_kernel {
                         self.check_kernel_out_read(ident);
                     }

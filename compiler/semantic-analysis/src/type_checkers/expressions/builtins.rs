@@ -527,7 +527,8 @@ impl TypeChecker {
         let Some(place) = Self::slice_borrow_root(object) else {
             return;
         };
-        if let Some((_, exclusive)) = self.symbols.borrow_counts(&place)
+        let path = Self::borrow_path(Self::slice_borrow_base(object));
+        if let Some((_, exclusive)) = self.symbols.borrow_counts_at(&place, &path)
             && exclusive > 0
         {
             self.record_error(TypeError::CannotBorrowWhileMutablyBorrowed {
@@ -535,7 +536,7 @@ impl TypeChecker {
                 span: call_span,
             });
         }
-        self.symbols.add_transient_borrow(&place, false);
+        self.symbols.add_transient_borrow_at(&place, &path, false);
     }
 
     /// The binding a `.slice` receiver ultimately borrows from, seen through a chain of
@@ -547,17 +548,23 @@ impl TypeChecker {
     /// tracker's rule throughout is to record only borrows it can name rather than
     /// guess at the ones it cannot.
     pub(crate) fn slice_borrow_root(expr: &Expr) -> Option<String> {
+        Self::place_root_name(Self::slice_borrow_base(expr))
+    }
+
+    /// The place a chain of `.slice` calls views, `s.a` in `s.a.slice(r).slice(q)`: what
+    /// the borrow counts against. Anything else is its own base.
+    pub(crate) fn slice_borrow_base(expr: &Expr) -> &Expr {
         match expr {
-            Expr::Paren(inner, _) => Self::slice_borrow_root(inner),
+            Expr::Paren(inner, _) => Self::slice_borrow_base(inner),
             Expr::Call { func, .. } => match func.as_ref() {
                 Expr::FieldAccess { object, field, .. }
                     if field.name == SLICE_METHOD || field.name == CHAR_SLICE_METHOD =>
                 {
-                    Self::slice_borrow_root(object)
+                    Self::slice_borrow_base(object)
                 }
-                _ => None,
+                _ => expr,
             },
-            other => Self::place_root_name(other),
+            other => other,
         }
     }
 
@@ -701,10 +708,9 @@ impl TypeChecker {
     /// passes; a `&T` receiver cannot yield write access, so it is rejected. An
     /// owned receiver must root in a `mut` binding: mutating `o.inner` needs `o`
     /// itself mutable. A receiver with no place root (a call or literal temporary)
-    /// is not assignable, so it is rejected like any `&mut` of a value. Exclusivity
-    /// is tracked at binding granularity (matching `&place` borrows), so only a
-    /// receiver that *is* the binding registers the call's transient exclusive
-    /// borrow and checks for a coexisting borrow; both clear at statement end.
+    /// is not assignable, so it is rejected like any `&mut` of a value. The call takes a
+    /// transient exclusive borrow of the receiver's place and checks it against every
+    /// overlapping borrow (matching `&place` borrows); it clears at statement end.
     pub(crate) fn check_mut_self_receiver(
         &mut self,
         object: &Expr,
@@ -739,9 +745,10 @@ impl TypeChecker {
             });
             return;
         }
-        // A borrow of a part borrows the whole binding, so `b.v.push(x)` is refused while
-        // anything borrows `b`, as `v.push(x)` is while anything borrows `v`.
-        if let Some((shared, exclusive)) = self.symbols.borrow_counts(&name)
+        // The call borrows the receiver's place exclusively, so `b.v.push(x)` is refused
+        // while anything borrows `b` or `b.v`, and not while only `b.n` is borrowed.
+        let path = Self::borrow_path(object);
+        if let Some((shared, exclusive)) = self.symbols.borrow_counts_at(&name, &path)
             && (shared > 0 || exclusive > 0)
         {
             self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
@@ -749,7 +756,7 @@ impl TypeChecker {
                 span,
             });
         }
-        self.symbols.add_transient_borrow(&name, true);
+        self.symbols.add_transient_borrow_at(&name, &path, true);
     }
 
     /// Type `.to_checked::<T>()`: exactly one turbofish type, an integer or a `T: Integer`,

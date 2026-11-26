@@ -7,6 +7,7 @@ use super::builtins::{PARSE_METHOD, TO_CHECKED_METHOD};
 use super::lending::Lend;
 use super::{COLLECTION_CTOR, TypeChecker, VEC_WITH_CAPACITY, declarations, eval_const_predicate};
 use crate::errors::TypeError;
+use crate::symbol_table::param_origin;
 use crate::type_checkers::closures::closure_context;
 use crate::type_checkers::container_iterators::views_builtin_receiver;
 use crate::type_checkers::declarations::traits::{
@@ -356,12 +357,15 @@ impl TypeChecker {
     }
 
     /// A callee may store any borrow it is handed into a `&mut` argument whose referent
-    /// can hold one (`func set(h: &mut H, s: &string) { h.r = s }`), and nothing in an
-    /// erased signature says which, so the binding behind each such argument holds every
-    /// borrow the call's other inputs carry: a borrowed argument, what an argument value
-    /// holds, and a borrow of the receiver with whatever it holds. A referent that holds
-    /// function values and no reference takes only what is function-valued: no closure over
-    /// a reference parameter leaves its call, so `opt.step(&batch)` keeps nothing of `batch`.
+    /// can hold one (`func set(h: &mut H, s: &string) { h.r = s }`), and unless its
+    /// lifetimes say which, the binding behind each such argument holds every borrow the
+    /// call's other inputs carry: a borrowed argument, what an argument value holds, and a
+    /// borrow of the receiver with whatever it holds. A signature naming every lifetime of
+    /// the referent narrows that to the inputs whose types name one of them. A referent that
+    /// holds function values and no reference takes only what is function-valued: no closure
+    /// over a reference parameter leaves its call, so `opt.step(&batch)` keeps nothing of
+    /// `batch`. A referent that is the caller's storage (reached through a parameter or
+    /// `self`) takes nothing of this function's frame, as a direct store into it does not.
     fn hold_argument_stores(
         &mut self,
         receiver: Option<(&ast_types::Expr, bool)>,
@@ -395,20 +399,56 @@ impl TypeChecker {
         if holders.iter().any(|(_, references, _)| *references) {
             self.refuse_stored_temporary_borrows(args);
         }
+        // Only this call's own summary: arguments checked outside a call expression (an
+        // operator's, inside a closure argument) must not read an enclosing call's.
+        let flow = self
+            .call_flows
+            .last()
+            .filter(|(call, _)| *call == span)
+            .and_then(|(_, flow)| flow.clone());
+        let takes = |target: Option<usize>, source: Option<usize>| {
+            flow.as_ref()
+                .is_none_or(|flow| flow.store_takes_argument(target, source))
+        };
         for (own, references, targets) in holders {
+            let receiver_carries = references
+                || receiver_ty
+                    .as_ref()
+                    .is_some_and(|ty| self.holds_function_value(ty.referent()));
+            let sources: Vec<usize> = args
+                .iter()
+                .zip(params)
+                .enumerate()
+                .filter(|(index, (_, param))| {
+                    Some(*index) != own
+                        && (references || self.holds_function_value(param))
+                        && takes(own, Some(*index))
+                })
+                .map(|(index, _)| index)
+                .collect();
+            let takes_receiver = own.is_some() && receiver_carries && takes(own, None);
             for holder in targets {
-                let before = self.symbols.borrow_count(&holder);
-                for (index, (arg, param)) in args.iter().zip(params).enumerate() {
-                    if Some(index) != own && (references || self.holds_function_value(param)) {
-                        self.hold_carried_borrows(&holder, arg, param);
+                // The caller's storage: what is stored there is judged as a store through
+                // the parameter it came in as.
+                let caller_param = param_origin(&holder).map(str::to_string).or_else(|| {
+                    self.current_fn_outliving
+                        .contains(&holder)
+                        .then(|| holder.clone())
+                });
+                if let Some(param) = caller_param {
+                    for index in &sources {
+                        self.check_stored_through_reference(&args[*index], Some(&param));
                     }
+                    if takes_receiver && let Some((expr, _)) = receiver {
+                        self.check_stored_through_reference(expr, Some(&param));
+                    }
+                    continue;
                 }
-                let receiver_carries = references
-                    || receiver_ty
-                        .as_ref()
-                        .is_some_and(|ty| self.holds_function_value(ty.referent()));
-                if own.is_some()
-                    && receiver_carries
+                let before = self.symbols.borrow_count(&holder);
+                for index in &sources {
+                    self.hold_carried_borrows(&holder, &args[*index], &params[*index]);
+                }
+                if takes_receiver
                     && let Some(root) = &receiver_root
                     && *root != holder
                 {
@@ -427,7 +467,12 @@ impl TypeChecker {
         if let Some((place, _)) = borrow_target_of(arg) {
             return vec![place];
         }
-        let Some(root) = Self::place_root_name(arg) else {
+        // `&mut *r` writes where `r` points, as `r` itself does.
+        let place = match arg {
+            ast_types::Expr::Reference { operand, .. } => operand.as_ref(),
+            other => other,
+        };
+        let Some(root) = Self::place_root_name(place) else {
             return Vec::new();
         };
         match self.symbols.lookup(&root).map(|info| &info.ty) {
@@ -1132,6 +1177,23 @@ impl TypeChecker {
     }
 
     pub(super) fn check_call_expr(
+        &mut self,
+        func: &Expr,
+        type_args: &[GenericArg],
+        args: &[Expr],
+        span: &Span,
+        expected: Option<&Type>,
+    ) -> Option<Type> {
+        // What the callee's lifetimes say it keeps, for the argument checks below; a call
+        // nested in an argument pushes and pops its own.
+        let flow = self.callee_flow(func).cloned();
+        self.call_flows.push((*span, flow));
+        let ty = self.check_callee_and_arguments(func, type_args, args, span, expected);
+        self.call_flows.pop();
+        ty
+    }
+
+    fn check_callee_and_arguments(
         &mut self,
         func: &Expr,
         type_args: &[GenericArg],

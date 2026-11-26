@@ -1,9 +1,10 @@
 // End-to-end tests for explicit lifetime annotations: the `'a` in
-// `func longest<'a>(a: &'a string, b: &'a string) -> &'a string`. Lifetimes are a
-// well-formedness surface only: they are validated against the declared parameter
-// list, then erased, so they add zero runtime cost and never change a reference's
-// type. These tests exercise the full pipeline: parse → type-check → HIR lowering →
-// LLVM codegen → native run.
+// `func longest<'a>(a: &'a string, b: &'a string) -> &'a string`. They are validated
+// against the declared parameter list and erased, so they add zero runtime cost and never
+// change a reference's type. What they do decide is what a call keeps: its result, or a
+// `&mut` argument's referent, holds only the arguments whose types name one of its
+// lifetimes, and the callee's body is held to that. These tests exercise the full
+// pipeline: parse → type-check → HIR lowering → LLVM codegen → native run.
 use crate::compile_harness::CompileTest;
 
 #[test]
@@ -239,4 +240,71 @@ fn a_wrong_lifetime_argument_count_is_refused() {
         let source = format!("{decls}{body}\nfunc main() -> i32 {{ 0 }}\n");
         crate::compile_harness::assert_check_error("lifetime_count.nr", &source, expected);
     }
+}
+
+/// A result naming one argument's lifetime leaves the other argument free, a local
+/// included, and a `&mut` argument takes only what its referent's lifetime names.
+#[test]
+fn regression_explicit_lifetimes_narrow_what_a_call_keeps() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Slot<'a> { text: &'a string }
+
+func first<'a>(keep: &'a string, probe: &string) -> &'a string {
+    if probe.len() > 0 { keep } else { keep }
+}
+
+func fill<'a>(slot: &mut Slot<'a>, text: &'a string, probe: &string) {
+    if probe.len() > 1 { slot.text = text }
+}
+
+func pass_through<'a>(keep: &'a string) -> &'a string {
+    val local = "scratch".clone()
+    first(keep, &local)
+}
+
+func main() -> i32 {
+    val outer = "outer text".clone()
+    mut probe = "p".clone()
+    val r = first(&outer, &probe)
+    probe = "pq".clone()
+    val longer = "longer text here".clone()
+    mut slot = Slot { text: &outer }
+    {
+        val inner = "inner".clone()
+        fill(&mut slot, &longer, &inner)
+        fill(&mut slot, &outer, &probe)
+    }
+    (r.len() + slot.text.len() + pass_through(&outer).len()) as i32
+}
+"#;
+    assert_eq!(
+        test.run_leak_checked("lifetime_narrowing.nr", source),
+        10 + 10 + 10
+    );
+}
+
+/// BUG-172: a call storing a local's borrow into what a `&mut` parameter points at
+/// compiled, and the caller then read the local's freed storage.
+#[test]
+fn regression_bug_172_a_local_stored_through_a_mut_parameter_by_a_call_is_refused() {
+    let source = r#"
+struct H<'a> { r: &'a string }
+func set<'a>(h: &mut H<'a>, s: &'a string) { h.r = s }
+func fill(h: &mut H) {
+    val local = "dangling".clone()
+    set(h, &local)
+}
+func main() -> i32 {
+    val keep = "keep"
+    mut h = H { r: &keep }
+    fill(&mut h)
+    h.r.len() as i32
+}
+"#;
+    crate::compile_harness::assert_check_error(
+        "bug_172.nr",
+        source,
+        "cannot store a borrow of 'local' through a reference",
+    );
 }

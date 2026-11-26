@@ -146,6 +146,16 @@ impl TypeChecker {
                     mode: FunctionMode::Shared,
                 },
             );
+            let flow = self.lifetime_flow(
+                &self.lifetime_scope,
+                false,
+                None,
+                &func.params,
+                func.return_type.as_ref(),
+            );
+            if let Some(flow) = flow {
+                self.lifetime_flows.insert(func.name.name.clone(), flow);
+            }
         } else {
             // A generic template is registered separately; its signature carries the
             // `Type::Generic` placeholders and is instantiated at each call site. A
@@ -304,6 +314,13 @@ impl TypeChecker {
             }
             self.bind_function_param(&param.name.name, param_ty);
         }
+        let params: Vec<(String, &Type)> = func
+            .params
+            .iter()
+            .map(|param| param.name.name.clone())
+            .zip(param_types.iter())
+            .collect();
+        self.enter_lifetime_flow(&func.name.name, &params);
         if self.in_kernel {
             self.enter_kernel_outs(func);
         }
@@ -317,6 +334,7 @@ impl TypeChecker {
         self.in_kernel = false;
         self.kernel_outs.clear();
         self.current_fn_outliving.clear();
+        self.leave_lifetime_flow();
     }
 
     /// Whether the last statement of a body is its implicit return.

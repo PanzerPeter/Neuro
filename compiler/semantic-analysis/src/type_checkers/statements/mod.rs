@@ -5,6 +5,7 @@ use crate::symbol_table::pending_key;
 use crate::types::Type;
 
 use super::backward::gradient_view_root;
+use super::lifetime_flow::RECEIVER;
 use super::resolution::NameSlot;
 use super::val_else::{expr_diverges, stmts_diverge};
 use super::{LoopContext, TypeChecker};
@@ -75,6 +76,18 @@ pub(crate) fn borrow_target_of(expr: &Expr) -> Option<(String, bool)> {
     }
 }
 
+/// The sub-place of its root a direct `&place` / `&mut place` borrows (`"a"` for
+/// `&mut p.a`, `"s"` for `p.s.slice(r)`), empty for a whole binding.
+pub(crate) fn borrow_target_path(expr: &Expr) -> String {
+    match peel_parens(expr) {
+        Expr::Reference { operand, .. } => TypeChecker::borrow_path(operand),
+        view if slice_receiver_of(view).is_some() => {
+            TypeChecker::borrow_path(TypeChecker::slice_borrow_base(view))
+        }
+        _ => String::new(),
+    }
+}
+
 /// What the walk of a value finds it carrying.
 #[derive(Default)]
 struct Carried {
@@ -106,15 +119,30 @@ impl Carried {
 /// What `value`, of type `ty`, carries into a binding that holds it. A call returning a
 /// reference carries its arguments' borrows only: `hold_returned_borrows` takes the
 /// receiver's, by how the method takes it.
-fn carried_by(value: &Expr, ty: &Type) -> Carried {
+fn carried_by(checker: &TypeChecker, value: &Expr, ty: &Type) -> Carried {
     let mut carried = Carried::default();
     match peel_parens(value) {
-        Expr::Call { args, .. } if matches!(ty, Type::Reference { .. }) => {
-            for arg in args {
-                tail_borrow_targets(arg, &mut Vec::new(), &mut Vec::new(), &mut carried);
+        Expr::Call { func, args, .. } if matches!(ty, Type::Reference { .. }) => {
+            let flow = checker.callee_flow(func);
+            for (index, arg) in args.iter().enumerate() {
+                if flow.is_none_or(|flow| flow.result_takes_argument(index)) {
+                    tail_borrow_targets(
+                        checker,
+                        arg,
+                        &mut Vec::new(),
+                        &mut Vec::new(),
+                        &mut carried,
+                    );
+                }
             }
         }
-        value => tail_borrow_targets(value, &mut Vec::new(), &mut Vec::new(), &mut carried),
+        value => tail_borrow_targets(
+            checker,
+            value,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut carried,
+        ),
     }
     carried
 }
@@ -128,6 +156,7 @@ fn carried_by(value: &Expr, ty: &Type) -> Carried {
 /// lands in `live`: the value copies whatever that binding holds, a reference or a closure
 /// over one, so its borrows are the caller's to inherit.
 fn tail_borrow_targets<'a>(
+    checker: &TypeChecker,
     expr: &'a Expr,
     blocks: &mut Vec<&'a [Stmt]>,
     followed: &mut Vec<&'a str>,
@@ -143,7 +172,7 @@ fn tail_borrow_targets<'a>(
     }
     match expr {
         Expr::Block { stmts, .. } | Expr::Unsafe { stmts, .. } => {
-            block_tail_borrow_targets(stmts, blocks, followed, carried)
+            block_tail_borrow_targets(checker, stmts, blocks, followed, carried)
         }
         Expr::If {
             then_block,
@@ -155,16 +184,16 @@ fn tail_borrow_targets<'a>(
                 .chain(else_if_blocks.iter().map(|(_, block)| block))
                 .chain(else_block.iter());
             for block in branches {
-                block_tail_borrow_targets(block, blocks, followed, carried);
+                block_tail_borrow_targets(checker, block, blocks, followed, carried);
             }
         }
         // An arm may yield what its pattern bound, a part of the scrutinee.
         Expr::Match {
             scrutinee, arms, ..
         } => {
-            tail_borrow_targets(scrutinee, blocks, followed, carried);
+            tail_borrow_targets(checker, scrutinee, blocks, followed, carried);
             for arm in arms {
-                tail_borrow_targets(&arm.body, blocks, followed, carried);
+                tail_borrow_targets(checker, &arm.body, blocks, followed, carried);
             }
         }
         // A part of a value carries that value's borrows: a destructuring `val (a, b) = e`
@@ -172,43 +201,52 @@ fn tail_borrow_targets<'a>(
         Expr::TupleIndex { object, .. }
         | Expr::FieldAccess { object, .. }
         | Expr::Index { object, .. } => {
-            tail_borrow_targets(object, blocks, followed, carried);
+            tail_borrow_targets(checker, object, blocks, followed, carried);
         }
-        Expr::Try { operand, .. } => tail_borrow_targets(operand, blocks, followed, carried),
+        Expr::Try { operand, .. } => {
+            tail_borrow_targets(checker, operand, blocks, followed, carried)
+        }
         Expr::Binary {
             left,
             op: BinaryOp::NullCoalesce,
             right,
             ..
         } => {
-            tail_borrow_targets(left, blocks, followed, carried);
-            tail_borrow_targets(right, blocks, followed, carried);
+            tail_borrow_targets(checker, left, blocks, followed, carried);
+            tail_borrow_targets(checker, right, blocks, followed, carried);
         }
         // A value built around a borrow holds it: `H { r: &s }`, `(&s, 1)`, `[&s]`.
         Expr::TupleLiteral { elements, .. } | Expr::ArrayLiteral { elements, .. } => {
             for element in elements {
-                tail_borrow_targets(element, blocks, followed, carried);
+                tail_borrow_targets(checker, element, blocks, followed, carried);
             }
         }
         Expr::StructLiteral { fields, base, .. } => {
             for field in fields {
-                tail_borrow_targets(&field.value, blocks, followed, carried);
+                tail_borrow_targets(checker, &field.value, blocks, followed, carried);
             }
             if let Some(base) = base {
-                tail_borrow_targets(base, blocks, followed, carried);
+                tail_borrow_targets(checker, base, blocks, followed, carried);
             }
         }
         Expr::EnumStructLiteral { fields, .. } => {
             for field in fields {
-                tail_borrow_targets(&field.value, blocks, followed, carried);
+                tail_borrow_targets(checker, &field.value, blocks, followed, carried);
             }
         }
         // A call's result may hold any borrow its arguments hand it (lifetime elision),
         // `Some(&s)` and `wrap(&s)` alike, and a method's may hold its receiver's: both a
         // borrow of the receiver and whatever the receiver itself holds.
         Expr::Call { func, args, .. } => {
-            for arg in args {
-                tail_borrow_targets(arg, blocks, followed, carried);
+            // A callee whose lifetimes name what its result keeps hands out only that.
+            let flow = checker.callee_flow(func);
+            for (index, arg) in args.iter().enumerate() {
+                if flow.is_none_or(|flow| flow.result_takes_argument(index)) {
+                    tail_borrow_targets(checker, arg, blocks, followed, carried);
+                }
+            }
+            if flow.is_some_and(|flow| !flow.result_takes(RECEIVER)) {
+                return;
             }
             let callee = peel_parens(func);
             // What a function value returns may hold what its captures hold.
@@ -222,18 +260,20 @@ fn tail_borrow_targets<'a>(
                 carried.live.push(root);
             }
         }
-        Expr::Identifier(id) => follow_binding(&id.name, blocks, followed, carried),
+        Expr::Identifier(id) => follow_binding(checker, &id.name, blocks, followed, carried),
         // A loop yields what its `break`s carry, which were resolved as each was checked.
         Expr::Loop { span, .. } => carried.loops.push(*span),
         // A value read out of a borrow holds what the borrowee holds.
-        Expr::Deref { operand, .. } => tail_borrow_targets(operand, blocks, followed, carried),
+        Expr::Deref { operand, .. } => {
+            tail_borrow_targets(checker, operand, blocks, followed, carried)
+        }
         // A closure carries the borrows it took and those of what it copied in.
         Expr::Closure {
             params, body, span, ..
         } => {
             carried.closures.push(*span);
             for name in super::closures::closure_reads(params, body) {
-                follow_binding(&name, blocks, followed, carried);
+                follow_binding(checker, &name, blocks, followed, carried);
             }
         }
         _ => {}
@@ -243,6 +283,7 @@ fn tail_borrow_targets<'a>(
 /// Follow a name a tail yields to the block declaration that bound it, or hand it to
 /// `live` when no walked block declares it.
 fn follow_binding<'a>(
+    checker: &TypeChecker,
     name: &str,
     blocks: &mut Vec<&'a [Stmt]>,
     followed: &mut Vec<&'a str>,
@@ -264,13 +305,14 @@ fn follow_binding<'a>(
     match decl {
         Some((declared, init)) => {
             followed.push(declared);
-            tail_borrow_targets(init, blocks, followed, carried);
+            tail_borrow_targets(checker, init, blocks, followed, carried);
         }
         None => carried.live.push(name.to_string()),
     }
 }
 
 fn block_tail_borrow_targets<'a>(
+    checker: &TypeChecker,
     stmts: &'a [Stmt],
     blocks: &mut Vec<&'a [Stmt]>,
     followed: &mut Vec<&'a str>,
@@ -278,7 +320,7 @@ fn block_tail_borrow_targets<'a>(
 ) {
     blocks.push(stmts);
     if let Some(Stmt::Expr(tail)) = stmts.last() {
-        tail_borrow_targets(tail, blocks, followed, carried);
+        tail_borrow_targets(checker, tail, blocks, followed, carried);
     }
     blocks.pop();
 }
@@ -314,6 +356,11 @@ impl TypeChecker {
     /// declared type whose return type takes an elided lifetime from `self`. Any other
     /// callee (a builtin method, a trait object's, a type parameter's) is assumed to.
     fn result_borrows_receiver(&self, callee: &Expr) -> bool {
+        if let Expr::FieldAccess { object, field, .. } = callee
+            && let Some(borrows) = self.collection_result_borrows_receiver(object, &field.name)
+        {
+            return borrows;
+        }
         self.callee_key(callee)
             .is_none_or(|key| self.self_borrowing_methods.contains(&key))
     }
@@ -328,7 +375,7 @@ impl TypeChecker {
         if !self.may_hold_borrow(ty) {
             return;
         }
-        let mut carried = carried_by(value, ty);
+        let mut carried = carried_by(self, value, ty);
         // `it.next()` yields what `it` holds, a borrow of its container, and borrows `it`
         // itself only when the method's return type takes an elided lifetime from `self`.
         for (root, callee) in std::mem::take(&mut carried.receivers) {
@@ -383,7 +430,7 @@ impl TypeChecker {
             other => other,
         };
         let mut carried = Carried::default();
-        tail_borrow_targets(value, &mut Vec::new(), &mut Vec::new(), &mut carried);
+        tail_borrow_targets(self, value, &mut Vec::new(), &mut Vec::new(), &mut carried);
         let mut carried = carried.receivers_as_places();
         let from_loops = self.loop_borrows(&carried.loops);
         carried.places.extend(from_loops);
@@ -495,7 +542,7 @@ impl TypeChecker {
             return;
         };
         self.refuse_dying_borrows(value, ty, floor);
-        let carried = carried_by(value, ty).receivers_as_places();
+        let carried = carried_by(self, value, ty).receivers_as_places();
         let mut borrows = carried.places;
         borrows.extend(self.loop_borrows(&carried.loops));
         for span in &carried.closures {
@@ -545,15 +592,22 @@ impl TypeChecker {
         let Expr::Call { func, .. } = peel_parens(init) else {
             return;
         };
+        if self
+            .callee_flow(func)
+            .is_some_and(|flow| !flow.result_takes(RECEIVER))
+        {
+            return;
+        }
         let Expr::FieldAccess { object, field, .. } = func.as_ref() else {
             return;
         };
         // `m.get_mut(k)` hands out a `&mut` inside its `Option`, so the receiver is held
         // exclusively, not by the shared borrow every method result carries.
+        let path = Self::borrow_path(object);
         if self.collection_lends_mutably(object, &field.name)
             && let Some(root) = Self::place_root_name(object)
         {
-            self.symbols.attach_borrow(holder, &root, true);
+            self.symbols.attach_borrow_at(holder, &root, &path, true);
             return;
         }
         if !matches!(ty, Type::Reference { .. }) {
@@ -573,7 +627,7 @@ impl TypeChecker {
         );
         match (mutable, root_is_reference) {
             (true, true) => self.symbols.hold_reborrow(holder, &root),
-            (_, false) => self.symbols.attach_borrow(holder, &root, mutable),
+            (_, false) => self.symbols.attach_borrow_at(holder, &root, &path, mutable),
             // A shared borrow of a reference binding borrows nothing the frame owns.
             (false, true) => {}
         }
@@ -823,7 +877,9 @@ impl TypeChecker {
                     // binding hold a persistent borrow of that place, live until
                     // the binding leaves scope.
                     if let Some((place, exclusive)) = borrow_target_of(init_expr) {
-                        self.symbols.attach_borrow(&holder, &place, exclusive);
+                        let path = borrow_target_path(init_expr);
+                        self.symbols
+                            .attach_borrow_at(&holder, &place, &path, exclusive);
                         // A `mut` reference may be pointed elsewhere later.
                         if exclusive && !*mutable {
                             self.note_block_referent(&holder, &place);

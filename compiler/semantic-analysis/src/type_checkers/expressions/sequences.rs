@@ -125,6 +125,7 @@ impl TypeChecker {
         // move them one path at a time; this node reads what they left, so it is not
         // the whole-binding read a partial move rules out.
         let arr_ty = self.with_sub_place_read(|this| this.check_expr(array, None));
+        self.check_chain_read(array);
         let arr_ty = arr_ty.unwrap_or(Type::Unknown);
         if matches!(arr_ty, Type::Unknown) {
             return Some(Type::Unknown);

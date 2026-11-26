@@ -979,9 +979,13 @@ arm that MOVES the payload out disarms the flag first, through the ordinary
 `mark_moved_for_drop` on the arm body, and the scope then releases nothing. The disowning hands
 back each flag with the value it held, and an arm that binds NOTHING (`B(_)`, `_`) stores them
 back at its entry: it took nothing, so the scrutinee still owns the whole value and its scope
-releases it. What still leaks is the part of a variant an arm that binds did not bind
-(`A(x, _)` over two owning fields): that is the safe direction, since which part left is known
-only per pattern.
+releases it. An arm that binds releases what its pattern left unbound once it is taken, after
+its guard (`release_arm_remainder`): when the match took the scrutinee over (it disowned a place
+whose flags all held, or the scrutinee is a fresh temporary), `release_unbound_parts` walks the
+matched alternative's test and its bindings' paths together, releasing whole each owning part no
+path enters, down enum payload slots (`payload_slot`) and array elements. An arm of several
+alternatives records which one matched in `match.alt.index`, which the release switches on. Any
+other shape a path enters is left as it is.
 
 `codegen_pattern_test` walks a test tree over a place: `pattern_part` turns each `HirPatternStep`
 into the address of that part (a GEP into the enum's payload slot or the array, a load through a
@@ -1330,15 +1334,18 @@ arena: it may outlive a `pool`), stores each capture (the value, or `&name` for 
 and pairs the closure function pointer with it; a closure with no captures pairs it with null.
 `closure_env_layout` opens with a header (`ENV_HEADER_FIELDS`: an `i64` count, starting at 1, and
 the address of the closure's release `<closure>.env.drop`, which `declare_closure` declares and
-`codegen_closure` defines after the body) and appends one `i1` ownership flag per capture that
-owns something. At the value site such a capture's source is disowned (`mark_moved_for_drop`) and
-its flag takes the source's ownership (`capture_ownership`: a function value always owns the
-count its copy took, a `PoolAware` value stays the arena's). The release frees each owned capture
-under its flag (`DropTarget::Captured`, which plans the value's owners fresh at the release so one
-flag covers them all), then the block. Inside the body the same field and flag are the capture's
-drop entry (`captured_drop_entries`, consulted by `live_drop_entry`, never emitted at the body's
-exits), so a body that moves the capture out, a `once` call, clears the flag and the release frees
-nothing twice. Reading a part of an owned capture that owns nothing (`n.id`) disowns nothing.
+`codegen_closure` defines after the body) and appends, for each capture that owns something, an
+`i1` ownership flag for the whole and one per owning position inside it (`held_owner_count`).
+`capture_drop_entry` builds the capture's drop entry over those fields, the plan a binding of its
+type gets (`plan_held_drops_flagged` takes the environment's fields as the positions' flags), and
+the value site, the body and the release all use it. At the value site the capture's source is
+disowned (`mark_moved_for_drop`) and each flag takes what the source owns of its part
+(`capture_ownership` for the whole, `owns_position_now` per position: a function value always owns
+the count its copy took, a `PoolAware` value stays the arena's). The release frees each owned
+capture as its entry says, then the block. Inside the body the entry is in `captured_drop_entries`
+(consulted by `live_drop_entry`, never emitted at the body's exits), so a body that moves the
+capture out, a `once` call, clears every flag, and one that moves a part out (`val n = p.name`)
+clears that part's alone, leaving the release the rest.
 
 **Counting.** `drops/functions.rs`. Every function value is a typed owner
 (`DropTarget::FunctionValue`, `holds_owner`), so the planner releases one in a binding, a

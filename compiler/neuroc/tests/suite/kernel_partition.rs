@@ -185,3 +185,61 @@ fn a_slice_index_past_the_run_stops_the_kernel_and_the_program() {
         "{stderr}"
     );
 }
+
+/// A `partition` closure writes the thread's own `mut` locals in place: a running total and
+/// a count carried across the closure's loop and across two partitions (LIM-231).
+#[cfg(target_os = "linux")]
+#[test]
+fn regression_a_partition_closure_writes_a_captured_local_on_the_gpu() {
+    let test = CompileTest::new();
+    let source = test.write_source("running.nr", r#"@kernel(threads: [4])
+func running(a: Tensor<f32, [8]>, marks: KernelOut<Tensor<f32, [4]>>, out: KernelOut<Tensor<f32, [8]>>) {
+    mut total = 0.0f32
+    mut seen = 0u64
+    marks.partition(|base, m| {
+        seen += 1u64
+        m[0] = base as f32
+    })
+    out.partition(|base, s| {
+        for i in 0u64..s.len() {
+            total += a.flat(base + i)
+            seen += 1u64
+            s[i] = total + seen as f32
+        }
+    })
+}
+
+func main() -> i32 {
+    mut a: Tensor<f32, [8]> = Tensor::zeros()
+    for i in 0..8 { a[i] = (i + 1) as f32 }
+    mut marks: Tensor<f32, [4]> = Tensor::zeros()
+    mut out: Tensor<f32, [8]> = Tensor::zeros()
+    running(a, &mut marks, &mut out)
+    mut agree = 0
+    for t in 0..4 {
+        val x = (2 * t + 1) as f32
+        val y = (2 * t + 2) as f32
+        if marks[t] == (t as f32) { agree += 1 }
+        if out[2 * t] == x + 2.0 { agree += 1 }
+        if out[2 * t + 1] == x + y + 3.0 { agree += 1 }
+    }
+    agree
+}
+"#);
+    let exe = source.with_extension("");
+    let compiled = std::process::Command::new(env!("CARGO_BIN_EXE_neuroc"))
+        .args(["compile", "-o"])
+        .arg(&exe)
+        .arg(&source)
+        .output()
+        .expect("Failed to execute neuroc");
+    assert!(compiled.status.success(), "{compiled:?}");
+    let output = std::process::Command::new(&exe)
+        .output()
+        .expect("the program should start");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("none is usable") {
+        return;
+    }
+    assert_eq!(output.status.code(), Some(12), "{stderr}");
+}

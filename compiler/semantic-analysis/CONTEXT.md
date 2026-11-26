@@ -724,8 +724,15 @@ one exception is a shared borrow of a `Copy` temporary that is a whole call argu
 hold a reference or a function value (`refuse_escaping_temporary_borrows`) or a `&mut` argument
 may store it (`refuse_stored_temporary_borrows`). It
 yields `&T` **without** moving the operand: borrowing never consumes. The borrow counts against
-the ROOT binding, and `borrow_target_of` returns that root for a sub-place, so holders, returns
-and stores treat `&p.name` as a borrow of `p`. `&mut` needs a `mut` binding, or a sub-place
+the ROOT binding at the sub-place it names (`borrow_path`, the operand's statically nameable
+prefix: a run-time index or a deref stops it), and the symbol table keeps its counts per path,
+so two borrows, a borrow and an access, or a borrow and a move meet only when one path contains
+the other (`borrow_counts_at`). `borrow_target_of` returns the root and `borrow_target_path` the
+path, so a binding initialized or assigned from `&p.name` holds `p.name` alone. A borrow carried
+into a holder any other way (a literal built around it, a call's result, a closure capture) is
+held against the whole root, which is the sound side of the same rule. A read of a place is
+judged by its outermost link (`check_chain_read`), and the base a store navigates is not read
+at all (`check_store_base`): the store judges its whole place. `&mut` needs a `mut` binding, or a sub-place
 reached through a `&mut` (`nearest_reference`), else `CannotBorrowMutably`. `Expr::Deref` types `*r` to the referent, else
 `CannotDereference`. `Place::Deref` requires `pointer: &mut T` (an immutable reference is
 `CannotAssignThroughRef` and a non-reference is `CannotDereference`), and the stored value is
@@ -791,14 +798,35 @@ dies first: `refuse_outliving_borrows` compares each newly held borrow's scope i
 holder's (`borrows_outliving`), and a deeper one is `BorrowOutlivesPlace`. Before this, `b = &v`
 inside a block with `b` declared outside compiled (BUG-109), and so did `out = r` from a `match`
 arm. A call is a store too (`hold_argument_stores` in `expressions/calls.rs`, run by every call
-path beside the reborrow check): an erased signature does not say what a callee keeps, so the
-binding behind each `&mut` argument whose referent can hold a borrow, or a `&mut self`
-receiver of such a type, holds every borrow the call's other arguments and receiver carry. A
-referent holding function values and no reference takes only the function-valued ones. A generic
-call judges its instance's parameters, not `Slot<T>`. A
-store through a reference writes into what the reference borrows (`borrowed_places` of the
-root); through a parameter or `self` it writes into the caller's frame, so the value may hold no
-borrow of a local (`check_stored_through_reference`, `StoresReferenceToLocal`).
+path beside the reborrow check): unless the signature says what a callee keeps, the binding
+behind each `&mut` argument whose referent can hold a borrow, or a `&mut self` receiver of such
+a type, holds every borrow the call's other arguments and receiver carry. A referent holding
+function values and no reference takes only the function-valued ones. A generic call judges its
+instance's parameters, not `Slot<T>`. A store through a reference writes into what the
+reference borrows (`borrowed_places` of the root); through a parameter or `self` it writes into
+the caller's frame, so the value may hold no borrow of a local (`check_stored_through_reference`,
+`StoresReferenceToLocal`). That holds for a call too: a `&mut` argument reaching the caller's
+storage (a parameter, `self`, a copy of one, `&mut *r`) has each stored argument judged as a
+direct store through that parameter. Until BUG-172 such an argument had no holder, so
+`set(h, &local)` in a body with `h: &mut H` compiled and the caller read freed storage.
+
+**Lifetime flows** (`type_checkers/lifetime_flow.rs`). A non-generic function or method whose
+signature names lifetimes gets a `LifetimeFlow` in `lifetime_flows`, by `functions` key: the
+parameters (`self` for the receiver) the result may hold, when the return type names every
+lifetime it has, and for each `&mut` parameter (or `&mut self`) whose referent's type names
+every lifetime it has, the parameters a store into it may take. A parameter is in a set when its
+type names one of those lifetimes or is not `lifetime_closed` (it may carry a borrow it names no
+lifetime for: a holder declaring none, a function value, a trait object, `Self` outside its
+`impl`'s lifetimes). Call sites narrow by it: the holder walk (`tail_borrow_targets`, which takes
+the checker for this), the escape walk's `Expr::Call` arm, `hold_returned_borrows` and
+`hold_argument_stores` (through `call_flows`, pushed by `check_call_expr` and read only by the
+call whose span it carries). The narrowing is sound because each body is held to its own flow:
+`enter_lifetime_flow` gives every parameter a `'param` origin mark (`hold_param_origin`, an inert
+place like a frame slot) that copies and values built from it inherit, and `report_if_escapes`
+refuses a returned value carrying a parameter the result does not keep
+(`ReturnsBorrowOfUnnamedLifetime`) or a stored one the referent does not keep
+(`StoresBorrowOfUnnamedLifetime`). A closure's own `return` is not the function's
+(`flow_governs_returns`); its stores through captured parameters are.
 
 A `&mut` binding passed bare to a call is a reborrow, not a borrow expression, so the counts
 never see it. `check_reborrow_exclusivity` (in `expressions/calls.rs`, run by every call path)
@@ -815,8 +843,8 @@ of it (or out of a field of it) is `CannotMoveWhileBorrowed` while ANY borrow is
 to it is `CannotAssignWhileBorrowed` on the same ground, checked before the RHS so `r = &mut x`
 does not conflict with the borrow it installs. A store into part of a binding (a field, an
 element, a tensor coordinate, `=` or any `OP=`) is refused the same way through
-`refuse_store_while_borrowed`, naming the root binding: the counts are per binding, so a borrow
-of one field freezes the whole value. Only the whole-binding store consulted them until BUG-070,
+`refuse_store_while_borrowed`, naming the root binding. Only the whole-binding store consulted
+them until BUG-070,
 so a live `&` saw the write and a displaced owned value was freed under it.
 
 The read rule reads the **persistent** counts only, the other two read persistent plus transient.
@@ -1335,8 +1363,9 @@ or whole, which `ClosureCapture::record_moved` writes onto the literal for lower
 body ends with is moved like a function's result (`move_closure_result`), so `|| s` is such a
 move. A closure
 whose body moves a capture is `FunctionMode::Once`, and `refuse_once_per_element` keeps a `once`
-value out of a built-in that calls per element. Inside a `@kernel` body only the old
-rule holds (`ClosureCapturesNonCopy`, `ClosureAssignsCapture`): MLIR copies captures. The transient
+value out of a built-in that calls per element. Inside a `@kernel` body a closure (the
+`partition` literal) runs in place over the thread's own slots, so it reads and writes its `Copy`
+captures where they live and takes no other kind (`ClosureCapturesNonCopy`). The transient
 borrows the enclosing statement had in flight are restored after the body (its own statements end
 them as they go), then each borrowed capture takes its borrow (`borrow_capture`), transient until
 `hold_carried_borrows` makes the initialized binding hold it, as `val r = &x` does.
@@ -1370,9 +1399,7 @@ are among them, so a `break` may carry one.
 
 A value that stays in its call is scope-bound (`scope_bound_closures`, a set of literal spans, and
 `SymbolInfo::scope_bound` on a binding holding one): a `mut` function parameter of a function, method
-or closure (`bind_function_param`), a closure holding a reference no local backs
-(`type_holds_reference` on the capture with no local in its `borrowed_places`), and a closure
-capturing either, `move` or not. It may be checked only in `function_value_slot`: the whole
+or closure (`bind_function_param`), and a closure capturing one, `move` or not. It may be checked only in `function_value_slot`: the whole
 initializer of a binding, a whole argument to a function-typed parameter (`check_receiver_call_args`,
 `check_generic_call_with`), or a callee. A tensor traversal and a `for`-head adapter open it for a
 bare binding or a closure literal (`function_value_position`) through `check_per_element_callee`,
@@ -1380,9 +1407,12 @@ which lends what the built-in walks (the iterable, a range's bounds, a traversal
 the literal is checked, so a literal writing one meets `CannotMutablyBorrowWhileBorrowed`.
 A `for` head's literals keep their borrows for the loop under the hidden `$adapters` holder
 (`hold_adapter_borrows`), so the body cannot write what they read. Anywhere else:
-`ScopeBoundClosureStored`. The reference rule is what lets `hold_argument_stores` keep a plain `&`
-argument out of a `&mut` holder of function values only: nothing can put the reference inside one,
-so `opt.step(&batch)` with a function-valued field leaves `batch` free.
+`ScopeBoundClosureStored`. A closure holding a reference that came in through a parameter is
+not scope-bound (LIM-264 closed it): it carries the parameter's origin mark, so it may be
+returned, and `report_if_escapes` refuses storing it into a `&mut` parameter's referent that
+holds function values only (`store_keeps_conservatively`, the body's side of the
+`hold_argument_stores` rule that keeps a plain `&` argument out of such a holder), so
+`opt.step(&batch)` with a function-valued field still leaves `batch` free.
 
 `Type::Function`'s `mode` makes `is_compatible_with` directional (a
 value fits a slot of its own mode or a stronger one), a `once` value is move-tracked, and a call
@@ -1755,9 +1785,13 @@ compiler-known nominal type, never `Copy` and always move-tracked.
 
 - `resolve_collection` resolves the generic application from `resolve_type`, validating storable
   elements and map keys; a program declaring its own generic type of that name shadows the
-  builtin. Any sized value is storable (`check_storable`): a slot owns what it holds. A type that
-  holds a reference or a function value is refused (`InvalidCollectionElement`, LIM in the
-  register), as are `dyn` and the non-values.
+  builtin. Any sized value is storable (`check_storable`): a slot owns what it holds, a
+  reference or a function value included. Only `dyn` and the non-values are refused
+  (`InvalidCollectionElement`). A collection whose element can hold a borrow is a holder: `push`
+  and `insert` put each argument's borrows on the receiver (`hold_inserted_borrows`, sharing
+  `hold_written_borrows` with a place store, so a receiver reached through a parameter takes no
+  local), and only a lookup's result borrows the receiver itself
+  (`collection_result_borrows_receiver`: `pop` and `remove` move their element out).
 - `check_collection_new` types `Vec::new()` and `Vec::with_capacity(n)` (one integer argument)
   from the expected type, else `CollectionTypeNotInferable`.
 - `resolve_collection_method` types the method surface, requiring a mutable receiver for the

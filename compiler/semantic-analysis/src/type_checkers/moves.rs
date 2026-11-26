@@ -125,7 +125,7 @@ impl TypeChecker {
             let binding_ty = self.symbols.lookup(&ident.name).map(|info| info.ty.clone());
 
             if binding_ty.is_some_and(|ty| self.is_type_move_tracked(&ty)) {
-                self.reject_move_of_borrowee(&ident.name, ident.span);
+                self.reject_move_of_borrowee(&ident.name, "", ident.span);
                 self.symbols.mark_moved(&ident.name, ident.span);
             }
             return;
@@ -156,7 +156,7 @@ impl TypeChecker {
             });
             return;
         }
-        self.reject_move_of_borrowee(&root, place.span());
+        self.reject_move_of_borrowee(&root, &Self::borrow_path(place), place.span());
         let path = Self::place_path(place).unwrap_or_default();
         self.symbols.mark_place_moved(&root, &path, place.span());
     }
@@ -238,6 +238,33 @@ impl TypeChecker {
         }
     }
 
+    /// The sub-place a borrow of `place`, or an access to it, counts against: its
+    /// statically nameable prefix below the root binding. A runtime index stops the path
+    /// at what it indexes, so `&mut p.v[i]` borrows all of `p.v`, and a dereference or a
+    /// temporary stops it at the root, so `&mut (*r).a` borrows all of `r`.
+    pub(crate) fn borrow_path(place: &Expr) -> String {
+        Self::nameable_prefix(place).0
+    }
+
+    /// The nameable prefix of `place`, and whether it is all of `place`.
+    fn nameable_prefix(place: &Expr) -> (String, bool) {
+        let (base, segment) = match place {
+            Expr::Paren(inner, _) => return Self::nameable_prefix(inner),
+            Expr::Identifier(_) => return (String::new(), true),
+            Expr::FieldAccess { object, field, .. } => (object, field.name.clone()),
+            Expr::TupleIndex { object, index, .. } => (object, index.to_string()),
+            Expr::Index { object, index, .. } => match index.as_ref() {
+                Expr::Literal(Literal::Integer(value, _), _) => (object, value.to_string()),
+                _ => return (Self::nameable_prefix(object).0, false),
+            },
+            _ => return (String::new(), false),
+        };
+        match Self::nameable_prefix(base) {
+            (prefix, true) => (Self::join_path(&prefix, &segment), true),
+            stopped => stopped,
+        }
+    }
+
     fn join_path(prefix: &str, segment: &str) -> String {
         if prefix.is_empty() {
             segment.to_string()
@@ -310,8 +337,8 @@ impl TypeChecker {
         self.record_move(object);
     }
 
-    /// Reject moving `name` out from under a live borrow: the borrow would be left
-    /// pointing at storage the binding no longer owns.
+    /// Reject moving the sub-place `path` of `name` out from under a live borrow of any
+    /// part of it: the borrow would be left pointing at storage the binding no longer owns.
     ///
     /// Every borrow counts, transient ones included: a `&mut` in flight as another
     /// operand of the same call is exactly as dangling as one a binding holds.
@@ -319,8 +346,8 @@ impl TypeChecker {
     /// An exclusive borrow held by a *binding* is the one case skipped, because it
     /// froze the name against any access at all and the read arm has already reported
     /// naming it here; reporting again would name one mistake twice.
-    fn reject_move_of_borrowee(&mut self, name: &str, span: Span) {
-        let Some((shared, exclusive)) = self.symbols.borrow_counts(name) else {
+    fn reject_move_of_borrowee(&mut self, name: &str, path: &str, span: Span) {
+        let Some((shared, exclusive)) = self.symbols.borrow_counts_at(name, path) else {
             return;
         };
         if shared + exclusive == 0 {
@@ -328,7 +355,7 @@ impl TypeChecker {
         }
         if self
             .symbols
-            .persistent_borrow_counts(name)
+            .persistent_borrow_counts_at(name, path)
             .is_some_and(|(_, persistent_exclusive)| persistent_exclusive > 0)
         {
             return;

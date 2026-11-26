@@ -43,9 +43,12 @@ collection drops its live slots when it is dropped.
 
 ## What still leaks
 
-A `match` arm that binds part of an enum payload disowns the whole scrutinee, so a part of that
-variant the arm did not bind is not destroyed. An arm that binds nothing leaves a place scrutinee
-owning everything, destroyed at its own scope exit, and destroys a temporary one on the spot.
+The shapes that still leak are open defects, each registered in [Known Bugs](../BUGS.md) with
+a repro and a workaround. A `match` arm that binds part of what it matched
+takes the scrutinee over, and once it is taken (its guard passed) it destroys the parts its
+pattern left unbound: `A(x, _)` destroys the second field there. An arm that binds nothing leaves
+a place scrutinee owning everything, destroyed at its own scope exit, and destroys a temporary
+one on the spot.
 
 ## Open defects
 

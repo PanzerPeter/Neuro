@@ -120,6 +120,9 @@ impl TypeChecker {
         // An early `return` inside the closure body returns from the *closure*, not the
         // enclosing function, so redirect the return-type context for the body check.
         let saved_return = self.current_function_return_type.take();
+        // A closure's result is not the enclosing function's, so the function's summary
+        // does not govern what the closure returns.
+        let saved_governs = std::mem::replace(&mut self.flow_governs_returns, false);
         self.current_function_return_type = ret_ty.clone();
         let saved_written = std::mem::replace(&mut self.return_type_written, false);
         let saved_inferring =
@@ -182,6 +185,7 @@ impl TypeChecker {
 
         self.pop_scope();
         self.current_function_return_type = saved_return;
+        self.flow_governs_returns = saved_governs;
         self.return_type_written = saved_written;
         self.inferring_closure_return = saved_inferring;
         self.loop_stack = saved_loops;
@@ -421,7 +425,10 @@ impl TypeChecker {
                     }
                 );
             if self.in_kernel {
-                self.refuse_kernel_capture(name, ty, copy, writes, *use_span);
+                self.refuse_kernel_capture(name, ty, copy, *use_span);
+                if writes {
+                    mode = mode.max(FunctionMode::Mut);
+                }
                 continue;
             }
             if writes {
@@ -436,20 +443,13 @@ impl TypeChecker {
                     capture.record_moved(name);
                 }
             }
-            // A value lent for the call stays lent inside whatever closure holds it, and so
-            // does a reference no local backs: it came in through a parameter, and a caller
-            // lending `&x` beside a `&mut` to a holder of function values only does not
-            // expect the holder to keep `x` (`hold_argument_stores`).
+            // A value lent for the call stays lent inside whatever closure holds it. A
+            // reference that came in through a parameter may leave inside one: the closure
+            // carries the parameter's origin, and the escape rules judge where it goes.
             scope_bound |= self
                 .symbols
                 .lookup(name)
-                .is_some_and(|info| info.scope_bound)
-                || (self.type_holds_reference(&ty)
-                    && !self
-                        .symbols
-                        .borrowed_places(name)
-                        .iter()
-                        .any(|place| self.is_local_to_function(place)));
+                .is_some_and(|info| info.scope_bound);
             if capture.by_value(name) {
                 // A body that moved it whole has met the binding's borrows already.
                 let moved_whole = self
@@ -508,24 +508,14 @@ impl TypeChecker {
         self.symbols.add_transient_borrow(name, exclusive);
     }
 
-    /// A kernel body lowers through MLIR, which takes a closure's captures by copy only.
-    fn refuse_kernel_capture(
-        &mut self,
-        name: &str,
-        ty: Type,
-        copy: bool,
-        writes: bool,
-        span: Span,
-    ) {
+    /// A kernel body lowers through MLIR, which runs a closure literal in place over the
+    /// thread's own slots: it reads and writes a `Copy` capture where it lives, and takes
+    /// no other kind.
+    fn refuse_kernel_capture(&mut self, name: &str, ty: Type, copy: bool, span: Span) {
         if !copy {
             self.record_error(TypeError::ClosureCapturesNonCopy {
                 name: name.to_string(),
                 ty,
-                span,
-            });
-        } else if writes {
-            self.record_error(TypeError::ClosureAssignsCapture {
-                name: name.to_string(),
                 span,
             });
         }
@@ -1272,24 +1262,50 @@ func main() -> i32 {
         assert!(errors.is_empty(), "{errors:?}");
     }
 
-    /// A closure holding a reference from a parameter stays in the call, whether it copied
-    /// the reference or took it by `move`: a caller may lend the reference beside a holder
-    /// of function values, which does not take its borrow. One over a local's slot is
-    /// refused as a borrow of that local.
+    /// A closure holding a reference from a parameter may leave its call, copied or taken by
+    /// `move`, as the reference itself may (LIM-264). It may not be stored where a caller does
+    /// not keep the reference: a holder of function values only takes no `&` argument. One
+    /// over a local's slot is refused as a borrow of that local.
     #[test]
-    fn a_closure_holding_a_parameter_reference_cannot_be_returned() {
-        for body in ["|| s.len()", "move || s.len()"] {
+    fn a_closure_holding_a_parameter_reference_may_be_returned() {
+        for body in [
+            "|| s.len()",
+            "move || s.len()",
+            "{\n    val r = s\n    move || r.len()\n}",
+        ] {
             let errors = semantic_errors(&format!(
-                "func len_of(s: &string) -> () -> u64 {{ {body} }}
+                "struct H {{ f: () -> u64 }}
+func len_of(s: &string) -> () -> u64 {{ {body} }}
+func held(s: &string) -> H {{ H {{ f: || s.len() }} }}
 func main() -> i32 {{ 0 }}"
+            ));
+            assert!(errors.is_empty(), "{body}: {errors:?}");
+        }
+        for item in [
+            "func keep(h: &mut H, s: &string) { h.f = move || s.len() }",
+            "struct P { n: string }\nfunc keep(h: &mut H, p: &P) {\n    val r = &p.n\n    h.f = move || r.len()\n}",
+            "func put(h: &mut H, f: () -> u64) { h.f = f }\nfunc keep(h: &mut H, s: &string) { put(h, || s.len()) }",
+            "impl H {\n    func keep(&mut self, s: &string) { self.f = || s.len() }\n}",
+        ] {
+            let errors = semantic_errors(&format!(
+                "struct H {{ f: () -> u64 }}\n{item}\nfunc main() -> i32 {{ 0 }}"
             ));
             assert!(
                 errors
                     .iter()
-                    .any(|e| matches!(e, TypeError::ScopeBoundClosureStored { .. })),
-                "{body}: {errors:?}"
+                    .any(|e| matches!(e, TypeError::StoresBorrowOfUnnamedLifetime { .. })),
+                "{item}: {errors:?}"
             );
         }
+        // A function value goes in, and so does the closure once both types name a lifetime.
+        let errors = semantic_errors(
+            "struct H { f: () -> u64 }
+struct G<'a> { f: () -> u64, r: &'a string }
+func put(h: &mut H, f: () -> u64) { h.f = f }
+func keep<'a>(g: &mut G<'a>, s: &'a string) { g.f = || s.len() }
+func main() -> i32 { 0 }",
+        );
+        assert!(errors.is_empty(), "{errors:?}");
         let errors = semantic_errors(
             "func len_of(s: string) -> () -> u64 { || s.len() }
 func main() -> i32 { 0 }",

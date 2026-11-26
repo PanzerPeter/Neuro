@@ -21,6 +21,7 @@ mod intrinsic_tests;
 mod iteration_tests;
 mod iterator_adapter_tests;
 mod kernel_tests;
+mod lifetime_flow_tests;
 mod literal_tests;
 mod loop_adapter_tests;
 mod loop_tests;

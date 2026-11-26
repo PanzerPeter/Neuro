@@ -10,6 +10,45 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.58.5] - 2026-11-26
+
+### Changed
+
+- Borrows of disjoint parts of one binding coexist: `two(&mut p.a, &mut p.b)`, a held
+  `val a = &mut p.a` beside a read, a store or a borrow of `p.b`, `p.v.push(x)` while `p.n` is
+  borrowed, and a lent function field beside a borrowed sibling (`run(job.step, &mut job.count)`).
+  Two places meet when one contains the other, so `&mut p.a` still excludes `&p`, a move of `p`
+  and a second `&mut p.a`. A run-time index borrows the whole collection it indexes.
+- A non-generic signature whose return type names every lifetime it has keeps only the
+  arguments whose types name one of them: `pick<'a>(a: &'a T, b: &U) -> &'a T` leaves `b` free
+  while the result lives, and `return pick(param, &local)` compiles. A `&mut` parameter whose
+  referent's type names every lifetime (`h: &mut H<'a>`, or `&mut self` of an `impl<'a> H<'a>`)
+  likewise takes only those arguments. The body is held to the same promise: returning `b` from
+  `pick` is `cannot return a borrow carried by parameter 'b'`, and storing a parameter the
+  referent does not keep is `cannot store a borrow carried by parameter`.
+- A closure holding a reference that came in through a parameter may be returned or built into
+  a returned value: `func len_of(s: &string) -> () -> u64 { || s.len() }` compiles. Storing one
+  into a `&mut` parameter's referent that holds only function values is refused, since a call
+  gives such a referent none of a plain `&` argument's borrow; naming one lifetime on both
+  types allows it.
+- A collection element may be a reference or a function value: `Vec<&string>`,
+  `HashMap<i32, &string>`, `Vec<(i32) -> i32>`. Each value a collection takes (`push`, `insert`,
+  a slot store) keeps its borrows on the collection's binding. `pop` and `remove` no longer
+  count as borrowing the collection.
+- A `partition` closure in a `@kernel` body may write the thread's `mut` locals, a running total
+  over its run included.
+
+### Fixed
+
+- BUG-172: a call that stored a local's borrow into what a `&mut` parameter points at
+  (`set(h, &local)` in a body with `h: &mut H`) compiled, and the caller then read the local's
+  freed storage. It is refused as the direct store is.
+- A `move` closure whose body moves one owning part out of a capture (`val n = p.name`) leaked
+  the capture's other owning parts. The environment keeps a flag per owning position.
+- A `match` arm that binds some owning parts of what it matched (`A(x, _)`, `Some(E::A(x, _))`,
+  `[x, _]`, either side of an alternative) leaked the parts it left unbound. It releases them once
+  the arm is taken, after its guard.
+
 ## [5.58.4] - 2026-11-23
 
 ### Fixed

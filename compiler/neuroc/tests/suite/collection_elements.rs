@@ -430,3 +430,71 @@ func main() -> i32 {
         "drop 1\nstored\ndrop 2\n"
     );
 }
+
+/// A reference is a sized value, so a collection holds one (LIM-241): every slot operation
+/// runs, and the collection's binding holds what it was given.
+#[test]
+fn regression_a_collection_of_references_runs() {
+    let test = CompileTest::new();
+    let source = r#"func main() -> i32 {
+    val a = "alpha".clone()
+    val b = "beta!".clone()
+    mut v: Vec<&string> = Vec::new()
+    v.push(&a)
+    v.push(&b)
+    v.push(&a)
+    mut total = 0u64
+    for s in &v { total += s.len() }
+    v[1] = &a
+    val first = v[0]
+    total += first.len()
+    val last = v.pop()
+    if val Some(s) = last { total += s.len() }
+    total += v.remove(0).len()
+    v.clear()
+    v.push(&b)
+    for s in v { total += s.len() }
+    mut m: HashMap<i32, &string> = HashMap::new()
+    m.insert(1, &a)
+    m.insert(1, &b)
+    m.insert(2, &a)
+    if val Some(s) = m.get(1) { total += s.len() }
+    if val Some(s) = m.remove(2) { total += s.len() }
+    for (k, s) in &m { total += s.len() + *k as u64 }
+    total as i32
+}
+"#;
+    assert_eq!(test.run_leak_checked("reference_elements.nr", source), 51);
+}
+
+/// A function value in a slot keeps its environment: a copy out takes a count, and an
+/// overwritten, popped, removed or cleared slot gives its back.
+#[test]
+fn regression_a_collection_of_function_values_runs() {
+    let test = CompileTest::new();
+    let source = r#"func make(tag: string) -> (i32) -> i32 { move |x: i32| x + tag.len() as i32 }
+func main() -> i32 {
+    mut fs: Vec<(i32) -> i32> = Vec::new()
+    fs.push(make("a".clone()))
+    fs.push(make("bb".clone()))
+    fs.push(|x: i32| x * 2)
+    val copy = fs[1]
+    mut total = copy(0) + fs[0](10)
+    fs[0] = make("cccc".clone())
+    total += fs[0](0)
+    if val Some(f) = fs.pop() { total += f(5) }
+    total += fs.remove(0)(0)
+    for f in &fs { total += (*f)(1) }
+    fs.clear()
+    fs.push(make("ddd".clone()))
+    for f in fs { total += f(0) }
+    mut m: HashMap<i32, (i32) -> i32> = HashMap::new()
+    m.insert(1, make("e".clone()))
+    m.insert(1, make("ff".clone()))
+    if val Some(f) = m.get(1) { total += (*f)(0) }
+    if val Some(f) = m.remove(1) { total += f(0) }
+    total + copy(1)
+}
+"#;
+    assert_eq!(test.run_leak_checked("function_elements.nr", source), 44);
+}

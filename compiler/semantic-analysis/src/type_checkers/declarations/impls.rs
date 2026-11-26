@@ -6,6 +6,7 @@
 
 use super::{CLONE_TRAIT, COPY_TRAIT, DERIVABLE_TRAITS, DERIVE_ATTRIBUTE, DROP_METHOD, DROP_TRAIT};
 use crate::errors::TypeError;
+use crate::type_checkers::lifetime_flow::{RECEIVER, Receiver};
 use crate::type_checkers::numeric_bounds::is_numeric_family;
 use crate::type_checkers::operator_traits::{
     OperatorForm, is_operator_trait, is_provided_method, operator_trait_spec,
@@ -153,6 +154,25 @@ impl TypeChecker {
             }
 
             self.functions.insert(mangled.clone(), func_ty);
+            if def.generics.is_empty() && method.generics.is_empty() {
+                let mut declared = self.lifetime_scope.clone();
+                declared.extend(method.lifetimes.iter().map(|l| l.name.clone()));
+                let receiver = method.self_param.as_ref().map(|mode| Receiver {
+                    mode,
+                    type_name: &struct_name,
+                    type_lifetimes: &def.type_lifetimes,
+                });
+                let flow = self.lifetime_flow(
+                    &declared,
+                    !method.lifetimes.is_empty(),
+                    receiver,
+                    &method.params,
+                    method.return_type.as_ref(),
+                );
+                if let Some(flow) = flow {
+                    self.lifetime_flows.insert(mangled.clone(), flow);
+                }
+            }
             // A lifetime the method declares itself may be the one `self` is borrowed for
             // (`func get<'b>(&'b self) -> &'b T`), so a result naming one is taken to borrow
             // the receiver. Only the impl's own lifetimes are known to outlive it.
@@ -757,6 +777,18 @@ impl TypeChecker {
             }
             self.bind_function_param(&param.name.name, param_ty);
         }
+        let mut params: Vec<(String, &Type)> = Vec::new();
+        if method.self_param.is_some() && !self.self_is_owned {
+            params.push((RECEIVER.to_string(), &Type::Unknown));
+        }
+        params.extend(
+            method
+                .params
+                .iter()
+                .map(|param| param.name.name.clone())
+                .zip(non_self_params.iter()),
+        );
+        self.enter_lifetime_flow(&format!("{struct_name}__{}", method.name.name), &params);
         saved_scope
     }
 
@@ -766,6 +798,7 @@ impl TypeChecker {
         self.current_function_return_type = None;
         self.return_type_written = false;
         self.current_fn_outliving.clear();
+        self.leave_lifetime_flow();
         self.self_is_owned = false;
         self.exit_method_generics(saved_scope);
     }

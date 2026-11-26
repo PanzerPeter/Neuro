@@ -401,3 +401,22 @@ fn flat_takes_a_u64_position_of_a_static_shape() {
         "got {errors:?}"
     );
 }
+
+/// A `partition` closure runs in place over the thread's own locals, so it may write a
+/// `Copy` capture, a running total included (LIM-231).
+#[test]
+fn regression_a_partition_closure_writes_a_thread_local_capture() {
+    let src = "@kernel(threads: [4])
+func running(a: Tensor<f32, [8]>, out: KernelOut<Tensor<f32, [8]>>) {
+    mut total = 0.0f32
+    out.partition(|base, s| {
+        for i in 0u64..s.len() {
+            total += a.flat(base + i)
+            s[i] = total
+        }
+    })
+}
+";
+    let errors = semantic_errors(src);
+    assert!(errors.is_empty(), "got {errors:?}");
+}

@@ -5,11 +5,12 @@ use ast_types::{BinaryOp, Expr, Place, TensorIndexArg};
 use shared_types::{Identifier, Span};
 
 use crate::errors::TypeError;
+use crate::symbol_table::param_origin;
 use crate::type_checkers::backward::gradient_view_root;
 use crate::type_checkers::{OperatorMethod, TypeChecker};
 use crate::types::Type;
 
-use super::borrow_target_of;
+use super::{borrow_target_of, borrow_target_path};
 
 impl TypeChecker {
     /// Check `place = value` and `place OP= value`.
@@ -113,8 +114,8 @@ impl TypeChecker {
         }
         let target = place.to_expr();
         self.check_expr(&target, None)?;
-        // A receiver's exclusive borrow is tracked per binding, so only a bare one sees a
-        // borrow of its binding; a sub-place is held to the rule of any store into it.
+        // A bare binding's receiver borrow sees every borrow of it; a sub-place is held to
+        // the rule of any store into it.
         if !Self::is_bare_binding(&target) {
             self.refuse_store_while_borrowed(place);
         }
@@ -154,7 +155,9 @@ impl TypeChecker {
             } => {
                 // Peeled to one `&` like a field read, so `c.n` on a `&mut &mut P` writes
                 // `P`'s field, and is writable only if every layer is `&mut`.
-                let obj_ty = self.check_expr(object, None)?.auto_deref();
+                let obj_ty = self
+                    .check_store_base(|this| this.check_expr(object, None))?
+                    .auto_deref();
                 // The object already failed to type-check and said so.
                 if matches!(obj_ty, Type::Unknown) {
                     return None;
@@ -202,7 +205,9 @@ impl TypeChecker {
                 span: index_span,
             } => {
                 // Peeled like a field place, so `r.0` on a `&mut (A, B)` writes the tuple.
-                let obj_ty = self.check_expr(object, None)?.auto_deref();
+                let obj_ty = self
+                    .check_store_base(|this| this.check_expr(object, None))?
+                    .auto_deref();
                 let element = match obj_ty.referent() {
                     Type::Tuple(elements) => match elements.get(*index) {
                         Some(element) => element.clone(),
@@ -243,7 +248,7 @@ impl TypeChecker {
                 index,
                 span: index_span,
             } => {
-                let obj_ty = self.check_index_base(object)?;
+                let obj_ty = self.check_store_base(|this| this.check_index_base(object))?;
                 if matches!(obj_ty, Type::Unknown) {
                     return None;
                 }
@@ -284,7 +289,7 @@ impl TypeChecker {
                 indices,
                 span: index_span,
             } => {
-                let obj_ty = self.check_index_base(object)?;
+                let obj_ty = self.check_store_base(|this| this.check_index_base(object))?;
                 if matches!(obj_ty, Type::Unknown) {
                     return None;
                 }
@@ -513,21 +518,70 @@ impl TypeChecker {
     /// in what that reference borrows instead, and through a parameter or `self`, in the
     /// caller's frame, which none of this function's locals outlive.
     fn hold_stored_borrows(&mut self, place: &Place, value: &Expr, value_ty: &Type, span: Span) {
-        if !self.may_hold_borrow(value_ty) {
-            return;
-        }
         let Some(root) = place.root().map(|root| root.name.clone()) else {
             return;
         };
-        if !self.reached_through_reference(place) {
+        let through_reference = self.reached_through_reference(place);
+        self.hold_written_borrows(&root, through_reference, value, value_ty, span);
+    }
+
+    /// A value a collection method keeps (`v.push(x)`, `m.insert(k, x)`) lands in the
+    /// receiver's slot, so the receiver holds its borrows as a store into it would.
+    pub(crate) fn hold_inserted_borrows(
+        &mut self,
+        receiver: &Expr,
+        value: &Expr,
+        value_ty: &Type,
+        span: Span,
+    ) {
+        let Some(root) = Self::place_root_name(receiver) else {
+            return;
+        };
+        let through_reference = (root == "self" && !self.self_is_owned)
+            || self.projection_type(receiver).is_some_and(|ty| {
+                matches!(ty, Type::Reference { .. })
+                    || self.nearest_reference(receiver, &ty).is_some()
+            });
+        self.hold_written_borrows(&root, through_reference, value, value_ty, span);
+    }
+
+    /// Make the storage a write into `root` lands in hold what `value` borrows: `root` itself,
+    /// or, through a reference, what that reference borrows and the caller's storage behind a
+    /// parameter, `self` or a copy of one.
+    fn hold_written_borrows(
+        &mut self,
+        root: &str,
+        through_reference: bool,
+        value: &Expr,
+        value_ty: &Type,
+        span: Span,
+    ) {
+        if !self.may_hold_borrow(value_ty) {
+            return;
+        }
+        let root = root.to_string();
+        if !through_reference {
             self.hold_value_borrows(&root, value, value_ty, span);
             return;
         }
+        // The caller's storage takes the value: through a parameter or `self`, or through a
+        // binding that copied one.
+        let mut targets: Vec<String> = Vec::new();
         if self.current_fn_outliving.contains(&root) {
-            self.check_stored_through_reference(value);
+            targets.push(root.clone());
         }
         for holder in self.symbols.borrowed_places(&root) {
-            self.hold_value_borrows(&holder, value, value_ty, span);
+            match param_origin(&holder) {
+                Some(param) => {
+                    if !targets.iter().any(|t| t == param) {
+                        targets.push(param.to_string());
+                    }
+                }
+                None => self.hold_value_borrows(&holder, value, value_ty, span),
+            }
+        }
+        for target in targets {
+            self.check_stored_through_reference(value, Some(&target));
         }
     }
 
@@ -542,7 +596,11 @@ impl TypeChecker {
     ) {
         let before = self.symbols.borrow_count(holder);
         match borrow_target_of(value) {
-            Some((place, exclusive)) => self.symbols.attach_borrow(holder, &place, exclusive),
+            Some((place, exclusive)) => {
+                let path = borrow_target_path(value);
+                self.symbols
+                    .attach_borrow_at(holder, &place, &path, exclusive)
+            }
             None => self.hold_carried_borrows(holder, value, value_ty),
         }
         self.refuse_outliving_borrows(holder, before, span);
@@ -560,14 +618,14 @@ impl TypeChecker {
         }
     }
 
-    /// Refuse a write into any part of a binding while a borrow of it is live. It is as
-    /// coarse as the whole-binding rule: a borrow of one field freezes the whole value,
-    /// because the borrow counts are kept per binding.
+    /// Refuse a write into a place while a borrow of it, of a part of it, or of a place
+    /// containing it is live. A borrow of a disjoint sibling field does not see the write.
     pub(crate) fn refuse_store_while_borrowed(&mut self, place: &Place) {
         let Some(root) = place.root() else {
             return;
         };
-        let Some((shared, exclusive)) = self.symbols.borrow_counts(&root.name) else {
+        let path = Self::borrow_path(&place.to_expr());
+        let Some((shared, exclusive)) = self.symbols.borrow_counts_at(&root.name, &path) else {
             return;
         };
         if shared > 0 || exclusive > 0 {
@@ -688,7 +746,9 @@ impl TypeChecker {
         // A direct `&place` / `&mut place` RHS makes the target hold a new
         // persistent borrow of that place.
         if let Some((place, exclusive)) = borrow_target_of(value) {
-            self.symbols.attach_borrow(&target.name, &place, exclusive);
+            let path = borrow_target_path(value);
+            self.symbols
+                .attach_borrow_at(&target.name, &place, &path, exclusive);
         } else {
             self.hold_carried_borrows(&target.name, value, &value_ty);
         }

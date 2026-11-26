@@ -2,7 +2,7 @@
 //! body uses it; the strongest use makes the closure `Fn`, `FnMut` or `FnOnce`, and a
 //! function type's `mut` / `once` mode says which of them a parameter takes.
 
-use crate::compile_harness::{rejected, run, stdout_of};
+use crate::compile_harness::{CompileTest, rejected, run, stdout_of};
 
 #[test]
 fn a_closure_reading_a_string_borrows_it_and_leaves_it_usable() {
@@ -650,4 +650,49 @@ func main() -> i32 {
         let message = format!("cannot borrow '{name}' as mutable: it is already borrowed");
         assert!(err.contains(&message), "{name}: {err}");
     }
+}
+
+/// A body moving one owning part out of a by-value capture leaves the others owned: the
+/// environment keeps a flag per owning position, so its release frees what the body left
+/// and nothing it took (LIM-230). Covers a never-called closure, a part taken in one branch
+/// only, a nested part, and a capture handed on to a closure built inside the body.
+#[test]
+fn regression_a_part_moved_out_of_a_capture_leaves_the_rest_owned() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Inner { a: string, b: string }
+struct P { name: string, tag: string, inner: Inner }
+
+func make(n: string) -> P {
+    P { name: n.clone(), tag: n.clone() + "!", inner: Inner { a: n.clone(), b: n } }
+}
+
+func main() -> i32 {
+    val p = make("one".clone())
+    val f = move || {
+        val n = p.name
+        n.len()
+    }
+    val q = make("two".clone())
+    val g = move |take: bool| {
+        if take {
+            val a = q.inner.a
+            a.len()
+        } else {
+            0u64
+        }
+    }
+    val r = make("three".clone())
+    val never = move || r.tag.len()
+    val s = make("four".clone())
+    val outer = move || {
+        val t = s.tag
+        val inner = move || s.inner.b.len()
+        t.len() + inner()
+    }
+    (f() + g(true) + outer()) as i32
+}
+"#;
+    // 3 + 3 + ("four!" 5 + "four" 4)
+    assert_eq!(test.run_leak_checked("capture_parts.nr", source), 3 + 3 + 9);
 }

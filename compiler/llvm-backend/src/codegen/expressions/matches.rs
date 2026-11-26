@@ -8,6 +8,7 @@
 // alternative after the one that matched. The frontend guarantees exhaustiveness, so the
 // final fall-through is `unreachable`.
 
+use crate::codegen::drops::is_fresh_value;
 use inkwell::IntPredicate;
 use inkwell::basic_block::BasicBlock;
 use inkwell::types::BasicTypeEnum;
@@ -28,6 +29,37 @@ pub(crate) struct SavedBinding<'ctx> {
     ty: Option<BasicTypeEnum<'ctx>>,
     sem: Option<Type>,
     constant: Option<BasicValueEnum<'ctx>>,
+}
+
+/// What a taken arm's bindings left of the matched value, which the arm releases: the
+/// scrutinee's slot and type, whether the match owns it, and which alternative matched
+/// when the arm has several.
+pub(crate) struct ArmRemainder<'ctx> {
+    scrut_alloca: PointerValue<'ctx>,
+    scrut_sem: Type,
+    owned: IntValue<'ctx>,
+    matched: Option<PointerValue<'ctx>>,
+}
+
+/// The tag `test` requires of the value it tests, if it requires one at this level.
+fn matched_tag(test: &HirMatchTest) -> Option<u32> {
+    match test {
+        HirMatchTest::Tag { tag } => Some(*tag),
+        HirMatchTest::All(tests) => tests.iter().find_map(matched_tag),
+        _ => None,
+    }
+}
+
+/// The test `test` makes of the part one step reaches, the step chosen by `is_step`.
+fn part_test(
+    test: &HirMatchTest,
+    is_step: impl Fn(&HirPatternStep) -> bool + Copy,
+) -> Option<&HirMatchTest> {
+    match test {
+        HirMatchTest::Part { step, test } if is_step(step) => Some(test),
+        HirMatchTest::All(tests) => tests.iter().find_map(|t| part_test(t, is_step)),
+        _ => None,
+    }
 }
 
 /// The alloca one binding lives in, shared by the alternatives of its arm.
@@ -80,6 +112,20 @@ impl<'ctx> CodegenContext<'ctx> {
             disowned = self.mark_held_moved_for_drop(scrutinee)?;
         }
         let shares = is_pure_place(scrutinee) && disowned.is_empty();
+        // What an arm that binds leaves unbound is the arm's to release, when the match
+        // took the scrutinee over: a place it disowned, which owned what the flags held,
+        // or a temporary no one else owns.
+        let remainder_owned = if !disowned.is_empty() {
+            let mut all = self.context.bool_type().const_int(1, false);
+            for (_, owned) in &disowned {
+                all = self.builder.build_and(all, *owned, "match.owned.all")?;
+            }
+            Some(all)
+        } else if !copies && is_fresh_value(scrutinee) && self.pool_depth == 0 {
+            Some(self.context.bool_type().const_int(1, false))
+        } else {
+            None
+        };
 
         let is_void = matches!(result_ty, Type::Void);
         let result_slot = if is_void {
@@ -112,7 +158,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
             self.builder.position_at_end(test_bbs[i]);
             let slots_of_arm = self.binding_slots(&arm.bindings)?;
-            let guard_failed = self.codegen_alternatives(
+            let (guard_failed, matched) = self.codegen_alternatives(
                 arm,
                 &slots_of_arm,
                 scrut_alloca,
@@ -120,6 +166,12 @@ impl<'ctx> CodegenContext<'ctx> {
                 body_bb,
                 next_bb,
             )?;
+            let remainder = remainder_owned.map(|owned| ArmRemainder {
+                scrut_alloca,
+                scrut_sem: scrut_sem.clone(),
+                owned,
+                matched,
+            });
 
             self.builder.position_at_end(body_bb);
             if arm.bindings.is_empty() {
@@ -134,7 +186,7 @@ impl<'ctx> CodegenContext<'ctx> {
                 arm,
                 &slots_of_arm,
                 ArmOwnership::Arm { shares },
-                result_slot,
+                (result_slot, remainder),
                 merge_bb,
                 guard_failed,
             )?;
@@ -158,7 +210,8 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// Emit an arm's alternatives from the current block: each that holds stores its
     /// bindings and jumps to `body_bb`, and the last that fails reaches `next_bb`. Returns
-    /// where a failed guard goes, which is the alternative after the one that matched.
+    /// where a failed guard goes, which is the alternative after the one that matched, and
+    /// for an arm of several alternatives the slot recording which one did.
     fn codegen_alternatives(
         &mut self,
         arm: &HirMatchArm,
@@ -167,13 +220,12 @@ impl<'ctx> CodegenContext<'ctx> {
         scrut_sem: &Type,
         body_bb: BasicBlock<'ctx>,
         next_bb: BasicBlock<'ctx>,
-    ) -> CodegenResult<BasicBlock<'ctx>> {
+    ) -> CodegenResult<(BasicBlock<'ctx>, Option<PointerValue<'ctx>>)> {
         let parent_fn = self
             .current_function
             .ok_or_else(|| CodegenError::InternalError("match outside function".to_string()))?;
         let i32_ty = self.context.i32_type();
-        let retries = arm.guard.is_some() && arm.tests.len() > 1;
-        let matched = if retries {
+        let matched = if arm.tests.len() > 1 {
             Some(self.entry_alloca(i32_ty, "match.alt.index")?)
         } else {
             None
@@ -204,8 +256,8 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder.position_at_end(miss_bb);
         }
 
-        let Some(matched) = matched else {
-            return Ok(next_bb);
+        let Some(matched) = matched.filter(|_| arm.guard.is_some()) else {
+            return Ok((next_bb, matched));
         };
         let guard_failed = self
             .context
@@ -216,7 +268,7 @@ impl<'ctx> CodegenContext<'ctx> {
             .build_load(i32_ty, matched, "match.alt.matched")?
             .into_int_value();
         self.builder.build_switch(index, next_bb, &resume)?;
-        Ok(guard_failed)
+        Ok((guard_failed, Some(matched)))
     }
 
     /// Lower `test` of the value at `place`, branching to `fail_bb` at the first failure
@@ -294,34 +346,194 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// The place `step` reaches from the value of type `sem` at `place`, and its type.
+    /// The address of payload slot `slot` of the enum value at `place`.
+    fn payload_slot(
+        &mut self,
+        place: PointerValue<'ctx>,
+        sem: &Type,
+        slot: usize,
+    ) -> CodegenResult<PointerValue<'ctx>> {
+        let i64_ty = self.context.i64_type();
+        let enum_llvm = self.get_any_llvm_type(sem)?.into_struct_type();
+        let payload = self
+            .builder
+            .build_struct_gep(enum_llvm, place, 1, "match.payload")?;
+        let payload_llvm = enum_llvm.get_field_type_at_index(1).ok_or_else(|| {
+            CodegenError::InternalError("an enum with no payload field".to_string())
+        })?;
+        let indices = [i64_ty.const_zero(), i64_ty.const_int(slot as u64, false)];
+        // SAFETY: the checker proved `slot` a field of the variant whose tag test guards
+        // this read, and the payload array has a slot per field.
+        Ok(unsafe {
+            self.builder
+                .build_in_bounds_gep(payload_llvm, payload, &indices, "match.slot")?
+        })
+    }
+
+    /// Release what the taken arm's bindings left of the matched value: under the
+    /// remainder's ownership, the alternative that matched (read from its slot when the
+    /// arm has several) walks its own test and binding paths.
+    fn release_arm_remainder(
+        &mut self,
+        arm: &HirMatchArm,
+        remainder: &ArmRemainder<'ctx>,
+    ) -> CodegenResult<()> {
+        let parent_fn = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("match outside function".to_string()))?;
+        let run_bb = self
+            .context
+            .append_basic_block(parent_fn, "match.rest.release");
+        let join_bb = self
+            .context
+            .append_basic_block(parent_fn, "match.rest.done");
+        self.builder
+            .build_conditional_branch(remainder.owned, run_bb, join_bb)?;
+        self.builder.position_at_end(run_bb);
+        let paths = |alternative: usize| -> Vec<&[HirPatternStep]> {
+            arm.bindings
+                .iter()
+                .filter_map(|binding| binding.paths.get(alternative).map(Vec::as_slice))
+                .collect()
+        };
+        match remainder.matched {
+            None => {
+                let test = arm.tests.first();
+                self.release_unbound_parts(
+                    remainder.scrut_alloca,
+                    &remainder.scrut_sem,
+                    test,
+                    &paths(0),
+                )?;
+            }
+            Some(matched) => {
+                let i32_ty = self.context.i32_type();
+                let index = self
+                    .builder
+                    .build_load(i32_ty, matched, "match.alt.taken")?
+                    .into_int_value();
+                let cases: Vec<_> = (0..arm.tests.len())
+                    .map(|alternative| {
+                        (
+                            i32_ty.const_int(alternative as u64, false),
+                            self.context.append_basic_block(parent_fn, "match.rest.alt"),
+                        )
+                    })
+                    .collect();
+                self.builder.build_switch(index, join_bb, &cases)?;
+                for (alternative, (_, case_bb)) in cases.iter().enumerate() {
+                    self.builder.position_at_end(*case_bb);
+                    self.release_unbound_parts(
+                        remainder.scrut_alloca,
+                        &remainder.scrut_sem,
+                        arm.tests.get(alternative),
+                        &paths(alternative),
+                    )?;
+                    self.builder.build_unconditional_branch(join_bb)?;
+                }
+                self.builder.position_at_end(join_bb);
+                return Ok(());
+            }
+        }
+        self.builder.build_unconditional_branch(join_bb)?;
+        self.builder.position_at_end(join_bb);
+        Ok(())
+    }
+
+    /// Release every owning part of the value at `place`, of type `sem`, that `test`
+    /// matched and no binding path in `bound` (each relative to `place`) takes. A path
+    /// ending here takes the whole part; a part no path enters is released whole. Only
+    /// an enum's payload slots and an array's elements are walked into: any other shape
+    /// a path enters is left as it is.
+    fn release_unbound_parts(
+        &mut self,
+        place: PointerValue<'ctx>,
+        sem: &Type,
+        test: Option<&HirMatchTest>,
+        bound: &[&[HirPatternStep]],
+    ) -> CodegenResult<()> {
+        if bound.iter().any(|path| path.is_empty()) {
+            return Ok(());
+        }
+        if bound.is_empty() {
+            if self.holds_owner(sem) {
+                self.emit_captured_drop(place, sem)?;
+            }
+            return Ok(());
+        }
+        match sem {
+            Type::Enum(name) => {
+                let Some(tag) = test.and_then(matched_tag) else {
+                    return Ok(());
+                };
+                let fields = self
+                    .type_mapper
+                    .enum_payload_types(name)
+                    .and_then(|variants| variants.get(tag as usize))
+                    .cloned()
+                    .unwrap_or_default();
+                for (slot, field_ty) in fields.iter().enumerate() {
+                    let below: Vec<&[HirPatternStep]> = bound
+                        .iter()
+                        .filter_map(|path| match path.split_first() {
+                            Some((HirPatternStep::EnumPayload { slot: s, .. }, rest))
+                                if *s == slot =>
+                            {
+                                Some(rest)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let part_test = test.and_then(|t| {
+                        part_test(t, |step| {
+                            matches!(step, HirPatternStep::EnumPayload { slot: s, .. } if *s == slot)
+                        })
+                    });
+                    let slot_ptr = self.payload_slot(place, sem, slot)?;
+                    self.release_unbound_parts(slot_ptr, field_ty, part_test, &below)?;
+                }
+            }
+            Type::Array { element, size } => {
+                for index in 0..*size as u64 {
+                    let rest_covers = bound.iter().any(|path| {
+                        matches!(path.first(), Some(HirPatternStep::Rest { start, .. }) if *start <= index)
+                    });
+                    if rest_covers {
+                        continue;
+                    }
+                    let below: Vec<&[HirPatternStep]> = bound
+                        .iter()
+                        .filter_map(|path| match path.split_first() {
+                            Some((HirPatternStep::Element { index: i, .. }, rest))
+                                if *i == index =>
+                            {
+                                Some(rest)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let part_test = test.and_then(|t| {
+                        part_test(t, |step| {
+                            matches!(step, HirPatternStep::Element { index: i, .. } if *i == index)
+                        })
+                    });
+                    let element_ptr = self.sequence_part(place, sem, index)?;
+                    self.release_unbound_parts(element_ptr, element, part_test, &below)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn pattern_part(
         &mut self,
         place: PointerValue<'ctx>,
         sem: &Type,
         step: &HirPatternStep,
     ) -> CodegenResult<(PointerValue<'ctx>, Type)> {
-        let i64_ty = self.context.i64_type();
         let part = match step {
-            HirPatternStep::EnumPayload { slot, .. } => {
-                let enum_llvm = self.get_any_llvm_type(sem)?.into_struct_type();
-                let payload =
-                    self.builder
-                        .build_struct_gep(enum_llvm, place, 1, "match.payload")?;
-                let payload_llvm = enum_llvm.get_field_type_at_index(1).ok_or_else(|| {
-                    CodegenError::InternalError("an enum with no payload field".to_string())
-                })?;
-                let indices = [i64_ty.const_zero(), i64_ty.const_int(*slot as u64, false)];
-                // SAFETY: the checker proved `slot` a field of the variant whose tag test
-                // guards this read, and the payload array has a slot per field.
-                unsafe {
-                    self.builder.build_in_bounds_gep(
-                        payload_llvm,
-                        payload,
-                        &indices,
-                        "match.slot",
-                    )?
-                }
-            }
+            HirPatternStep::EnumPayload { slot, .. } => self.payload_slot(place, sem, *slot)?,
             HirPatternStep::Element { index, .. } => self.sequence_part(place, sem, *index)?,
             HirPatternStep::Rest { start, .. } => {
                 let tail = self.sequence_part(place, sem, *start)?;
@@ -422,7 +634,7 @@ impl<'ctx> CodegenContext<'ctx> {
         arm: &HirMatchArm,
         binding_slots: &[BindingSlot<'ctx>],
         ownership: ArmOwnership,
-        result_slot: Option<PointerValue<'ctx>>,
+        (result_slot, remainder): (Option<PointerValue<'ctx>>, Option<ArmRemainder<'ctx>>),
         merge_bb: BasicBlock<'ctx>,
         guard_failed: BasicBlock<'ctx>,
     ) -> CodegenResult<()> {
@@ -441,6 +653,11 @@ impl<'ctx> CodegenContext<'ctx> {
             self.builder
                 .build_conditional_branch(guard_val, eval_bb, guard_failed)?;
             self.builder.position_at_end(eval_bb);
+        }
+        // Taken: what the arm's bindings left of the value is released here, after the
+        // guard, since a failing one hands the whole value to the next arm.
+        if let Some(remainder) = remainder.filter(|_| !arm.bindings.is_empty()) {
+            self.release_arm_remainder(arm, &remainder)?;
         }
 
         match result_slot {

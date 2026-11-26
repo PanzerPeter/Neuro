@@ -198,3 +198,40 @@ func main() -> i32 {
         42,
     );
 }
+
+/// Borrows of disjoint parts of one binding coexist and each write lands in its own part:
+/// two `&mut` fields handed to one call, two held at once, a lent function field beside a
+/// borrowed sibling, and a `Vec` field grown while another field is held.
+#[test]
+fn regression_disjoint_part_borrows_coexist_and_run() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Inner { x: i32, y: i32 }
+struct Job { step: mut (&mut i32) -> void, count: i32, log: Vec<i32>, inner: Inner }
+
+func two(a: &mut i32, b: &mut i32) {
+    *a += 1
+    *b += 10
+}
+
+func run(f: mut (&mut i32) -> void, n: &mut i32) { f(n) }
+
+func main() -> i32 {
+    mut job = Job { step: |n: &mut i32| { *n += 100 }, count: 0, log: Vec::new(), inner: Inner { x: 0, y: 0 } }
+    two(&mut job.inner.x, &mut job.inner.y)
+    run(job.step, &mut job.count)
+    {
+        val x = &mut job.inner.x
+        val c = &job.count
+        job.log.push(*c)
+        *x += job.inner.y
+    }
+    job.inner.x + job.inner.y + job.count + job.log.len() as i32
+}
+"#;
+    // x = 1 + 10, y = 10, count = 100, one log entry
+    assert_eq!(
+        test.run_leak_checked("disjoint_parts.nr", source),
+        11 + 10 + 100 + 1
+    );
+}

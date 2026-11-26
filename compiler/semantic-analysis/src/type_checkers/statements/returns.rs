@@ -8,6 +8,7 @@ use crate::errors::TypeError;
 use crate::symbol_table::{frame_slot_binding, is_frame_slot};
 use crate::type_checkers::TypeChecker;
 use crate::type_checkers::closures::closure_reads;
+use crate::type_checkers::lifetime_flow::RECEIVER;
 use crate::types::Type;
 
 use super::borrow_target_of;
@@ -184,47 +185,100 @@ impl TypeChecker {
 
     /// Verify a value stored through a reference (`*r = v`, `p.field = v` with `p` a
     /// `&mut` parameter or `self`) holds no borrow of a function-local place: the
-    /// reference's target outlives the call, and the local does not.
-    pub(crate) fn check_stored_through_reference(&mut self, expr: &Expr) {
-        self.check_escaping_borrows(expr, Escape::Store);
+    /// reference's target outlives the call, and the local does not. `target` is the
+    /// parameter whose referent takes the value, when the store is into one: the
+    /// signature's lifetimes then say which parameters' borrows it may take.
+    pub(crate) fn check_stored_through_reference(&mut self, expr: &Expr, target: Option<&str>) {
+        self.check_escaping_borrows(expr, Escape::Store(target));
     }
 
-    fn report_escape(&mut self, name: String, span: Span, escape: Escape) {
+    fn report_escape(&mut self, name: String, span: Span, escape: Escape<'_>) {
         let name = frame_slot_binding(&name).map_or(name.clone(), str::to_string);
         self.record_error(match escape {
             Escape::Return => TypeError::ReturnsReferenceToLocal { name, span },
-            Escape::Store => TypeError::StoresReferenceToLocal { name, span },
+            Escape::Store(_) => TypeError::StoresReferenceToLocal { name, span },
         });
     }
 
-    fn check_escaping_binding(&mut self, name: &str, span: Span, escape: Escape) {
-        if let Some(place) = self
+    /// Report `place`, a borrow a leaving value carries, when it may not leave this way:
+    /// a function-local place, or a parameter's borrows the signature's lifetimes do not let
+    /// the result, or the referent the value is stored into, keep. Whether it reported.
+    fn report_if_escapes(&mut self, place: &str, span: Span, escape: Escape<'_>) -> bool {
+        if self.is_local_to_function(place) {
+            self.report_escape(place.to_string(), span, escape);
+            return true;
+        }
+        let Some(param) = self.origin_param(place) else {
+            return false;
+        };
+        let flow = self.current_flow.as_ref();
+        let name = param.to_string();
+        let error = match escape {
+            Escape::Return
+                if self.flow_governs_returns && flow.is_some_and(|f| !f.result_takes(param)) =>
+            {
+                TypeError::ReturnsBorrowOfUnnamedLifetime { name, span }
+            }
+            Escape::Store(Some(target))
+                if param != target
+                    && !match flow.and_then(|f| f.stores_into(target)) {
+                        Some(kept) => kept.contains(param),
+                        None => self.store_keeps_conservatively(target, param),
+                    } =>
+            {
+                TypeError::StoresBorrowOfUnnamedLifetime {
+                    name,
+                    target: target.to_string(),
+                    span,
+                }
+            }
+            _ => return false,
+        };
+        self.record_error(error);
+        true
+    }
+
+    /// Whether a call keeps the parameter `param` for what the `&mut` parameter (or `self`)
+    /// `target` points at, when no lifetime says: always when the referent can hold a
+    /// reference, and when it holds only function values, only for a function-valued
+    /// `param` (`hold_argument_stores`, which the body mirrors).
+    fn store_keeps_conservatively(&self, target: &str, param: &str) -> bool {
+        let Some(referent) = self
             .symbols
-            .borrowed_places(name)
-            .into_iter()
-            .find(|place| self.is_local_to_function(place))
-        {
-            self.report_escape(place, span, escape);
+            .lookup(target)
+            .map(|info| info.ty.referent().clone())
+        else {
+            return true;
+        };
+        if self.type_holds_reference(&referent) || !self.holds_function_value(&referent) {
+            return true;
+        }
+        self.symbols
+            .lookup(param)
+            .is_some_and(|info| self.holds_function_value(&info.ty))
+    }
+
+    fn check_escaping_binding(&mut self, name: &str, span: Span, escape: Escape<'_>) {
+        for place in self.symbols.borrowed_places(name) {
+            if self.report_if_escapes(&place, span, escape) {
+                return;
+            }
         }
     }
 
-    fn check_escaping_borrows(&mut self, expr: &Expr, escape: Escape) {
+    fn check_escaping_borrows(&mut self, expr: &Expr, escape: Escape<'_>) {
         // A `.slice` view borrows its receiver exactly as `&receiver` does.
         if matches!(expr, Expr::Call { .. })
             && let Some((place, _)) = borrow_target_of(expr)
         {
-            if self.is_local_to_function(&place) {
-                self.report_escape(place, expr.span(), escape);
-            }
+            self.report_if_escapes(&place, expr.span(), escape);
             return;
         }
         match expr {
             Expr::Paren(inner, _) => self.check_escaping_borrows(inner, escape),
             Expr::Reference { operand, span, .. } => {
-                if let Some(name) = root_place_name(operand)
-                    && self.is_local_to_function(&name)
-                {
-                    self.report_escape(name, *span, escape);
+                if let Some(name) = root_place_name(operand) {
+                    self.report_if_escapes(&name, *span, escape);
                 }
             }
             Expr::Identifier(ident) => self.check_escaping_binding(&ident.name, ident.span, escape),
@@ -325,10 +379,15 @@ impl TypeChecker {
                 if self.temporary_views.contains(span) {
                     self.record_error(TypeError::TemporaryBorrowEscapes { span: *span });
                 }
-                for arg in args {
-                    self.check_escaping_borrows(arg, escape);
+                // A callee whose lifetimes name what its result keeps carries out only that.
+                let flow = self.callee_flow(func).cloned();
+                for (index, arg) in args.iter().enumerate() {
+                    if flow.as_ref().is_none_or(|f| f.result_takes_argument(index)) {
+                        self.check_escaping_borrows(arg, escape);
+                    }
                 }
                 if !self.is_variant_constructor(func)
+                    && flow.as_ref().is_none_or(|f| f.result_takes(RECEIVER))
                     && let Expr::FieldAccess { object, field, .. } = func.as_ref()
                 {
                     self.check_escaping_borrows(object, escape);
@@ -350,9 +409,10 @@ impl TypeChecker {
 
 /// Where a value holding a borrow is going when it leaves the function's frame.
 #[derive(Clone, Copy)]
-enum Escape {
+enum Escape<'a> {
     /// Returned to the caller.
     Return,
-    /// Written through a reference into storage the caller owns.
-    Store,
+    /// Written through a reference into storage the caller owns: the referent of the
+    /// named parameter, when the store is into one.
+    Store(Option<&'a str>),
 }

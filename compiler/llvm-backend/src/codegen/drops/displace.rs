@@ -283,7 +283,7 @@ impl<'ctx> CodegenContext<'ctx> {
 
     /// The drop work one entry stands for, innermost-holder first: the binding's own
     /// release, then each owner it holds in declaration order.
-    pub(super) fn snapshot_entry(
+    pub(crate) fn snapshot_entry(
         entry: &DropEntry<'ctx>,
     ) -> Vec<(PointerValue<'ctx>, PointerValue<'ctx>, DropTarget)> {
         let mut pending = vec![(entry.storage_ptr, entry.flag_ptr, entry.target.clone())];

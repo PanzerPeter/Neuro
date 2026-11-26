@@ -664,16 +664,13 @@ func main() -> i32 {
 - It cannot be returned while it borrows a local or a by-value parameter. A closure that borrows a reference parameter or `self` points at that binding's slot, so it stays in the function too.
 - A `break` value hands what it borrows to the binding that holds the loop's value, so `val f = loop { break |x: i32| s.len() }` freezes `s` while `f` lives, and a closure over a binding the loop declares cannot leave it.
 
-A `mut` function parameter is lent exclusively, and a closure holding a reference that came in through a parameter stays in the call as well. Either may be bound, passed to a function-typed parameter or called, and nothing else:
+A `mut` function parameter is lent exclusively, and stays in the call, as does a closure over one. Either may be bound, passed to a function-typed parameter or called, and nothing else:
 
 ```text
-error: this function value stays in the call that made it (a `mut` function-typed parameter, a closure over one, or a closure holding a reference that came in through a parameter): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored
+error: this function value stays in the call that made it (a `mut` function-typed parameter, or a closure over one): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored
 ```
 
-### Not yet supported
-
-- Storing a closure over a reference parameter, or returning one (`func len_of(s: &string) -> () -> u64 { || s.len() }`).
-- A function value in a collection (`Vec<(i32) -> i32>`).
+A closure holding a reference that came in through a parameter may be returned, as the reference may: `func len_of(s: &string) -> () -> u64 { || s.len() }` compiles, and the caller's result holds what `s` borrowed. A call gives a `&mut` argument that holds only function values none of a plain `&` argument's borrow, so `opt.step(&batch)` leaves `batch` free, and storing such a closure there (`func keep(h: &mut H, s: &string) { h.f = || s.len() }`) is ``cannot store a borrow carried by parameter 's'``. Give both types a lifetime (`h: &mut H<'a>`, `s: &'a string`) and the store is allowed, with the caller keeping `s` borrowed for `h`.
 
 ## See also
 

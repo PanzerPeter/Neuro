@@ -392,6 +392,19 @@ impl<'ctx> CodegenContext<'ctx> {
         path: &mut Vec<String>,
         out: &mut Vec<HeldDrop<'ctx>>,
     ) -> CodegenResult<()> {
+        self.plan_held_drops_flagged(storage_ptr, ty, path, out, &mut |this| this.arm_drop_flag())
+    }
+
+    /// [`Self::plan_held_drops`] with each position's flag taken from `flag`, called once
+    /// per owning position in plan order: a closure environment hands out its own fields.
+    pub(crate) fn plan_held_drops_flagged(
+        &mut self,
+        storage_ptr: PointerValue<'ctx>,
+        ty: &Type,
+        path: &mut Vec<String>,
+        out: &mut Vec<HeldDrop<'ctx>>,
+        flag: &mut dyn FnMut(&mut Self) -> CodegenResult<PointerValue<'ctx>>,
+    ) -> CodegenResult<()> {
         let positions = self.held_positions(ty);
         if positions.is_empty() {
             return Ok(());
@@ -412,7 +425,7 @@ impl<'ctx> CodegenContext<'ctx> {
             if let Some(target) = self.drop_target_of(&position_ty)
                 && !matches!(target, DropTarget::Aggregate)
             {
-                let flag_ptr = self.arm_drop_flag()?;
+                let flag_ptr = flag(self)?;
                 out.push(HeldDrop {
                     path: path.clone(),
                     storage_ptr: position_ptr,
@@ -420,10 +433,25 @@ impl<'ctx> CodegenContext<'ctx> {
                     target,
                 });
             }
-            self.plan_held_drops(position_ptr, &position_ty, path, out)?;
+            self.plan_held_drops_flagged(position_ptr, &position_ty, path, out, flag)?;
             let _ = path.pop();
         }
         Ok(())
+    }
+
+    /// How many owning positions [`Self::plan_held_drops`] plans for a value of `ty`: the
+    /// flags a holder of it carries besides its own.
+    pub(crate) fn held_owner_count(&self, ty: &Type) -> usize {
+        self.held_positions(ty)
+            .into_iter()
+            .filter(|(_, position_ty)| self.holds_owner(position_ty))
+            .map(|(_, position_ty)| {
+                let own = self
+                    .drop_target_of(&position_ty)
+                    .is_some_and(|target| !matches!(target, DropTarget::Aggregate));
+                usize::from(own) + self.held_owner_count(&position_ty)
+            })
+            .sum()
     }
 
     /// Register a binding that owns something, or holds something that does, for
@@ -507,10 +535,31 @@ impl<'ctx> CodegenContext<'ctx> {
     }
 
     /// How a `move` closure's environment releases a capture of type `ty`, or `None`
-    /// when the value owns nothing.
+    /// when the value owns nothing: as a binding of `ty` would, its owning positions each
+    /// under a flag of the environment's (`closures.rs`).
     pub(crate) fn captured_drop_target(&self, ty: &Type) -> Option<DropTarget> {
         self.drop_target_of(ty)
-            .map(|_| DropTarget::Captured(ty.clone()))
+    }
+
+    /// The flag guarding the position `path` of the binding `name`, or the binding's own
+    /// flag when it plans no such position.
+    pub(crate) fn owns_position_now(
+        &mut self,
+        name: &str,
+        path: &[String],
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let held = self
+            .live_drop_entry(name)
+            .and_then(|entry| entry.held.iter().find(|held| held.path == path))
+            .map(|held| held.flag_ptr);
+        let Some(flag_ptr) = held else {
+            return self.owns_binding_now(name);
+        };
+        let bool_ty = self.context.bool_type();
+        Ok(self
+            .builder
+            .build_load(bool_ty, flag_ptr, "capture.part.owns")?
+            .into_int_value())
     }
 
     /// Whether a closure environment taking the binding `name` of `ty` by value owns what

@@ -237,6 +237,21 @@ pub(crate) struct TypeChecker {
     /// A returned reference is only safe when it ultimately borrows one of these:
     /// borrowing any other (function-local) place dangles.
     current_fn_outliving: HashSet<String>,
+    /// What each callee's explicit lifetimes say a call keeps, by `functions` key. A
+    /// callee with no entry is judged conservatively (`lifetime_flow`).
+    pub(crate) lifetime_flows: HashMap<String, lifetime_flow::LifetimeFlow>,
+    /// The summary the body being checked is held to, when its signature has one.
+    current_flow: Option<lifetime_flow::LifetimeFlow>,
+    /// The parameters of the body being checked that carry their caller's borrows, and the
+    /// index of the scope that binds them.
+    current_params: HashSet<String>,
+    current_param_scope: usize,
+    /// Whether a `return` answers to [`Self::current_flow`]: false inside a closure body,
+    /// whose result is its own, while a store it makes through a parameter still answers.
+    flow_governs_returns: bool,
+    /// For each call being checked, innermost last, its span and what its callee's
+    /// lifetimes say it keeps of its arguments (`None` for a callee with no summary).
+    call_flows: Vec<(shared_types::Span, Option<lifetime_flow::LifetimeFlow>)>,
     /// The names the body being checked calls `.backward()` on (`backward::backward_losses`).
     backward_losses: HashSet<String>,
     /// Whether the method body being checked took `self` by value. A consuming
@@ -497,6 +512,7 @@ mod grad;
 mod iteration;
 mod iterator_adapters;
 mod kernel;
+pub(crate) mod lifetime_flow;
 mod literals;
 mod loop_adapters;
 mod matches;
@@ -589,6 +605,12 @@ impl TypeChecker {
             unsafe_depth: 0,
             kernel_params: HashMap::new(),
             current_fn_outliving: HashSet::new(),
+            lifetime_flows: HashMap::new(),
+            current_flow: None,
+            current_params: HashSet::new(),
+            current_param_scope: 0,
+            flow_governs_returns: false,
+            call_flows: Vec::new(),
             backward_losses: HashSet::new(),
             self_is_owned: false,
             loop_stack: Vec::new(),

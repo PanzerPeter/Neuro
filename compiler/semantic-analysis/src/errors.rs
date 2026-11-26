@@ -1309,6 +1309,20 @@ pub enum TypeError {
     StoresReferenceToLocal { name: String, span: Span },
 
     #[error(
+        "cannot return a borrow carried by parameter '{name}': the return type names lifetimes that '{name}''s type does not, so callers do not keep '{name}' borrowed for the result; name one of the result's lifetimes in '{name}''s type"
+    )]
+    ReturnsBorrowOfUnnamedLifetime { name: String, span: Span },
+
+    #[error(
+        "cannot store a borrow carried by parameter '{name}' into what '{target}' points at: a caller keeps '{name}' borrowed for that referent only when its type can hold a reference and names no lifetime, or when both types name one lifetime, as in `{target}: &mut T<'a>` and `{name}: &'a U`"
+    )]
+    StoresBorrowOfUnnamedLifetime {
+        name: String,
+        target: String,
+        span: Span,
+    },
+
+    #[error(
         "a range value is the standard library's `Range`, which is missing from this program; a range still works in a `for` head and as a `.slice()` argument"
     )]
     RangeNotAllowed { span: Span },
@@ -1376,9 +1390,7 @@ pub enum TypeError {
     )]
     CollectionTypeNotInferable { name: String, span: Span },
 
-    #[error(
-        "{ty} cannot be stored in a `{collection}`: an element must be a sized value that holds no reference or function"
-    )]
+    #[error("{ty} cannot be stored in a `{collection}`: an element must be a sized value")]
     InvalidCollectionElement {
         collection: String,
         ty: Type,
@@ -1596,14 +1608,9 @@ pub enum TypeError {
     ClosureParamNeedsType { name: String, span: Span },
 
     #[error(
-        "a closure inside a `@kernel` body captures '{name}' of non-Copy type {ty}: a kernel closure captures Copy values only; borrow it outside the closure and capture the reference"
+        "a closure inside a `@kernel` body captures '{name}' of non-Copy type {ty}: a kernel closure runs in place over the thread's own values, which are all Copy"
     )]
     ClosureCapturesNonCopy { name: String, ty: Type, span: Span },
-
-    #[error(
-        "a closure inside a `@kernel` body assigns to captured variable '{name}': a kernel closure captures by copy, so it may not write a capture"
-    )]
-    ClosureAssignsCapture { name: String, span: Span },
 
     #[error(
         "`.{method}` calls its function once per element, but this one gives a capture away, so it can run only once: pass a `.clone()` of the capture to the call, or borrow it"
@@ -1611,7 +1618,7 @@ pub enum TypeError {
     OnceFunctionPerElement { method: String, span: Span },
 
     #[error(
-        "this function value stays in the call that made it (a `mut` function-typed parameter, a closure over one, or a closure holding a reference that came in through a parameter): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored"
+        "this function value stays in the call that made it (a `mut` function-typed parameter, or a closure over one): call it, lend it to a function-typed parameter or bind it, but it cannot be returned or stored"
     )]
     ScopeBoundClosureStored { span: Span },
 
@@ -1959,6 +1966,8 @@ impl TypeError {
             | Self::BorrowOutlivesPlace { span, .. }
             | Self::BorrowLeavesScope { span, .. }
             | Self::StoresReferenceToLocal { span, .. }
+            | Self::ReturnsBorrowOfUnnamedLifetime { span, .. }
+            | Self::StoresBorrowOfUnnamedLifetime { span, .. }
             | Self::RangeNotAllowed { span, .. }
             | Self::RevOnNonRange { span }
             | Self::StepOnNonRange { span }
@@ -2016,7 +2025,6 @@ impl TypeError {
             | Self::UntestableLiteralPattern { span, .. }
             | Self::ClosureParamNeedsType { span, .. }
             | Self::ClosureCapturesNonCopy { span, .. }
-            | Self::ClosureAssignsCapture { span, .. }
             | Self::OnceFunctionPerElement { span, .. }
             | Self::ScopeBoundClosureStored { span }
             | Self::ClosureBlockNeedsReturnType { span, .. }

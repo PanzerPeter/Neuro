@@ -37,8 +37,9 @@ impl TypeChecker {
         }
     }
 
-    /// Diagnose a read of `name` through its own name while a `&mut` of it is live.
-    /// A shared borrow tolerates reads, so only the exclusive count matters.
+    /// Diagnose a read of the sub-place `path` of `name` while a `&mut` of any part of it
+    /// is live. A shared borrow tolerates reads, so only the exclusive count matters. A
+    /// name at the base of a longer place is judged by the place's outermost link.
     ///
     /// Only borrows held by a live reference binding freeze the name. A transient
     /// `&mut` handed to a call ends when that call returns, so a later operand of the
@@ -51,11 +52,11 @@ impl TypeChecker {
     /// reports the conflicting case. [`in_borrow_operand`] is what tells the two apart.
     ///
     /// [`in_borrow_operand`]: TypeChecker::in_borrow_operand
-    pub(crate) fn check_borrowee_read(&mut self, name: &str, span: Span) {
+    pub(crate) fn check_borrowee_read(&mut self, name: &str, path: &str, span: Span) {
         if self.in_borrow_operand {
             return;
         }
-        let Some((_, exclusive)) = self.symbols.persistent_borrow_counts(name) else {
+        let Some((_, exclusive)) = self.symbols.persistent_borrow_counts_at(name, path) else {
             return;
         };
         if exclusive > 0 {
@@ -135,12 +136,14 @@ impl TypeChecker {
         }
 
         // Aliasing exclusivity. A `&mut` borrow is exclusive:
-        // no other borrow of the place may be live at the same time. A
+        // no other borrow of the place, of a part of it or of a place containing it may
+        // be live at the same time (a disjoint sibling field may). A
         // shared `&` borrow tolerates other shared borrows but excludes an
         // active `&mut`. The counts sum persistent borrows (held by live
         // reference bindings) and transient borrows (taken earlier in this
         // same statement, e.g. another argument of the same call).
-        if let Some((shared, exclusive)) = self.symbols.borrow_counts(&name) {
+        let path = Self::borrow_path(place);
+        if let Some((shared, exclusive)) = self.symbols.borrow_counts_at(&name, &path) {
             if mutable {
                 if shared > 0 || exclusive > 0 {
                     self.record_error(TypeError::CannotMutablyBorrowWhileBorrowed {
@@ -157,7 +160,7 @@ impl TypeChecker {
         }
         // Every fresh borrow starts transient; a `val r = &place` initializer
         // is promoted to a persistent borrow by the `VarDecl` handler.
-        self.symbols.add_transient_borrow(&name, mutable);
+        self.symbols.add_transient_borrow_at(&name, &path, mutable);
 
         Some(Type::Reference {
             inner: Box::new(inner),
@@ -228,6 +231,19 @@ impl TypeChecker {
     /// `&x` reads `x`'s type, not its value, so the rule that freezes a mutably-borrowed
     /// place against access through its own name does not apply to the borrow site
     /// itself; the exclusivity rules above govern it instead.
+    /// Type the base a store navigates to its place (`p.c` in `p.c.x = 1`). The base is
+    /// not read: [`Self::refuse_store_while_borrowed`] judges the whole place against the
+    /// borrows that overlap it, so a borrow of a sibling (`p.c.y`) does not see the store.
+    pub(crate) fn check_store_base(
+        &mut self,
+        base: impl FnOnce(&mut Self) -> Option<Type>,
+    ) -> Option<Type> {
+        let outer = std::mem::replace(&mut self.in_borrow_operand, true);
+        let ty = base(self);
+        self.in_borrow_operand = outer;
+        ty
+    }
+
     fn check_borrow_operand(&mut self, operand: &Expr) -> Option<Type> {
         let outer = self.in_borrow_operand;
         self.in_borrow_operand = true;
@@ -272,7 +288,12 @@ impl TypeChecker {
             let axes = [TensorIndexArg::Position(index.clone())];
             return Some(self.check_tensor_index(&element, &shape, &axes, *span));
         }
+        // The index is a value of its own, read as one, not a link of the place indexed.
+        let in_chain = std::mem::replace(&mut self.in_sub_place, false);
+        let in_operand = std::mem::replace(&mut self.in_borrow_operand, false);
         let idx_ty = self.check_expr(index, None).unwrap_or(Type::Unknown);
+        self.in_sub_place = in_chain;
+        self.in_borrow_operand = in_operand;
 
         if !matches!(idx_ty, Type::Unknown) && !idx_ty.is_integer() {
             self.record_error(TypeError::IndexNotInteger {

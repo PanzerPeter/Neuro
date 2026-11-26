@@ -115,13 +115,7 @@ impl<'ctx> CodegenContext<'ctx> {
             return Ok(());
         };
         let prefix = path.unwrap_or_default();
-        // A captured value has no held entries to disown one part at a time, so moving
-        // any part of it that owns something disowns the whole: what is left behind leaks
-        // rather than being released along with the part already gone. Reading a part
-        // that owns nothing (`n.id`) takes nothing.
-        let takes_an_owner = self.drop_target_of(&ty).is_some();
-        if prefix.is_empty() || (matches!(entry.target, DropTarget::Captured(_)) && takes_an_owner)
-        {
+        if prefix.is_empty() {
             flags.push(entry.flag_ptr);
         }
         flags.extend(

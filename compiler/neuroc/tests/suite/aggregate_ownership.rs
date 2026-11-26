@@ -1107,3 +1107,53 @@ func main() -> i32 {
         10
     );
 }
+
+/// An arm binding some owning parts of what it matched releases the parts it left out once
+/// it is taken, so nothing leaks and nothing is freed twice (LIM-087): a variant field, a
+/// nested variant's field, an array element, each side of an alternative, and a part left
+/// alone by an arm whose guard failed, which a later arm still reads.
+#[test]
+fn regression_an_arm_releases_what_its_pattern_left_unbound() {
+    let test = CompileTest::new();
+    let source = r#"
+struct Probe { id: i32, name: string }
+enum E { A(Probe, Probe), B(Probe), C(i32, Probe) }
+
+func probe(id: i32) -> Probe { Probe { id: id, name: "probe".clone() } }
+
+func pick(e: E) -> i32 {
+    match e {
+        E::A(x, _) if x.id > 100 => x.id,
+        E::A(_, y) => y.id,
+        E::B(x) | E::C(_, x) => x.id,
+    }
+}
+
+func main() -> i32 {
+    val a = pick(E::A(probe(1), probe(2)))
+    val b = pick(E::C(7, probe(3)))
+    val c = match E::A(probe(4), probe(5)) {
+        E::A(x, _) => x.id,
+        _ => 0,
+    }
+    val o: Option<E> = Some(E::A(probe(6), probe(7)))
+    val d = match o {
+        Some(E::A(x, _)) => x.id,
+        _ => 0,
+    }
+    val n = match E::C(8, probe(9)) {
+        E::C(k, _) => k,
+        _ => 0,
+    }
+    val arr = [probe(10), probe(11)]
+    val f = match arr {
+        [x, _] => x.id,
+    }
+    a + b + c + d + n + f
+}
+"#;
+    assert_eq!(
+        test.run_leak_checked("unbound_parts.nr", source),
+        2 + 3 + 4 + 6 + 8 + 10
+    );
+}

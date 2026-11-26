@@ -854,3 +854,146 @@ func main() -> i32 { 0 }
     );
     assert!(returns_ref_to_local(&errors), "got {errors:?}");
 }
+
+/// `main` over `mut p = P { a, b, v, c }`, running `body` after the declarations.
+fn over_parts(body: &str) -> Vec<TypeError> {
+    semantic_errors(&format!(
+        "struct C {{ x: i32, y: i32 }}
+struct P {{ a: i32, b: i32, v: Vec<i32>, c: C }}
+func two(x: &mut i32, y: &mut i32) {{
+    *x += 1
+    *y += 1
+}}
+func look(x: &i32, y: &mut i32) {{ *y += *x }}
+func main() -> i32 {{
+    mut p = P {{ a: 1, b: 2, v: Vec::new(), c: C {{ x: 3, y: 4 }} }}
+    {body}
+    0
+}}"
+    ))
+}
+
+#[test]
+fn regression_disjoint_field_borrows_coexist() {
+    for body in [
+        "two(&mut p.a, &mut p.b)",
+        "two(&mut p.c.x, &mut p.c.y)",
+        "look(&p.a, &mut p.b)",
+        "val a = &mut p.a\n    val b = &mut p.b\n    *a += 1\n    *b += 1",
+        "val x = &mut p.c.x\n    two(&mut p.a, &mut p.c.y)\n    *x += 1",
+        "val a = &mut p.a\n    p.b = 5\n    val n = p.b + p.c.x\n    *a += n",
+        "val a = &p.a\n    p.v.push(1)\n    val n = *a",
+        "val v = &mut p.v\n    p.a += 1\n    v.push(p.b)",
+    ] {
+        let errors = over_parts(body);
+        assert!(errors.is_empty(), "{body}: {errors:?}");
+    }
+}
+
+#[test]
+fn regression_overlapping_part_borrows_still_conflict() {
+    for body in [
+        "two(&mut p.a, &mut p.a)",
+        "look(&p.c.x, &mut p.c.x)",
+        "val c = &mut p.c\n    two(&mut p.c.x, &mut p.a)\n    c.y = 1",
+        "val x = &mut p.c.x\n    val c = &p.c\n    *x += c.y",
+        "val a = &mut p.a\n    val q = &p\n    *a += 1",
+        "val a = &mut p.v\n    val b = &p.v\n    a.push(1)",
+    ] {
+        let errors = over_parts(body);
+        assert!(errors.iter().any(is_borrow_conflict), "{body}: {errors:?}");
+    }
+}
+
+#[test]
+fn regression_a_part_borrow_freezes_only_what_overlaps_it() {
+    let errors = over_parts("val a = &mut p.a\n    val n = p.a\n    *a += n");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotUseWhileMutablyBorrowed { .. })),
+        "{errors:?}"
+    );
+    let errors = over_parts("val a = &mut p.a\n    val q = p\n    *a += 1");
+    assert!(
+        !errors.is_empty(),
+        "a whole read under a part borrow: {errors:?}"
+    );
+    let errors = over_parts("val c = &p.c\n    p.c.x = 1\n    val n = c.y");
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotAssignWhileBorrowed { .. })),
+        "{errors:?}"
+    );
+    let errors = over_parts("val v = &p.v\n    p.v.push(1)\n    val n = v.len()");
+    assert!(errors.iter().any(is_borrow_conflict), "{errors:?}");
+}
+
+/// A runtime index names no element the checker can tell apart, so two of them meet.
+#[test]
+fn regression_runtime_indexed_borrows_conflict_and_literal_ones_do_not() {
+    let errors = semantic_errors(
+        "func two(x: &mut i32, y: &mut i32) { *x += *y }
+func main() -> i32 {
+    mut a = [1, 2, 3]
+    val i: u64 = 0
+    val j: u64 = 1
+    two(&mut a[i], &mut a[j])
+    two(&mut a[0], &mut a[1])
+    0
+}",
+    );
+    assert_eq!(
+        errors.iter().filter(|e| is_borrow_conflict(e)).count(),
+        1,
+        "{errors:?}"
+    );
+}
+
+/// The lend of one field meets a borrow of another only when the two overlap.
+#[test]
+fn regression_a_lent_field_and_a_borrowed_sibling_coexist() {
+    let errors = semantic_errors(
+        "struct Job { step: mut (&mut i32) -> void, count: i32 }
+func run(f: mut (&mut i32) -> void, n: &mut i32) { f(n) }
+func main() -> i32 {
+    mut job = Job { step: |n: &mut i32| { *n += 1 }, count: 0 }
+    run(job.step, &mut job.count)
+    job.count
+}",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A method result that borrows its receiver freezes the receiver's part only.
+#[test]
+fn regression_a_method_result_borrows_only_its_receiver_part() {
+    let errors = semantic_errors(
+        "struct S { s: string, v: Vec<i32>, n: i32 }
+func main() -> i32 {
+    mut p = S { s: \"abc\", v: Vec::new(), n: 0 }
+    p.v.push(4)
+    val view = p.s.slice(0..1)
+    p.n += 1
+    val n = view.len()
+    p.n
+}",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+    let errors = semantic_errors(
+        "struct S { s: string, v: Vec<i32>, n: i32 }
+func main() -> i32 {
+    mut p = S { s: \"abc\", v: Vec::new(), n: 0 }
+    val view = p.s.slice(0..1)
+    p.s = \"xyz\"
+    view.len() as i32
+}",
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::CannotAssignWhileBorrowed { .. })),
+        "{errors:?}"
+    );
+}
