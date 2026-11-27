@@ -909,6 +909,94 @@ func main() -> i32 {
     );
 }
 
+/// A tensor displaced through a borrow is released at the store, in each form a borrowed
+/// place takes: a `&mut` parameter's field, a `&mut self` receiver, a `*r` store, an array
+/// element, a tuple field, an enum payload, and a store that reads the place it replaces.
+/// Each pass replaced a buffer that was never released. The sum checks every store landed.
+#[test]
+fn regression_bug_077_a_tensor_displaced_through_a_borrow_is_released() {
+    let source = r#"
+struct Layer { w: Tensor<f32, [4]> }
+
+impl Layer {
+    func scale(&mut self, k: f32) { self.w = Tensor::<f32, [4]>::ones() * k }
+}
+
+enum Slot { Full(Tensor<f32, [4]>), Empty }
+
+func reset(l: &mut Layer, k: f32) { l.w = Tensor::<f32, [4]>::ones() * k }
+
+func replace(t: &mut Tensor<f32, [4]>, k: f32) { *t = Tensor::<f32, [4]>::ones() * k }
+
+func second(ts: &mut [Tensor<f32, [4]>; 2], k: f32) { ts[1] = Tensor::<f32, [4]>::ones() * k }
+
+func pair(p: &mut (Tensor<f32, [4]>, i32), k: f32) { p.0 = Tensor::<f32, [4]>::ones() * k }
+
+func refill(s: &mut Slot, k: f32) { *s = Slot::Full(Tensor::<f32, [4]>::ones() * k) }
+
+func grow(l: &mut Layer) { l.w = l.w.clone() + 1.0f32 }
+
+func main() -> i32 {
+    mut l = Layer { w: Tensor::zeros() }
+    mut t: Tensor<f32, [4]> = Tensor::zeros()
+    mut ts: [Tensor<f32, [4]>; 2] = [Tensor::zeros(), Tensor::zeros()]
+    mut p: (Tensor<f32, [4]>, i32) = (Tensor::zeros(), 0)
+    mut s = Slot::Empty
+    mut i = 0
+    while i < 200 {
+        reset(&mut l, 1.0f32)
+        l.scale(2.0f32)
+        grow(&mut l)
+        replace(&mut t, 3.0f32)
+        second(&mut ts, 4.0f32)
+        pair(&mut p, 5.0f32)
+        refill(&mut s, 6.0f32)
+        i += 1
+    }
+    l.w.sum() as i32 + t.sum() as i32 + ts[1].sum() as i32 + p.0.sum() as i32 + match s {
+        Slot::Full(u) => u.sum() as i32,
+        Slot::Empty => 0,
+    }
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(
+        test.run_leak_checked("tensor_through_borrow.nr", source),
+        12 + 12 + 16 + 20 + 24
+    );
+}
+
+/// The tensor a callee displaces may be arena memory its caller's `pool` allocated. The
+/// release leaves that buffer to the mark restore and frees a heap one, so a pool binding
+/// and an outer one both stay clean across fifty blocks.
+#[test]
+fn regression_bug_077_a_tensor_displaced_through_a_borrow_in_a_pool() {
+    let source = r#"
+struct Layer { w: Tensor<f32, [4]> }
+
+func reset(l: &mut Layer, k: f32) { l.w = Tensor::<f32, [4]>::ones() * k }
+
+func main() -> i32 {
+    mut outer = Layer { w: Tensor::zeros() }
+    mut total = 0
+    for round in 0..50 {
+        pool {
+            mut inner = Layer { w: Tensor::<f32, [4]>::ones() }
+            reset(&mut inner, 2.0f32)
+            reset(&mut outer, 3.0f32)
+            total = total + inner.w.sum() as i32
+        }
+    }
+    total + outer.w.sum() as i32
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(
+        test.run_leak_checked("tensor_through_borrow_pool.nr", source),
+        (50 * 8 + 12) % 256
+    );
+}
+
 /// Moving one owning field out of a temporary (`make().n`) leaves the reader that field
 /// and destroys the temporary's other owners, each exactly once, a function value's
 /// environment included.

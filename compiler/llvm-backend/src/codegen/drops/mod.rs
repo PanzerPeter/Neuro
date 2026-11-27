@@ -329,17 +329,18 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Nothing tracks a borrowed place, so there is no flag to consult, and none is
     /// needed: nothing can be moved out of a borrow, so the value behind one is always
-    /// live. What the release needs instead is a type that proves what it owns. A value
-    /// holding a tensor
-    /// or a `PoolAware` value is left alone, because either may belong to a `pool`'s
-    /// arena, which a callee cannot see from where its caller stands. Inside a `pool`
-    /// the arena owns what the block allocates, as for a temporary.
+    /// live. What the release needs instead is a type that proves what it owns. A tensor
+    /// needs no exception for arena memory: its `deleter` frees through `__neuro_release`,
+    /// which leaves a buffer inside a reserved chunk to the mark restore. A value holding
+    /// a `PoolAware` value is left alone, because the `pool`'s sweep may release it too,
+    /// and a callee cannot see from where its caller stands whether it was registered.
+    /// Inside a `pool` the arena owns what the block allocates, as for a temporary.
     pub(crate) fn drop_displaced_through_borrow(
         &mut self,
         place_ptr: PointerValue<'ctx>,
         ty: &Type,
     ) -> CodegenResult<()> {
-        if self.pool_depth > 0 || !self.holds_owner(ty) || self.may_hold_arena_memory(ty) {
+        if self.pool_depth > 0 || !self.holds_owner(ty) || self.may_hold_pool_aware(ty) {
             return Ok(());
         }
         let depth = self.drop_scopes.len();
@@ -350,14 +351,13 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(())
     }
 
-    /// Whether a value of `ty` holds a tensor or a `PoolAware` value anywhere inside it.
-    fn may_hold_arena_memory(&self, ty: &Type) -> bool {
+    /// Whether a value of `ty` holds a `PoolAware` value anywhere inside it.
+    fn may_hold_pool_aware(&self, ty: &Type) -> bool {
         match ty {
-            Type::Tensor { .. } => true,
             Type::Struct(name) => {
                 self.pool_aware_types.contains(name)
                     || self.struct_defs.get(name).is_some_and(|fields| {
-                        fields.iter().any(|(_, f)| self.may_hold_arena_memory(f))
+                        fields.iter().any(|(_, f)| self.may_hold_pool_aware(f))
                     })
             }
             Type::Enum(name) => self
@@ -367,10 +367,10 @@ impl<'ctx> CodegenContext<'ctx> {
                     variants
                         .iter()
                         .flatten()
-                        .any(|f| self.may_hold_arena_memory(f))
+                        .any(|f| self.may_hold_pool_aware(f))
                 }),
-            Type::Array { element, .. } => self.may_hold_arena_memory(element),
-            Type::Tuple(elements) => elements.iter().any(|e| self.may_hold_arena_memory(e)),
+            Type::Array { element, .. } => self.may_hold_pool_aware(element),
+            Type::Tuple(elements) => elements.iter().any(|e| self.may_hold_pool_aware(e)),
             _ => false,
         }
     }

@@ -1460,10 +1460,10 @@ A place reached through a borrow (`reached_through_borrow`: a reference-typed ob
 `&mut self` receiver, or a field or element of one) has no flags in this frame, since it belongs
 to whoever lent it. A store there does two things the owner's flags cannot. It destroys the
 displaced value when its type proves what it owns (`drop_displaced_through_borrow`: a user
-`Drop` type, a collection, or a holder of one, released like an unbound temporary; nothing
-inside a `pool`, and nothing holding a tensor or a `PoolAware` value, either of which may be
-arena memory the callee cannot see), a `string` included, whose release tests its owner bit. A
-displaced tensor still leaks. A reassignment re-arms the binding's flag and the whole plan
+`Drop` type, a collection, a tensor, or a holder of one, released like an unbound temporary;
+nothing inside a `pool`, and nothing holding a `PoolAware` value, which the caller's `pool` sweep
+may also release). A `string` release tests its owner bit, and a tensor's `deleter` frees through
+`__neuro_release`, which leaves arena memory to the mark restore. A reassignment re-arms the binding's flag and the whole plan
 (`rearm_binding`), which is unconditional because a held position exists only where its own type
 proves ownership.
 

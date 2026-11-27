@@ -287,45 +287,6 @@ instantiates per call and terminates.
 **Fix sketch**: register an instance's method signatures when a call first looks the method up, not
 when the instance is built, in the checker and in lowering's `register_instance_methods` alike.
 
-## BUG-077: a store through a borrow leaks the tensor it displaces
-
-- **Status**: open, confirmed. Narrowed: a displaced value whose type proves what it owns (a
-  user `Drop` type, a `Vec`, a map, a `string`, or a holder of one) is now destroyed at the store
-- **Area**: `llvm-backend`; `drop_displaced_through_borrow` in `codegen/drops/mod.rs`
-- **Severity**: major. An unbounded leak, one buffer per store, through a `&mut` parameter, a
-  `&mut self` receiver or a `*r` store
-
-**Minimal repro**
-
-```neuro
-struct Layer { w: Tensor<f32, [4]> }
-
-func reset(l: &mut Layer) { l.w = Tensor::zeros() }
-
-func main() -> i32 {
-    mut l = Layer { w: Tensor::zeros() }
-    mut i = 0
-    while i < 1000 {
-        reset(&mut l)
-        i += 1
-    }
-    0
-}
-```
-
-Expected: each `reset` releases the tensor it displaces, and the last one is released at `l`'s
-scope exit. Observed: AddressSanitizer's leak check reports every displaced buffer.
-
-**Root cause**: confirmed in the code. The value behind the borrow may have come from a `pool`
-arena, and a callee cannot see whether its caller is inside one, so `may_hold_arena_memory`
-leaves any displaced value holding a tensor alone.
-
-**Workaround**: store through the owning binding (`l.w = ...` in the scope that owns `l`).
-
-**Fix sketch**: release through the DLPack `deleter` only when the handle's buffer is not arena
-memory, which the release can test as `__neuro_release` does. Regression tests: the repro in a
-loop under a leak check, and a tensor field inside and outside a `pool`.
-
 ## Taking one of these on
 
 An entry here is a self-contained task: repro, root cause where known, and a fix

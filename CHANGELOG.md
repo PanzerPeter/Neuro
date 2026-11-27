@@ -11,6 +11,15 @@ means.
 
 ## [Unreleased]
 
+## [5.58.10] - 2026-11-27
+
+### Fixed
+
+- A store through a borrow releases the tensor it displaces: a `&mut` parameter's field, a
+  `&mut self` receiver, a `*r` store, an array element, a tuple field or an enum payload. Each such
+  store used to leak one buffer (BUG-077). A buffer the caller's `pool` allocated is left to the
+  arena, so the store is safe whether or not the caller is inside a `pool`.
+
 ## [5.58.9] - 2026-11-27
 
 ### Documentation
