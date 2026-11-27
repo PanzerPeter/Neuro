@@ -987,7 +987,7 @@ func main() -> i32 {
             total = total + inner.w.sum() as i32
         }
     }
-    total + outer.w.sum() as i32
+    (total + outer.w.sum() as i32) % 256
 }
 "#;
     let test = CompileTest::new();

@@ -11,6 +11,13 @@ means.
 
 ## [Unreleased]
 
+## [5.58.11] - 2026-11-27
+
+### Fixed
+
+- The BUG-077 regression test returns its total modulo 256 inside the program. The exit status
+  is truncated to a byte on Linux but not on Windows, so the test failed on Windows CI.
+
 ## [5.58.10] - 2026-11-27
 
 ### Fixed
