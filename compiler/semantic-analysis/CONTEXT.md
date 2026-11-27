@@ -2102,7 +2102,11 @@ Each closed a path where a program type-checked and then aborted codegen with an
   still not a value.
 - **Size and depth caps.** A static tensor shape holds at most `u32::MAX` elements
   (`TensorTooLarge`), the cap an array has, computed with a checked product so an overflowing
-  shape is refused rather than wrapped to an empty tensor (BUG-147). `instantiate_impls_for` stops
-  at 128 nested instances (`InstantiationTooDeep`), the depth lowering enforces: registering an
-  instance's method signatures instantiates the types they name, and a signature naming its own
-  type nested in itself never closes the chain (BUG-152).
+  shape is refused rather than wrapped to an empty tensor (BUG-147). Registering an instance's
+  method signatures instantiates the types they name, so `wrap(self) -> W<W<I>>` would build a
+  new level forever. `instantiate_impls_for` keeps a stack of the instances registering
+  (`registering_instances`); an instance born under a smaller one of the same template registers
+  its trait impls and parks its inherent ones in `deferred_inherent` until `check_expr`, or a path
+  naming the type, reaches `ensure_inherent_impls` (BUG-152). Trait impls stay eager, so a trait
+  method nesting its own type still stops at 128 nested instances (`InstantiationTooDeep`), the
+  depth lowering enforces.

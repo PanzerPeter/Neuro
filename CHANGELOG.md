@@ -11,6 +11,15 @@ means.
 
 ## [Unreleased]
 
+## [5.58.12] - 2026-11-27
+
+### Fixed
+
+- A method whose signature names its own type nested in itself, such as
+  `func wrap(self) -> W<W<I>>` in `impl<I> W<I>`, compiles and runs (BUG-152). Each level of the
+  chain gets its inherent methods when the program first uses it, so only the levels the program
+  reaches are built. A trait method of that shape still stops at the 128-instance cap (BUG-175).
+
 ## [5.58.11] - 2026-11-27
 
 ### Fixed

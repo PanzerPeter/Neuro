@@ -42,6 +42,15 @@ impl TypeChecker {
     /// - `expr`: The expression to type check
     /// - `expected`: Optional expected type for contextual type inference
     pub(crate) fn check_expr(&mut self, expr: &Expr, expected: Option<&Type>) -> Option<Type> {
+        let ty = self.check_expr_in_chain(expr, expected);
+        // A value of an instance whose inherent methods were deferred is a use of them.
+        if let Some(ty) = &ty {
+            self.ensure_inherent_impls(ty);
+        }
+        ty
+    }
+
+    fn check_expr_in_chain(&mut self, expr: &Expr, expected: Option<&Type>) -> Option<Type> {
         match expr {
             // A name or a grouping is the same read as whatever encloses it, so it
             // inherits the chain state rather than opening or closing one.

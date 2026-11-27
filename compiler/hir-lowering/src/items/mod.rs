@@ -338,6 +338,26 @@ impl Lowerer {
                 defer_instance_error(outcome, &mut instance_errors)?;
                 continue;
             }
+            if let Some(ms) = self.mono_inherent_pending.pop() {
+                self.mono_chain = ms.chain;
+                let generics = self.template_generics(&ms.base);
+                let outcome = self
+                    .emit_instance_impls(
+                        &ms.base,
+                        &ms.mangled,
+                        &generics,
+                        &ms.subst,
+                        &ms.const_subst,
+                        ms.impls,
+                    )
+                    .map_err(|error| {
+                        error.in_instance(ms.chain, || {
+                            crate::describe_instance(&ms.base, &ms.const_subst)
+                        })
+                    });
+                defer_instance_error(outcome, &mut instance_errors)?;
+                continue;
+            }
             if let Some(mm) = self.mono_method_pending.pop() {
                 self.mono_chain = mm.chain;
                 let outcome = self.emit_mono_method(&mm).map_err(|error| {

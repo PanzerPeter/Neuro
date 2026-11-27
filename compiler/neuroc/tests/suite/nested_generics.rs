@@ -317,3 +317,104 @@ func main() -> i32 {
     let err = compile_rejected("grow.nr", source);
     assert!(err.contains("nests generic instances more than"), "{err}");
 }
+
+/// BUG-152: registering an instance's methods built the instance each signature named, so
+/// `wrap` on `W<i32>` built `W<W<i32>>`, whose `wrap` built the next level without end.
+#[test]
+fn regression_a_method_returning_its_own_type_nested_in_itself_compiles() {
+    let source = r#"
+struct W<I> { inner: I }
+
+impl<I> W<I> {
+    func wrap(self) -> W<W<I>> { W { inner: self } }
+}
+
+func main() -> i32 {
+    val w = W { inner: 3 }
+    w.wrap().inner.inner
+}
+"#;
+    assert_eq!(run("self_nesting.nr", source), 3);
+}
+
+#[test]
+fn a_self_nesting_method_agrees_across_equivalent_forms() {
+    let source = r#"
+struct W<I> { inner: I }
+
+impl<I> W<I> {
+    func wrap(self) -> W<W<I>> { W { inner: self } }
+    func get(self) -> I { self.inner }
+    func both(x: I) -> W<W<I>> { W { inner: W { inner: x } } }
+}
+
+enum E<T> { One(T) }
+
+impl<T> E<T> {
+    func nest(self) -> E<E<T>> { E::One(self) }
+}
+
+func twice<T>(w: W<T>) -> W<W<W<T>>> { w.wrap().wrap() }
+
+func echo(x: i32) -> i32 { x }
+
+func main() -> i32 {
+    val g = echo(W::both::<W<i32>>(W { inner: 6 }).inner.inner.inner)
+    val a = W { inner: 1 }.wrap().inner.inner
+    val bound = W { inner: 2 }.wrap()
+    val b = bound.get().get()
+    val c = if a == 1 { W { inner: 3 }.wrap().wrap().get().get().get() } else { 0 }
+    val d = twice(W { inner: 4 }).inner.inner.inner
+    val f = |x: i32| -> i32 { W { inner: x }.wrap().get().inner }
+    val e = f(5)
+    val h = match E::One(7).nest() {
+        E::One(E::One(v)) => v,
+    }
+    a + b * 2 + c * 3 + d * 4 + e * 5 + g * 6 + h - 7
+}
+"#;
+    // 1 + 4 + 9 + 16 + 25 + 36 + 0
+    assert_eq!(run("self_nesting_forms.nr", source), 91);
+}
+
+#[test]
+fn a_self_nesting_method_drops_every_level_once() {
+    let source = r#"
+struct D<I> { inner: I }
+
+impl<I> D<I> {
+    func wrap(self) -> D<D<I>> { D { inner: self } }
+}
+
+impl<I> Drop for D<I> {
+    func drop(&mut self) {
+        println("drop")
+    }
+}
+
+struct S<I> { inner: I }
+
+impl<I> S<I> {
+    func wrap(self) -> S<S<I>> { S { inner: self } }
+}
+
+func main() -> i32 {
+    val d = D { inner: 1 }.wrap().wrap()
+    mut total: u64 = 0
+    for i in 0..50 {
+        val s = S { inner: "level {i}" }.wrap().wrap()
+        total = total + s.inner.inner.inner.len()
+    }
+    println("{total}")
+    0
+}
+"#;
+    assert_eq!(
+        crate::compile_harness::stdout_of("self_nesting_drop.nr", source),
+        "390\ndrop\ndrop\ndrop\n"
+    );
+    assert_eq!(
+        CompileTest::new().run_leak_checked("self_nesting_leaks.nr", source),
+        0
+    );
+}

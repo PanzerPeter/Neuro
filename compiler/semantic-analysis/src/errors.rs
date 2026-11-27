@@ -57,7 +57,7 @@ pub enum TypeError {
     GenericParamNotInferable { name: String, span: Span },
 
     #[error(
-        "instantiating '{name}' nests generic instances more than {limit} deep: a method whose signature names its own type nested in itself needs a new instance at every level"
+        "instantiating '{name}' nests generic instances more than {limit} deep: a trait method whose signature names its own type nested in itself needs a new instance at every level"
     )]
     InstantiationTooDeep {
         name: String,

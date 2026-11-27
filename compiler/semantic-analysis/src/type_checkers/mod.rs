@@ -110,10 +110,16 @@ pub(crate) struct TypeChecker {
     /// Instantiating a generic struct also instantiates each matching impl's methods.
     /// Shared, so instantiating an instance copies handles rather than method bodies.
     generic_impls: HashMap<String, Vec<Rc<ast_types::ImplDef>>>,
-    /// How many instances' impls are being registered inside one another. Registering an
-    /// instance's method signatures can instantiate the types they name, so a signature
-    /// naming its own type nested in itself (`-> W<W<I>>`) would recurse without end.
-    impl_instance_depth: u32,
+    /// The instances whose impls are being registered, innermost last, as `(template,
+    /// instance)`. Registering an instance's method signatures can instantiate the types
+    /// they name, so a signature naming its own type nested in itself (`-> W<W<I>>`)
+    /// would recurse without end were every instance registered in full at once.
+    registering_instances: Vec<(String, String)>,
+    /// Instances whose inherent methods wait for a use, keyed by instance name, with the
+    /// template, the arguments and the span that built them. A larger instance of a
+    /// template born while one of its instances registers lands here, which is what
+    /// closes the `-> W<W<I>>` chain; the first expression of the type registers them.
+    deferred_inherent: HashMap<String, (String, Vec<Type>, shared_types::Span)>,
     /// The bounds a generic `impl` puts on its parameters (`impl<T: Show> Cell<T>`),
     /// keyed by each of its methods' template key (`Cell__get`). An instance's
     /// arguments are checked against them at a call, not at instantiation: an instance
@@ -577,7 +583,8 @@ impl TypeChecker {
             grad_functions: HashMap::new(),
             generic_structs: HashMap::new(),
             generic_impls: HashMap::new(),
-            impl_instance_depth: 0,
+            registering_instances: Vec::new(),
+            deferred_inherent: HashMap::new(),
             impl_bounds: HashMap::new(),
             traits: HashMap::new(),
             trait_names: HashSet::new(),

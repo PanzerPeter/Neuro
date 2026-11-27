@@ -480,6 +480,13 @@ requested it, and the origin, the call in ordinary code the chain of requests st
 (`mono_chain`, set as each worklist item is emitted; `next_link` makes the next one). Past
 `MAX_INSTANCE_DEPTH` the request is `InstantiationTooDeep`.
 
+An instance born while a smaller instance of the same template registers its signatures or emits
+its bodies (`instance_stack`) is one level of a chain like `wrap(self) -> W<W<I>>`. It registers
+and emits its trait impls (`ImplSet::Traits`) and parks its inherent ones in `deferred_inherent`.
+A method call, a method reference or a `Type::f` path on it reaches `ensure_inherent_methods`,
+which registers them and queues their bodies on `mono_inherent_pending`. The chain stops at the
+levels the program calls, as the checker's does.
+
 **Per-instance shape checks.** The checker types a shape-generic reshape, flatten or
 reduction symbolically and leaves the counts to the instance, where they are first concrete. So
 `.reshape` (`tensor_shape.rs`) refuses a count that changes, a `-1` that does not divide or an

@@ -910,11 +910,13 @@ impl Lowerer {
                 name: format!("{}::{} parameter '{}'", base, member, gp.name.name),
             })?);
         }
-        if self.is_generic_enum(base) {
-            self.instantiate_generic_enum(base, &instance_args)
+        let instance = if self.is_generic_enum(base) {
+            self.instantiate_generic_enum(base, &instance_args)?
         } else {
-            self.instantiate_generic_struct(base, &instance_args)
-        }
+            self.instantiate_generic_struct(base, &instance_args)?
+        };
+        self.ensure_inherent_methods(&instance)?;
+        Ok(instance)
     }
 
     /// The parameter types of `type_name`'s associated function `member` at the instance
@@ -1183,6 +1185,10 @@ impl Lowerer {
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         let object = self.lower_expr(object, None)?;
+        if let HirType::Struct(name) | HirType::Enum(name) = object.ty.referent() {
+            let name = name.clone();
+            self.ensure_inherent_methods(&name)?;
+        }
         if crate::safetensors::is_safetensors_method(&object.ty, method) {
             let object = super::coercion::auto_deref(object);
             return self.lower_safetensors_method(object, method, args, expected, span);

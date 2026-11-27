@@ -6,7 +6,7 @@ use std::rc::Rc;
 use ast_types::ImplDef;
 use neuro_hir::{HirField, HirFunction, HirImpl, HirItem, HirParam, HirStruct, HirType};
 
-use crate::{Lowerer, LoweringError, MonoInstance};
+use crate::{ImplSet, Lowerer, LoweringError, MonoInstance};
 
 /// Split a monomorphized instance's positional arguments into a type substitution and a
 /// const substitution, keyed by the template's generic parameter names in order.
@@ -79,13 +79,15 @@ impl Lowerer {
                 }
             }
 
-            self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
+            let impls = self.born_impls(base, &mangled, chain);
+            self.register_instance_methods(base, &mangled, &subst, &const_subst, impls)?;
             self.mono_struct_pending.push(crate::MonoStruct {
                 chain,
                 base: base.to_string(),
                 mangled: mangled.clone(),
                 subst,
                 const_subst,
+                impls,
             });
         }
         Ok(mangled)
@@ -128,19 +130,77 @@ impl Lowerer {
         Ok(bound)
     }
 
-    /// Register the signature of every method of each generic `impl` of `base` for the
-    /// concrete instance `mangled`, so calls on the instance resolve.
+    /// Which impls a new instance registers now. A larger instance of a template, born
+    /// while one of its instances registers or emits, is a level of a chain like
+    /// `wrap(self) -> W<W<I>>`: it leaves its inherent methods for
+    /// [`Self::ensure_inherent_methods`], so the chain stops at the levels the program
+    /// calls. A growing chain is longer by name at every level.
+    fn born_impls(&mut self, base: &str, mangled: &str, chain: crate::Chain) -> ImplSet {
+        let nested = self
+            .instance_stack
+            .iter()
+            .any(|(b, m)| b == base && mangled.len() > m.len());
+        if !nested {
+            return ImplSet::All;
+        }
+        self.deferred_inherent.insert(mangled.to_string(), chain);
+        ImplSet::Traits
+    }
+
+    /// Register and queue the inherent methods the instance `mangled` left waiting, now
+    /// that a call needs one.
+    pub(crate) fn ensure_inherent_methods(&mut self, mangled: &str) -> Result<(), LoweringError> {
+        let Some(chain) = self.deferred_inherent.remove(mangled) else {
+            return Ok(());
+        };
+        let mangled = mangled.to_string();
+        let (base, args) = match self.instance_args(&mangled) {
+            Some((base, args)) => (base.to_string(), args.to_vec()),
+            None => return Err(LoweringError::UnresolvedType { name: mangled }),
+        };
+        let (subst, const_subst) = split_mono_args(&self.template_generics(&base), &args);
+        self.register_instance_methods(&base, &mangled, &subst, &const_subst, ImplSet::Inherent)?;
+        self.mono_inherent_pending.push(crate::MonoStruct {
+            chain,
+            base,
+            mangled,
+            subst,
+            const_subst,
+            impls: ImplSet::Inherent,
+        });
+        Ok(())
+    }
+
+    /// Register the signature of every method of each generic `impl` of `base` in
+    /// `which` for the concrete instance `mangled`, so calls on the instance resolve.
     pub(super) fn register_instance_methods(
         &mut self,
         base: &str,
         mangled: &str,
         subst: &std::collections::HashMap<String, HirType>,
         const_subst: &std::collections::HashMap<String, u64>,
+        which: ImplSet,
+    ) -> Result<(), LoweringError> {
+        self.instance_stack
+            .push((base.to_string(), mangled.to_string()));
+        let registered = self.register_impls_of(base, mangled, subst, const_subst, which);
+        self.instance_stack.pop();
+        registered
+    }
+
+    /// [`Self::register_instance_methods`] inside its stack entry.
+    fn register_impls_of(
+        &mut self,
+        base: &str,
+        mangled: &str,
+        subst: &std::collections::HashMap<String, HirType>,
+        const_subst: &std::collections::HashMap<String, u64>,
+        which: ImplSet,
     ) -> Result<(), LoweringError> {
         let impls = self.generic_impls.get(base).cloned().unwrap_or_default();
         let base_generics = self.template_generics(base);
         let self_ty = self.impl_target_type(mangled)?;
-        for imp in &impls {
+        for imp in impls.iter().filter(|imp| which.covers(imp)) {
             let impl_subst = self.build_impl_subst(imp, &base_generics, subst);
             let impl_subst = self.with_impl_assoc(imp, impl_subst)?;
             let saved_ty = std::mem::replace(&mut self.type_subst, impl_subst.clone());
@@ -236,7 +296,7 @@ impl Lowerer {
         );
         for (mangled, base, args) in existing {
             let (subst, const_subst) = split_mono_args(&self.template_generics(&base), &args);
-            self.register_instance_methods(&base, &mangled, &subst, &const_subst)?;
+            self.register_instance_methods(&base, &mangled, &subst, &const_subst, ImplSet::All)?;
         }
         Ok(())
     }
@@ -279,11 +339,13 @@ impl Lowerer {
             &template.generics,
             &ms.subst,
             &ms.const_subst,
+            ms.impls,
         )
     }
 
-    /// Emit one `HirItem::Impl` per generic impl of `base` for the instance `mangled`,
-    /// with method bodies lowered under the impl's concrete type-parameter substitution.
+    /// Emit one `HirItem::Impl` per generic impl of `base` in `which` for the instance
+    /// `mangled`, with method bodies lowered under the impl's concrete type-parameter
+    /// substitution.
     pub(super) fn emit_instance_impls(
         &mut self,
         base: &str,
@@ -291,10 +353,30 @@ impl Lowerer {
         generics: &[ast_types::GenericParam],
         subst: &std::collections::HashMap<String, HirType>,
         const_subst: &std::collections::HashMap<String, u64>,
+        which: ImplSet,
+    ) -> Result<(), LoweringError> {
+        // A body building a larger instance of its own template is a level of a chain
+        // too, so the instance is on the stack while its bodies lower.
+        self.instance_stack
+            .push((base.to_string(), mangled.to_string()));
+        let emitted = self.emit_impls_of(base, mangled, generics, subst, const_subst, which);
+        self.instance_stack.pop();
+        emitted
+    }
+
+    /// [`Self::emit_instance_impls`] inside its stack entry.
+    fn emit_impls_of(
+        &mut self,
+        base: &str,
+        mangled: &str,
+        generics: &[ast_types::GenericParam],
+        subst: &std::collections::HashMap<String, HirType>,
+        const_subst: &std::collections::HashMap<String, u64>,
+        which: ImplSet,
     ) -> Result<(), LoweringError> {
         let impls = self.generic_impls.get(base).cloned().unwrap_or_default();
         let self_type = self.impl_target_type(mangled)?;
-        for imp in &impls {
+        for imp in impls.iter().filter(|imp| which.covers(imp)) {
             let impl_subst = self.build_impl_subst(imp, generics, subst);
             // The checker refuses every call that would reach a method of an impl whose
             // bounds this instance misses, so the impl is not emitted for it: its bodies
@@ -473,13 +555,15 @@ impl Lowerer {
                 .insert(mangled.clone(), base.to_string());
             self.enum_instance_args
                 .insert(mangled.clone(), args.to_vec());
-            self.register_instance_methods(base, &mangled, &subst, &const_subst)?;
+            let impls = self.born_impls(base, &mangled, chain);
+            self.register_instance_methods(base, &mangled, &subst, &const_subst, impls)?;
             self.mono_enum_pending.push(crate::MonoEnum {
                 chain,
                 base: base.to_string(),
                 mangled: mangled.clone(),
                 subst,
                 const_subst,
+                impls,
             });
         }
         Ok(mangled)
@@ -523,6 +607,7 @@ impl Lowerer {
             &template.generics,
             &me.subst,
             &me.const_subst,
+            me.impls,
         )
     }
 

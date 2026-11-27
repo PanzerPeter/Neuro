@@ -247,7 +247,12 @@ impl TypeChecker {
 
         let mangled = mangle_struct_instance(base, args);
         if self.enum_defs.contains_key(&mangled) {
-            return Type::Enum(mangled);
+            let ty = Type::Enum(mangled);
+            // A path naming the instance outside any registration is a use of it.
+            if self.registering_instances.is_empty() {
+                self.ensure_inherent_impls(&ty);
+            }
+            return ty;
         }
 
         let mut subst: HashMap<String, Type> = HashMap::new();

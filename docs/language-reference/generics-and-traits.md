@@ -56,6 +56,8 @@ func main() -> i32 {
 
 A generic that calls itself with a type built from its own parameter (`grow((x, 1))` inside `grow<T>`) would need a new instance at every level. The compiler stops once the chain passes 128 instances deep: ``instantiating 'grow' nests generic instances more than 128 deep``.
 
+A method whose signature names its own type nested in itself, such as `func wrap(self) -> W<W<I>>` in `impl<I> W<I>`, is not such a chain: each level gets its methods when the program first calls one on it. A trait method of that shape still hits the 128-instance cap.
+
 ### Ownership through a type parameter
 
 Because the body is checked once for every instantiation at once, a type parameter is treated as **non-`Copy`**. A `T`-typed binding moves when it is placed into a new owner, and reading it afterwards is an error even where the call site supplies `i32`. The same holds for `(v, v)` and `[v, v]`.

@@ -423,6 +423,9 @@ impl Lowerer {
             Expr::FieldAccess { object, field, .. } => {
                 let receiver =
                     crate::expressions::coercion::auto_deref(self.lower_expr(object, None)?);
+                if let HirType::Struct(name) | HirType::Enum(name) = receiver.ty.referent() {
+                    self.ensure_inherent_methods(&name.clone())?;
+                }
                 // An instantiated generic method's parameters leave `self` out already.
                 if let Some(key) = self.generic_method_key(receiver.ty.referent(), &field.name) {
                     let params = self

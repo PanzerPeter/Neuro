@@ -5,6 +5,76 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-175: a trait method returning its own type nested in itself does not compile
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (`instantiate_impls_for`); `hir-lowering` (`register_instance_methods`)
+- **Severity**: major. A well-typed program fails to compile
+
+**Minimal repro**
+
+```neuro
+trait Wrap {
+    func wrap(self) -> W<Self>
+}
+
+struct W<I> { inner: I }
+
+impl<I> Wrap for W<I> {
+    func wrap(self) -> W<W<I>> { W { inner: self } }
+}
+
+func main() -> i32 {
+    val w = W { inner: 3 }
+    w.wrap().inner.inner
+}
+```
+
+Expected: exit code 3. Observed: `instantiating 'W' nests generic instances more than 128 deep`.
+An inherent method of this shape compiles: a level of the chain registers its inherent methods
+when a use reaches it. Trait impls still register in full at every level, because lowering uses
+some of them without a call to hook (a destructor, an operator, the iteration protocol, a `dyn`
+vtable), so `wrap` on each level builds the next one. A trait's default method returning
+`Wrapper<Self>` does the same, which is why the prelude's iterator adapters are not default
+methods on `Iterator`.
+
+**Workaround**: declare the method in an inherent `impl<I> W<I>` instead.
+
+**Fix sketch**: defer a nested level's trait impls too, and register them from each implicit use
+in lowering (drop glue, operator and protocol lowering, `dyn` coercion) as well as from calls.
+
+## BUG-174: calling a generic type's method by path does not compile
+
+- **Status**: open, confirmed
+- **Area**: `hir-lowering` (`lower_generic_assoc_call`, `generic_assoc_fn`)
+- **Severity**: major. A well-typed program fails to compile
+
+**Minimal repro**
+
+```neuro
+struct W<I> { inner: I }
+
+impl<I> W<I> {
+    func get(self) -> I { self.inner }
+}
+
+func main() -> i32 {
+    W::get(W { inner: 6 })
+}
+```
+
+Expected: exit code 6, as `V::get(v)` gives on a non-generic `V`. Observed: the checker accepts it,
+then lowering fails with `unresolved call target 'W__get'`. A turbofish (`W::get::<i32>(...)`) fails
+the same way.
+
+**Root cause**: `generic_assoc_fn` finds only functions without `self`, so a method falls through to
+`lower_assoc_call`, which looks the template's own name up. Only instances have methods.
+
+**Workaround**: call it as a method, `W { inner: 6 }.get()`.
+
+**Fix sketch**: let `lower_generic_assoc_call` take a method too, inferring the instance from the
+receiver argument against the impl's target type.
+
 ## BUG-173: a device traversal whose function comes through a local panics
 
 - **Status**: open, confirmed
@@ -251,41 +321,6 @@ holds the `Lowerer` and name mangling in `hir-lowering`, `build_module` and the 
 `pub(crate)` and reach them from unit tests, and add a check for both rules to
 `architecture_tests.rs`. The driver-facing pairs (`compile` and `compile_to_ir`, `lower_for_link`
 and `lower_for_gpu`) stay public and are already named in their slices' CONTEXT.md.
-
-## BUG-152: a method returning its own type nested in itself does not compile
-
-- **Status**: open, confirmed. Narrowed: the checker now stops the chain at 128 nested instances
-  with a diagnostic, the depth lowering already enforced, instead of allocating until killed
-- **Area**: `semantic-analysis` (`instantiate_impls_for`); `hir-lowering` (`register_instance_methods`)
-- **Severity**: major. A well-typed program fails to compile
-
-**Minimal repro**
-
-```neuro
-struct W<I> { inner: I }
-
-impl<I> W<I> {
-    func wrap(self) -> W<W<I>> { W { inner: self } }
-}
-
-func main() -> i32 {
-    val w = W { inner: 3 }
-    w.wrap().inner.inner
-}
-```
-
-Expected: exit code 3. Observed: `instantiating 'W' nests generic instances more than 128 deep`.
-Before the cap, `neuroc check` allocated until the memory cap aborted it. Every instance
-registers the signature of each method of its generic impls, and registering `wrap` for `W<i32>`
-builds `W<W<i32>>`, whose own `wrap` builds `W<W<W<i32>>>`, with no end. A trait's default method
-returning `Wrapper<Self>` does the same, which is why the prelude's iterator adapters are not default
-methods on `Iterator`.
-
-**Workaround**: none that keeps the method; a free function `func wrap<I>(w: W<I>) -> W<W<I>>`
-instantiates per call and terminates.
-
-**Fix sketch**: register an instance's method signatures when a call first looks the method up, not
-when the instance is built, in the checker and in lowering's `register_instance_methods` alike.
 
 ## Taking one of these on
 

@@ -382,6 +382,16 @@ struct Lowerer {
     struct_instances: HashMap<String, (String, Vec<MonoArg>)>,
     /// Generic-struct instances discovered but whose HIR items are not yet emitted.
     mono_struct_pending: Vec<MonoStruct>,
+    /// Struct and enum instances whose deferred inherent methods a use registered, and
+    /// whose bodies are not yet emitted.
+    mono_inherent_pending: Vec<MonoStruct>,
+    /// The instances whose method signatures are being registered or whose method bodies
+    /// are being emitted, innermost last, as `(template, instance)`.
+    instance_stack: Vec<(String, String)>,
+    /// Instances whose inherent methods wait for a call, with the chain that built them.
+    /// A larger instance of a template born under one of its instances in
+    /// [`Self::instance_stack`] lands here, which closes a `-> W<W<I>>` chain.
+    deferred_inherent: HashMap<String, Chain>,
     /// Generic methods keyed `Type__method`, a generic impl's under each instance's name,
     /// with what the body lowers under besides the method's own parameters.
     generic_methods: HashMap<String, Rc<GenericMethod>>,
@@ -515,7 +525,9 @@ enum MonoArg {
 /// One pending generic-struct instantiation: the base template name, the
 /// mangled instance name, the concrete type arguments (in declaration order), and the
 /// type-parameter substitution. Emission produces one `HirItem::Struct` plus one
-/// `HirItem::Impl` per matching generic impl.
+/// `HirItem::Impl` per matching generic impl in `impls`. On
+/// [`Lowerer::mono_inherent_pending`] it is a struct or enum instance whose inherent impls
+/// alone are emitted.
 #[derive(Clone)]
 struct MonoStruct {
     chain: Chain,
@@ -523,6 +535,27 @@ struct MonoStruct {
     mangled: String,
     subst: HashMap<String, HirType>,
     const_subst: HashMap<String, u64>,
+    impls: ImplSet,
+}
+
+/// Which of a generic type's impls one registration or emission of an instance covers.
+/// A level of a self-nesting chain takes its trait impls when built and its inherent
+/// ones when a call first needs them.
+#[derive(Clone, Copy)]
+enum ImplSet {
+    All,
+    Traits,
+    Inherent,
+}
+
+impl ImplSet {
+    fn covers(self, imp: &ast_types::ImplDef) -> bool {
+        match self {
+            Self::All => true,
+            Self::Traits => imp.trait_name.is_some(),
+            Self::Inherent => imp.trait_name.is_none(),
+        }
+    }
 }
 
 /// A generic method's template: the type whose impl declares it (an instance's name for a
@@ -559,6 +592,7 @@ struct MonoEnum {
     mangled: String,
     subst: HashMap<String, HirType>,
     const_subst: HashMap<String, u64>,
+    impls: ImplSet,
 }
 
 /// Lower a type-checked program to typed HIR.
@@ -623,6 +657,9 @@ impl Lowerer {
             generic_impls: HashMap::new(),
             struct_instances: HashMap::new(),
             mono_struct_pending: Vec::new(),
+            mono_inherent_pending: Vec::new(),
+            instance_stack: Vec::new(),
+            deferred_inherent: HashMap::new(),
             generic_methods: HashMap::new(),
             mono_method_pending: Vec::new(),
             type_subst: HashMap::new(),

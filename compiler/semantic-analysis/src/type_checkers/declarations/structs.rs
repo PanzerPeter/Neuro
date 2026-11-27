@@ -555,6 +555,9 @@ impl TypeChecker {
             }
 
             self.instantiate_impls_for(base, &mangled, args, span);
+        } else if self.registering_instances.is_empty() {
+            // A path naming the instance outside any registration is a use of it.
+            self.ensure_inherent_impls(&Type::Struct(mangled.clone()));
         }
 
         Type::Struct(mangled)
@@ -590,6 +593,11 @@ impl TypeChecker {
     /// instance `mangled`, substituting the impl's type parameters (mapped positionally
     /// from the impl's type arguments to the struct's concrete arguments) into each
     /// method signature, which turns the receiver's template type into the instance.
+    ///
+    /// An instance born while a smaller instance of the same template registers is a
+    /// level of a chain like `wrap(self) -> W<W<I>>`: it takes its trait impls now and
+    /// leaves its inherent methods to [`Self::ensure_inherent_impls`], so the chain stops
+    /// at the levels the program uses. A growing chain is longer by name at every level.
     pub(crate) fn instantiate_impls_for(
         &mut self,
         base: &str,
@@ -597,11 +605,61 @@ impl TypeChecker {
         args: &[Type],
         span: Span,
     ) {
-        let impls = match self.generic_impls.get(base) {
-            Some(v) => v.clone(),
-            None => return,
+        let Some(impls) = self.generic_impls.get(base).cloned() else {
+            return;
         };
-        if self.impl_instance_depth >= MAX_IMPL_INSTANCE_DEPTH {
+        let nested = self
+            .registering_instances
+            .iter()
+            .any(|(b, m)| b == base && mangled.len() > m.len());
+        let impls = if nested {
+            self.deferred_inherent
+                .insert(mangled.to_string(), (base.to_string(), args.to_vec(), span));
+            impls
+                .into_iter()
+                .filter(|i| i.trait_name.is_some())
+                .collect()
+        } else {
+            impls
+        };
+        self.register_nested(&impls, base, mangled, args, span);
+    }
+
+    /// Register the inherent methods `ty`'s instance left waiting, now that a use names
+    /// its type.
+    pub(crate) fn ensure_inherent_impls(&mut self, ty: &Type) {
+        if self.deferred_inherent.is_empty() {
+            return;
+        }
+        let (Type::Struct(name) | Type::Enum(name)) = ty.referent() else {
+            return;
+        };
+        let Some((base, args, span)) = self.deferred_inherent.remove(name) else {
+            return;
+        };
+        let name = name.clone();
+        let impls: Vec<Rc<ImplDef>> = self
+            .generic_impls
+            .get(&base)
+            .into_iter()
+            .flatten()
+            .filter(|i| i.trait_name.is_none())
+            .cloned()
+            .collect();
+        self.register_nested(&impls, &base, &name, &args, span);
+    }
+
+    /// Register `impls` for `mangled` inside the instances already registering, past
+    /// the depth cap a chain through trait impls still meets.
+    fn register_nested(
+        &mut self,
+        impls: &[Rc<ImplDef>],
+        base: &str,
+        mangled: &str,
+        args: &[Type],
+        span: Span,
+    ) {
+        if self.registering_instances.len() >= MAX_IMPL_INSTANCE_DEPTH as usize {
             self.record_error(TypeError::InstantiationTooDeep {
                 name: base.to_string(),
                 limit: MAX_IMPL_INSTANCE_DEPTH,
@@ -609,12 +667,13 @@ impl TypeChecker {
             });
             return;
         }
-        self.impl_instance_depth += 1;
-        self.register_instance_impls(&impls, base, mangled, args, span);
-        self.impl_instance_depth -= 1;
+        self.registering_instances
+            .push((base.to_string(), mangled.to_string()));
+        self.register_instance_impls(impls, base, mangled, args, span);
+        self.registering_instances.pop();
     }
 
-    /// [`Self::instantiate_impls_for`] past its depth check.
+    /// [`Self::register_nested`] past its depth check.
     fn register_instance_impls(
         &mut self,
         impls: &[Rc<ImplDef>],
