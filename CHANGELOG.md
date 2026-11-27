@@ -3,12 +3,21 @@
 All notable changes to the Neuro programming language compiler will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Version numbers
-track the roadmap rather than Semantic Versioning: MAJOR is the phase, MINOR is one roadmap item,
-and PATCH is a fix, a test or a docs change. A breaking change can land in any MINOR during alpha.
+track the roadmap rather than Semantic Versioning, and a breaking change can land in any release
+during alpha. [CONTRIBUTING.md](CONTRIBUTING.md#project-status) says what each part of the number
+means.
 
 ---
 
 ## [Unreleased]
+
+## [5.58.9] - 2026-11-27
+
+### Documentation
+
+- The version number rule in `CONTRIBUTING.md` matches how releases ship: PATCH covers every
+  release that is not one roadmap feature, and a breaking change can land in any release, not only
+  a MINOR one. The changelog header links to that rule instead of restating it.
 
 ## [5.58.8] - 2026-11-27
 

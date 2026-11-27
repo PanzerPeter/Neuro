@@ -8,9 +8,9 @@ A phase is divided into lettered sub-phases implemented strictly in dependency o
 status lives in exactly one place, the [Quick Roadmap](README.md#quick-roadmap), and what each
 release changed is in [CHANGELOG.md](CHANGELOG.md).
 
-Version numbers track the roadmap, not SemVer: MAJOR is the phase, MINOR is one roadmap item, and
-PATCH is a fix, a test or a docs change. Architecture and design are still evolving, so a breaking
-change can land in any MINOR.
+Version numbers track the roadmap, not SemVer: MAJOR is the phase, MINOR is one roadmap feature,
+and PATCH is every other release, from a fix or a docs change to a batch of lifted limitations.
+Architecture and design are still evolving, so a breaking change can land in any release.
 
 ## Table of Contents
 
