@@ -1022,7 +1022,7 @@ base name matches the scrutinee's instance and binds payloads at the instance's 
 (name → int type, `u64` for an extent) and `value_consts` the ones written `const NAME: T`,
 which size nothing; `enter/exit_generic_scope` sets the scopes. An array length or tensor
 extent naming a `value_consts` entry, and an `impl` passing one to its type's extent
-(`register_generic_impl`), is `ConstParamSizes`, whose hint is the bare form. `Type::Array.size` and the `extent` of every
+(`register_generic_impl`), is `ConstParamSizes`, whose hint is the bare form. A binding of any form that takes a `const_scope` name is `BindingShadowsGenericParam` (`refuse_reserved_binding_name`, the hook every binding site calls), since lowering would read the parameter where the checker typed the local. `Type::Array.size` and the `extent` of every
 `TensorAxis` in `Type::Tensor.shape` are an `ArrayLen`
 (`Fixed` / `Param` / `Dynamic`, the last reachable only from a tensor's `?` or `?B`, plus a tensor's
 `Splice` and `Expr`, below) and a

@@ -78,10 +78,18 @@ impl TypeChecker {
             || self.const_scope.contains_key(name)
     }
 
-    /// Report a value binding `name` that shadows a dynamic name in scope, returning
-    /// whether it did. Both would name the same identifier in one scope, and a value read
-    /// of it could not tell them apart.
-    pub(crate) fn refuse_value_named_dynamic(&mut self, name: &str, span: Span) -> bool {
+    /// Report a value binding `name` that shadows a dynamic name or a size, shape or `const`
+    /// parameter in scope, returning whether it did. Both would name the same identifier in
+    /// one scope, and a value read of it could not tell them apart: lowering would read the
+    /// parameter where the checker typed the local.
+    pub(crate) fn refuse_reserved_binding_name(&mut self, name: &str, span: Span) -> bool {
+        if self.const_scope.contains_key(name) {
+            self.record_error(TypeError::BindingShadowsGenericParam {
+                name: name.to_string(),
+                span,
+            });
+            return true;
+        }
         if !self.dynamic_name_in_scope(name) {
             return false;
         }

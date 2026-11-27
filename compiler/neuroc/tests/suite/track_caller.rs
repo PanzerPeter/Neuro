@@ -44,7 +44,7 @@ fn diagnostic(which: &str, optimization: &str) -> String {
     );
     let output = Command::new(&exe).output().expect("run executable");
     assert_ne!(output.status.code(), Some(0), "the call should abort");
-    String::from_utf8_lossy(&output.stderr).into_owned()
+    String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n")
 }
 
 #[test]

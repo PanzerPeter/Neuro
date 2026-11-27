@@ -758,7 +758,7 @@ impl TypeChecker {
                 {
                     return Some(());
                 }
-                self.refuse_value_named_dynamic(&name.name, name.span);
+                self.refuse_reserved_binding_name(&name.name, name.span);
                 let declared_ty = if let Some(ty) = ty {
                     self.resolve_type_naming(ty, NameSlot::Top)
                 } else {
@@ -1120,7 +1120,7 @@ impl TypeChecker {
                 self.hold_adapter_borrows(adapters);
 
                 self.define_loop_index(index);
-                self.refuse_value_named_dynamic(&iterator.name, iterator.span);
+                self.refuse_reserved_binding_name(&iterator.name, iterator.span);
                 if let Some(element_ty) = element_ty
                     && let Err(duplicate_name) =
                         self.symbols
@@ -1231,7 +1231,7 @@ impl TypeChecker {
                 self.hold_adapter_borrows(adapters);
 
                 self.define_loop_index(index);
-                self.refuse_value_named_dynamic(&iterator.name, iterator.span);
+                self.refuse_reserved_binding_name(&iterator.name, iterator.span);
                 match self
                     .symbols
                     .define(iterator.name.clone(), element_ty.clone(), false)

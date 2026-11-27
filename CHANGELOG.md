@@ -10,6 +10,17 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.58.8] - 2026-11-27
+
+### Fixed
+
+- A binding named like a size, shape or `const` parameter in scope (`val N = 100u64` in a body
+  generic over `N`) is refused, naming the parameter. It used to compile, and later reads of `N`
+  still gave the parameter (BUG-171). The check covers every binding form: `val`, `mut`,
+  patterns, `match` arms, loops, closure and function parameters.
+- The `@track_caller` diagnostic test normalizes `\r\n` in the program's stderr, so it passes on
+  Windows CI.
+
 ## [5.58.7] - 2026-11-27
 
 ### Documentation

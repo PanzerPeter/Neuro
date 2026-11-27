@@ -189,6 +189,68 @@ fn a_const_parameter_in_a_size_position_is_refused_with_the_bare_form() {
     }
 }
 
+/// BUG-171: a size, shape or `const` parameter is a value and an extent at once, so a
+/// binding of its name would split `N` from `[T; N]` in one body. Every binding form is
+/// refused, naming the parameter.
+#[test]
+fn a_binding_named_like_a_size_or_const_parameter_is_refused() {
+    for (name, source, param) in [
+        (
+            "val.nr",
+            "func s<N>(a: [i32; N]) -> u64 {\n    val N = 100u64\n    N\n}",
+            "N",
+        ),
+        (
+            "const.nr",
+            "func s<const N: u32>() -> u32 {\n    val N = 100u32\n    N\n}",
+            "N",
+        ),
+        (
+            "mut.nr",
+            "func s<N>(a: [i32; N]) -> u64 {\n    mut N = 1u64\n    N\n}",
+            "N",
+        ),
+        (
+            "tuple.nr",
+            "func s<N>(a: [i32; N]) -> u64 {\n    val (N, b) = (1u64, 2u64)\n    N + b\n}",
+            "N",
+        ),
+        ("param.nr", "func s<const N: u32>(N: u32) -> u32 { N }", "N"),
+        (
+            "for.nr",
+            "func s<N>(a: [i32; N]) -> u64 {\n    mut t = 0u64\n    for N in 0..3 { t += 1 }\n    t\n}",
+            "N",
+        ),
+        (
+            "closure.nr",
+            "func s<N>(a: [i32; N]) -> u64 {\n    val f = |N: u64| -> u64 { N }\n    f(1)\n}",
+            "N",
+        ),
+        (
+            "match.nr",
+            "func s<N>(a: [i32; N]) -> u64 {\n    match Some(1u64) {\n        Some(N) => N,\n        None => 0,\n    }\n}",
+            "N",
+        ),
+        (
+            "shape.nr",
+            "func s<S>(t: &Tensor<f32, [2, ..S]>) -> f32 {\n    val S = 1.0\n    S\n}",
+            "S",
+        ),
+        (
+            "method.nr",
+            "struct B<CAP> { d: [i32; CAP] }\nimpl<CAP> B<CAP> {\n    func c(&self) -> u64 {\n        val CAP = 9u64\n        CAP\n    }\n}",
+            "CAP",
+        ),
+    ] {
+        let source = format!("{source}\nfunc main() -> i32 {{ 0 }}\n");
+        assert_check_error(
+            name,
+            &source,
+            &format!("`{param}` is a generic parameter here and cannot also name a binding"),
+        );
+    }
+}
+
 #[test]
 fn a_misspelled_size_is_not_a_new_parameter() {
     assert_check_error(

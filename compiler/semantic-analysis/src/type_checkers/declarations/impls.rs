@@ -771,7 +771,7 @@ impl TypeChecker {
             if matches!(param_ty, Type::Unknown) {
                 continue;
             }
-            self.refuse_value_named_dynamic(&param.name.name, param.name.span);
+            self.refuse_reserved_binding_name(&param.name.name, param.name.span);
             if let Err(dup) = self
                 .symbols
                 .define(param.name.name.clone(), param_ty.clone(), false)

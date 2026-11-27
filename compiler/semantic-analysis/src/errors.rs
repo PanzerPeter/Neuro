@@ -38,6 +38,11 @@ pub enum TypeError {
     MethodGenericShadowsImpl { name: String, span: Span },
 
     #[error(
+        "`{name}` is a generic parameter here and cannot also name a binding: it is a value and a type-level extent at once, and a local of the same name would split the two; give the binding another name"
+    )]
+    BindingShadowsGenericParam { name: String, span: Span },
+
+    #[error(
         "method '{method}' of the `impl {trait_name}` declares type parameters of its own; `{trait_name}` is compiler-known and its methods take none"
     )]
     GenericMethodInTraitImpl {
@@ -1766,6 +1771,7 @@ impl TypeError {
             | Self::FunctionUsedAsValue { span, .. }
             | Self::GenericParamShadowsBuiltin { span, .. }
             | Self::MethodGenericShadowsImpl { span, .. }
+            | Self::BindingShadowsGenericParam { span, .. }
             | Self::GenericMethodInTraitImpl { span, .. }
             | Self::GenericParamNotInferable { span, .. }
             | Self::InstantiationTooDeep { span, .. }

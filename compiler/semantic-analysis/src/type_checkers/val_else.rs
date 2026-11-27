@@ -61,7 +61,7 @@ impl TypeChecker {
 
         self.symbols.push_scope();
         if let (Some(ident), Some(ty)) = (else_binding, else_binding_ty) {
-            self.refuse_value_named_dynamic(&ident.name, ident.span);
+            self.refuse_reserved_binding_name(&ident.name, ident.span);
             let _ = self.symbols.define(ident.name.clone(), ty, false);
         }
         for stmt in else_block {
@@ -84,7 +84,7 @@ impl TypeChecker {
             if matches!(ty, Type::Unknown) && self.errors.is_empty() {
                 continue;
             }
-            self.refuse_value_named_dynamic(&name, binding_span);
+            self.refuse_reserved_binding_name(&name, binding_span);
             if !declared.insert(name.clone()) {
                 self.record_error(TypeError::VariableAlreadyDefined {
                     name,

@@ -301,7 +301,7 @@ impl TypeChecker {
         // error is already reported, and leaving the name undefined turns every use of
         // it in the body into a second, misleading "undefined variable" report.
         for (param, param_ty) in func.params.iter().zip(param_types.iter()) {
-            self.refuse_value_named_dynamic(&param.name.name, param.name.span);
+            self.refuse_reserved_binding_name(&param.name.name, param.name.span);
             if let Err(duplicate_name) = self.symbols.define(
                 param.name.name.clone(),
                 param_ty.clone(),

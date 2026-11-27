@@ -162,6 +162,8 @@ A name used in none of these ways is a type parameter, and a misspelled size is 
 
 A **const parameter**, `const NAME: T` with `T` an integer type, is a value that sizes nothing, such as the `N` of `count` above. Writing one in a size position is an error whose hint is the bare form, so every parameter has one spelling: `` const parameter 'N' sizes an array, but a `const` parameter is a value that sizes nothing; declare a size parameter by its bare name instead: `<N>` ``.
 
+No binding takes the name of a size, shape or const parameter in scope: a `val`, `mut`, pattern, loop, closure or function parameter named `N` inside a body generic over `N` is an error naming the parameter. `N` is a value and an extent at once, so a local would make it mean two things in one scope. This is the one exception to ordinary shadowing.
+
 A `where` clause can constrain a size or const parameter; see [Trait Bounds and Where Clauses](#trait-bounds-and-where-clauses).
 
 ## Generic Structs and Impls

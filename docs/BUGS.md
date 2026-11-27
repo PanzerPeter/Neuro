@@ -40,40 +40,6 @@ the host first.
 **Fix sketch**: copy a device operand to the host before the outlined traversal's host body runs, and
 emit the warning the language reference names at compile time.
 
-## BUG-171: a binding named like a size parameter is accepted and reads the parameter
-
-- **Status**: open, confirmed
-- **Area**: `semantic-analysis` / `hir-lowering` (a size parameter read as a value)
-- **Severity**: high. Valid source compiles and gives a wrong answer with no diagnostic
-
-**Minimal repro**
-
-```neuro
-func s<N>(a: [i32; N]) -> u64 {
-    val N = 100u64
-    N
-}
-
-func main() -> i32 {
-    s([1]) as i32
-}
-```
-
-Expected: exit code 100, since a later `val` shadows a name for the rest of its scope. Observed:
-exit code 1. The `N` after the `val` still reads the extent parameter. A `const N: u32`
-parameter behaves the same way.
-
-**Root cause**: not traced. A size parameter read as a value resolves before the local scope is
-consulted, so the binding is made and never read.
-
-**Workaround**: give the local another name.
-
-**Fix sketch**: ruled: the language refuses the binding. A size, shape or `const` parameter is
-a value and a type-level extent at once, so a local of the same name would split `N` from
-`[T; N]` in one body (Rust refuses the same shadow). The checker reports any binding (`val`,
-`mut`, pattern, loop or closure parameter) that takes a generic parameter's name, naming the
-parameter. Regression test: the repro above is rejected, for a size and a `const` parameter.
-
 ## BUG-170: reading a field of a temporary with a `Drop` impl skips its destructor
 
 - **Status**: open, confirmed
