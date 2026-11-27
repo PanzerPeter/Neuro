@@ -309,16 +309,13 @@ impl<'ctx> CodegenContext<'ctx> {
         let bytes = self
             .builder
             .build_int_mul(capacity, stride, "vec.cap.bytes")?;
-        // The buffer grows through libc `realloc`, so it starts out as libc's too, never
-        // an arena's. Whatever a zero-byte request returns, null or not, `free` accepts.
-        let realloc = self.get_or_declare_realloc();
-        let null = self
-            .context
-            .ptr_type(inkwell::AddressSpace::default())
-            .const_null();
+        // In a `pool` body the arena's, like any allocation written there: a value that
+        // outlives the block is built with the arena switched off. Growth takes a buffer
+        // of either kind, and whatever a zero-byte request returns, the release accepts.
+        let alloc = self.alloc_fn()?;
         let buffer = self
             .builder
-            .build_call(realloc, &[null.into(), bytes.into()], "vec.cap.buf")?
+            .build_call(alloc, &[bytes.into()], "vec.cap.buf")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("realloc returned void".into()))?

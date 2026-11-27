@@ -10,6 +10,56 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.58.6] - 2026-11-26
+
+### Added
+
+- `@track_caller` on a free function: a `panic`, `assert` or `unreachable` in its body names the
+  line of the call that reached it, passed on through any chain of `@track_caller` callers.
+  `std::testing::assert_close` carries it, so a failing check names the test's line instead of
+  `<std>/testing.nr`.
+
+### Changed
+
+- A binding that borrows a function value is called by name: `for f in &fs { total += f(1) }`
+  and `f(0)` on the `&F` a `HashMap::get` hands out, each the call `(*f)(x)` already was.
+- An inline `module` block reads, writes and builds the private fields of every module around
+  it, at any depth, as it already called their private functions.
+- A trait's default method body is checked in the trait's module wherever an impl receives it,
+  so it may build or read a struct private to that module from an impl in another file.
+- A tensor meets a `T: PoolAware` bound, as the language reference states, and a generic body
+  may call `register_with_pool` and `bulk_release` on one; both do nothing, since the arena or
+  the tensor's own deleter releases its buffer.
+- A `val` a `pool` block builds from nothing of the arena's and then stores whole into a place
+  outliving the block is built off the arena: `pool { val s = "a" + "b"; out = s }` compiles.
+- A `pool` arena is a chain of chunks: a block whose allocations pass the first 64 MiB moves on
+  to a chunk twice the size instead of falling back to the heap one allocation at a time, and the
+  chunks stay reserved for the next block to reuse.
+- A `Vec`, a map or a `StringBuilder` a `pool` block owns grows its buffer in the arena, the last
+  allocation in place when it can. One declared before the block still grows on the heap, and a
+  buffer handed to a callee or pushed to from a nested block is copied out to the heap first.
+- In a program that moves a tensor to a device, a tensor operation inside a `pool` block over
+  host operands allocates its result from the arena, as it does in a program with no transfer.
+  The call chooses between the device and the host body where it is made.
+- A `.to(Device::GPU(0))` or a device `.clone()` written in a `pool` block takes its buffer from
+  the device arena, released all at once at the block's exit instead of one synchronizing free per
+  tensor. A transfer stored into a place outliving the block still gets a buffer of its own.
+- A host float sort, and a host integer sort over runs shorter than 256, merges each run
+  sequentially in O(n log n) comparisons: a million `f32` sort about five times faster. An integer
+  sort over a dynamic axis takes the radix sort when its runs are long enough, chosen at run time.
+- `std::safetensors` saves a file with one copy per tensor instead of one push per byte, finds a
+  tensor and a repeated name through a map, and orders the byte ranges with a merge sort: a
+  64 MiB checkpoint of 20,000 tensors saves in about 30 ms and opens and reads back in about as
+  long.
+
+### Fixed
+
+- A `mut` function value called through a shared borrow, `(*r)(1)` with `r: &F`, compiled,
+  though a call may write the value's environment. It is refused, as a field call through
+  `&self` already was. A `once` value called through a borrow, `(*r)()`, is refused as a move
+  out of the borrow, and a parenthesized `once` call `(f)()` now uses `f` up, so a second one is
+  a use of a moved value.
+
 ## [5.58.5] - 2026-11-26
 
 ### Changed

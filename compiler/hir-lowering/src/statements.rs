@@ -133,6 +133,13 @@ impl Lowerer {
                         {
                             self.written_types.insert(value.span(), written);
                         }
+                        // A binding moved whole into a place: every open `pool` builds a
+                        // `val` of that name off the arena (`HirExprKind::Pool::routed`).
+                        if let Some(moved) = moved_binding(value) {
+                            for moves in &mut self.pool_moves {
+                                moves.push(moved.to_string());
+                            }
+                        }
                         let value = self.lower_expr(value, Some(&place_ty))?;
                         Ok(HirStmt::Assign {
                             place: lowered,
@@ -685,5 +692,14 @@ fn borrowed_element(iterable_ty: &HirType, element: HirType) -> HirType {
             mutable: *mutable,
         },
         _ => element,
+    }
+}
+
+/// The binding a stored value moves whole: `name`, through any parentheses.
+fn moved_binding(value: &ast_types::Expr) -> Option<&str> {
+    match value {
+        ast_types::Expr::Identifier(ident) => Some(&ident.name),
+        ast_types::Expr::Paren(inner, _) => moved_binding(inner),
+        _ => None,
     }
 }

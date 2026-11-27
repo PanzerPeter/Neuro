@@ -95,7 +95,7 @@ define internal fastcc void @probe() unnamed_addr {
 
 12:                                               ; preds = %5, %9
   %13 = phi i64 [ %10, %9 ], [ 0, %5 ]
-  %14 = getelementptr inbounds nuw %struct.anon.0, ptr @entry_points, i64 %13
+  %14 = getelementptr inbounds nuw [16 x i8], ptr @entry_points, i64 %13
   %15 = load ptr, ptr %14, align 16
   %16 = tail call ptr @dlsym(ptr noundef nonnull %6, ptr noundef %15)
   %17 = getelementptr inbounds nuw i8, ptr %14, i64 8
@@ -229,7 +229,7 @@ define dso_local i32 @__neuro_device_switch(i32 noundef %0) local_unnamed_addr {
 11:                                               ; preds = %7
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
   %12 = zext nneg i32 %5 to i64
-  %13 = getelementptr inbounds nuw ptr, ptr @contexts, i64 %12
+  %13 = getelementptr inbounds nuw [8 x i8], ptr @contexts, i64 %12
   %14 = load ptr, ptr %13, align 8
   %15 = icmp eq ptr %14, null
   br i1 %15, label %16, label %29
@@ -314,12 +314,12 @@ define internal fastcc void @report(ptr noundef %0, i32 noundef %1) unnamed_addr
 
 declare noundef i32 @snprintf(ptr noalias noundef writeonly captures(none), i64 noundef, ptr noundef readonly captures(none), ...) local_unnamed_addr
 
-define dso_local noalias noundef ptr @mgpuModuleLoad(ptr noundef %0, i64 noundef %1) local_unnamed_addr {
+define dso_local noundef ptr @mgpuModuleLoad(ptr noundef %0, i64 noundef %1) local_unnamed_addr {
   %3 = tail call fastcc ptr @load(ptr noundef %0)
   ret ptr %3
 }
 
-define internal fastcc noalias noundef ptr @load(ptr noundef %0) unnamed_addr {
+define internal fastcc noundef ptr @load(ptr noundef %0) unnamed_addr {
   %2 = alloca [128 x i8], align 16
   %3 = alloca ptr, align 8
   %4 = alloca ptr, align 8
@@ -390,7 +390,7 @@ define internal fastcc noalias noundef ptr @load(ptr noundef %0) unnamed_addr {
   %38 = getelementptr inbounds nuw i8, ptr %33, i64 8
   %39 = load i32, ptr @current, align 4
   %40 = sext i32 %39 to i64
-  %41 = getelementptr inbounds ptr, ptr %38, i64 %40
+  %41 = getelementptr inbounds [8 x i8], ptr %38, i64 %40
   store ptr %37, ptr %41, align 8
   br label %42
 
@@ -404,7 +404,7 @@ define internal fastcc noalias noundef ptr @load(ptr noundef %0) unnamed_addr {
   ret ptr %45
 }
 
-define dso_local noalias noundef ptr @mgpuModuleLoadJIT(ptr noundef %0, i32 noundef %1) local_unnamed_addr {
+define dso_local noundef ptr @mgpuModuleLoadJIT(ptr noundef %0, i32 noundef %1) local_unnamed_addr {
   %3 = tail call fastcc ptr @load(ptr noundef %0)
   ret ptr %3
 }
@@ -430,7 +430,7 @@ define dso_local void @mgpuModuleUnload(ptr noundef captures(address_is_null) %0
   %13 = load i32, ptr @current, align 4
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
   %14 = sext i32 %13 to i64
-  %15 = getelementptr inbounds ptr, ptr @contexts, i64 %14
+  %15 = getelementptr inbounds [8 x i8], ptr @contexts, i64 %14
   %16 = load ptr, ptr %15, align 8
   %17 = icmp eq ptr %16, null
   br i1 %17, label %18, label %29
@@ -465,14 +465,14 @@ define dso_local void @mgpuModuleUnload(ptr noundef captures(address_is_null) %0
 
 34:                                               ; preds = %10, %65
   %35 = phi i64 [ 0, %10 ], [ %66, %65 ]
-  %36 = getelementptr inbounds nuw ptr, ptr %11, i64 %35
+  %36 = getelementptr inbounds nuw [8 x i8], ptr %11, i64 %35
   %37 = load ptr, ptr %36, align 8
   %38 = icmp eq ptr %37, null
   br i1 %38, label %65, label %39
 
 39:                                               ; preds = %34
   call void @llvm.lifetime.start.p0(ptr nonnull %2)
-  %40 = getelementptr inbounds nuw ptr, ptr @contexts, i64 %35
+  %40 = getelementptr inbounds nuw [8 x i8], ptr @contexts, i64 %35
   %41 = load ptr, ptr %40, align 8
   %42 = icmp eq ptr %41, null
   br i1 %42, label %43, label %56
@@ -533,7 +533,7 @@ define dso_local ptr @mgpuModuleGetFunction(ptr noundef %0, ptr noundef %1) loca
   %6 = getelementptr inbounds nuw i8, ptr %0, i64 8
   %7 = load i32, ptr @current, align 4
   %8 = sext i32 %7 to i64
-  %9 = getelementptr inbounds ptr, ptr %6, i64 %8
+  %9 = getelementptr inbounds [8 x i8], ptr %6, i64 %8
   %10 = load ptr, ptr %9, align 8
   %11 = icmp eq ptr %10, null
   br i1 %11, label %12, label %25
@@ -548,7 +548,7 @@ define dso_local ptr @mgpuModuleGetFunction(ptr noundef %0, ptr noundef %1) loca
 17:                                               ; preds = %12
   %18 = load i32, ptr @current, align 4
   %19 = sext i32 %18 to i64
-  %20 = getelementptr inbounds ptr, ptr %6, i64 %19
+  %20 = getelementptr inbounds [8 x i8], ptr %6, i64 %19
   %21 = load ptr, ptr %20, align 8
   br label %25
 
@@ -608,7 +608,7 @@ define dso_local ptr @mgpuStreamCreate() local_unnamed_addr {
   %1 = alloca [128 x i8], align 16
   %2 = load i32, ptr @current, align 4
   %3 = sext i32 %2 to i64
-  %4 = getelementptr inbounds %struct.device, ptr @devices, i64 %3
+  %4 = getelementptr inbounds [24 x i8], ptr @devices, i64 %3
   %5 = load ptr, ptr %4, align 8
   %6 = icmp eq ptr %5, null
   br i1 %6, label %7, label %20
@@ -663,11 +663,11 @@ define dso_local void @mgpuStreamSynchronize(ptr noundef %0) local_unnamed_addr 
   ret void
 }
 
-define dso_local void @mgpuStreamDestroy(ptr noundef readnone captures(none) %0) local_unnamed_addr {
+define dso_local void @mgpuStreamDestroy(ptr nofree noundef readnone captures(none) %0) local_unnamed_addr {
   ret void
 }
 
-define dso_local ptr @mgpuMemAlloc(i64 noundef %0, ptr noundef readnone captures(none) %1, i8 noundef zeroext %2) local_unnamed_addr {
+define dso_local ptr @mgpuMemAlloc(i64 noundef %0, ptr nofree noundef readnone captures(none) %1, i8 noundef zeroext %2) local_unnamed_addr {
   %4 = alloca i64, align 8
   tail call fastcc void @probe()
   %5 = load i1, ptr @ready, align 4
@@ -712,7 +712,7 @@ define dso_local ptr @mgpuMemAlloc(i64 noundef %0, ptr noundef readnone captures
   ret ptr %25
 }
 
-define dso_local void @mgpuMemFree(ptr noundef %0, ptr noundef readnone captures(none) %1) local_unnamed_addr {
+define dso_local void @mgpuMemFree(ptr noundef %0, ptr nofree noundef readnone captures(none) %1) local_unnamed_addr {
   %3 = alloca [128 x i8], align 16
   %4 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 112), align 8
   %5 = ptrtoint ptr %0 to i64
@@ -756,7 +756,7 @@ define dso_local nonnull ptr @_mlir_memref_to_llvm_alloc(i64 noundef %0) local_u
   %3 = alloca i64, align 8
   %4 = load i32, ptr @current, align 4
   %5 = sext i32 %4 to i64
-  %6 = getelementptr inbounds %struct.device, ptr @devices, i64 %5
+  %6 = getelementptr inbounds [24 x i8], ptr @devices, i64 %5
   %7 = getelementptr inbounds nuw i8, ptr %6, i64 8
   %8 = load ptr, ptr %7, align 8
   %9 = icmp eq ptr %8, null
@@ -800,49 +800,48 @@ define dso_local nonnull ptr @_mlir_memref_to_llvm_alloc(i64 noundef %0) local_u
   %33 = sub nuw nsw i64 67108864, %29
   %34 = icmp ugt i64 %0, %33
   %35 = select i1 %32, i1 true, i1 %34
-  br i1 %35, label %38, label %36
+  br i1 %35, label %39, label %36
 
 36:                                               ; preds = %21
   %37 = add nuw nsw i64 %29, %0
   store i64 %37, ptr %24, align 8
-  br label %49
+  %38 = icmp eq i64 %28, 0
+  br i1 %38, label %39, label %53
 
-38:                                               ; preds = %21
+39:                                               ; preds = %21, %36
   call fastcc void @probe()
-  %39 = load i1, ptr @ready, align 4
-  br i1 %39, label %42, label %40
+  %40 = load i1, ptr @ready, align 4
+  br i1 %40, label %43, label %41
 
-40:                                               ; preds = %38
-  %41 = load ptr, ptr @unusable_reason, align 8
-  call fastcc void @unusable(ptr noundef nonnull @__neuro_gpu_launcher, ptr noundef %41)
+41:                                               ; preds = %39
+  %42 = load ptr, ptr @unusable_reason, align 8
+  call fastcc void @unusable(ptr noundef nonnull @__neuro_gpu_launcher, ptr noundef %42)
   unreachable
 
-42:                                               ; preds = %38
-  %43 = icmp eq i64 %0, 0
-  br i1 %43, label %52, label %44
+43:                                               ; preds = %39
+  %44 = icmp eq i64 %0, 0
+  br i1 %44, label %52, label %45
 
-44:                                               ; preds = %42
+45:                                               ; preds = %43
   call void @llvm.lifetime.start.p0(ptr nonnull %2)
   store i64 0, ptr %2, align 8
-  %45 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 96), align 8
-  %46 = call i32 %45(ptr noundef nonnull %2, i64 noundef %0)
-  %47 = load i64, ptr %2, align 8
+  %46 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 96), align 8
+  %47 = call i32 %46(ptr noundef nonnull %2, i64 noundef %0)
+  %48 = load i64, ptr %2, align 8
   call void @llvm.lifetime.end.p0(ptr nonnull %2)
-  %48 = icmp eq i32 %46, 0
-  br i1 %48, label %49, label %52
-
-49:                                               ; preds = %44, %36
-  %50 = phi i64 [ %28, %36 ], [ %47, %44 ]
-  %51 = icmp eq i64 %50, 0
+  %49 = icmp ne i32 %47, 0
+  %50 = icmp eq i64 %48, 0
+  %51 = select i1 %49, i1 true, i1 %50
   br i1 %51, label %52, label %53
 
-52:                                               ; preds = %42, %44, %49
+52:                                               ; preds = %43, %45
   call fastcc void @report(ptr noundef nonnull @ALLOCATION_FAILED, i32 noundef 76)
   unreachable
 
-53:                                               ; preds = %49
-  %54 = inttoptr i64 %50 to ptr
-  ret ptr %54
+53:                                               ; preds = %45, %36
+  %54 = phi i64 [ %48, %45 ], [ %28, %36 ]
+  %55 = inttoptr i64 %54 to ptr
+  ret ptr %55
 }
 
 define dso_local void @_mlir_memref_to_llvm_free(ptr noundef %0) local_unnamed_addr {
@@ -853,16 +852,16 @@ define dso_local void @_mlir_memref_to_llvm_free(ptr noundef %0) local_unnamed_a
 4:                                                ; preds = %1
   %5 = load i32, ptr @current, align 4
   %6 = sext i32 %5 to i64
-  %7 = getelementptr inbounds %struct.device, ptr @devices, i64 %6
+  %7 = getelementptr inbounds [24 x i8], ptr @devices, i64 %6
   %8 = getelementptr inbounds nuw i8, ptr %7, i64 8
   %9 = load ptr, ptr %8, align 8
   %10 = ptrtoint ptr %9 to i64
-  %11 = icmp ne ptr %9, null
+  %11 = icmp eq ptr %9, null
   %12 = ptrtoint ptr %0 to i64
   %13 = sub i64 %12, %10
-  %14 = icmp ult i64 %13, 67108864
-  %15 = and i1 %11, %14
-  br i1 %15, label %23, label %16
+  %14 = icmp ugt i64 %13, 67108863
+  %15 = or i1 %11, %14
+  br i1 %15, label %16, label %23
 
 16:                                               ; preds = %4
   %17 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 112), align 8
@@ -884,7 +883,7 @@ define dso_local void @_mlir_memref_to_llvm_free(ptr noundef %0) local_unnamed_a
 define dso_local i64 @__neuro_device_mark() local_unnamed_addr {
   %1 = load i32, ptr @current, align 4
   %2 = sext i32 %1 to i64
-  %3 = getelementptr inbounds %struct.device, ptr @devices, i64 %2
+  %3 = getelementptr inbounds [24 x i8], ptr @devices, i64 %2
   %4 = getelementptr inbounds nuw i8, ptr %3, i64 16
   %5 = load i64, ptr %4, align 8
   ret i64 %5
@@ -893,7 +892,7 @@ define dso_local i64 @__neuro_device_mark() local_unnamed_addr {
 define dso_local void @__neuro_device_restore(i64 noundef %0) local_unnamed_addr {
   %2 = load i32, ptr @current, align 4
   %3 = sext i32 %2 to i64
-  %4 = getelementptr inbounds %struct.device, ptr @devices, i64 %3
+  %4 = getelementptr inbounds [24 x i8], ptr @devices, i64 %3
   %5 = getelementptr inbounds nuw i8, ptr %4, i64 16
   store i64 %0, ptr %5, align 8
   ret void
@@ -927,101 +926,165 @@ define dso_local void @__neuro_device_check(i32 noundef %0) local_unnamed_addr {
   unreachable
 }
 
-define dso_local ptr @__neuro_device_alloc(i64 noundef %0) local_unnamed_addr {
-  %2 = alloca [128 x i8], align 16
-  %3 = alloca i64, align 8
+define dso_local ptr @__neuro_device_alloc(i64 noundef %0, i32 noundef %1) local_unnamed_addr {
+  %3 = alloca [128 x i8], align 16
+  %4 = alloca i64, align 8
+  %5 = alloca i64, align 8
   tail call fastcc void @probe()
-  %4 = load i1, ptr @ready, align 4
-  br i1 %4, label %7, label %5
+  %6 = load i1, ptr @ready, align 4
+  br i1 %6, label %9, label %7
 
-5:                                                ; preds = %1
-  %6 = load ptr, ptr @unusable_reason, align 8
-  tail call fastcc void @unusable(ptr noundef nonnull @TRANSFER, ptr noundef %6)
+7:                                                ; preds = %2
+  %8 = load ptr, ptr @unusable_reason, align 8
+  tail call fastcc void @unusable(ptr noundef nonnull @TRANSFER, ptr noundef %8)
   unreachable
 
-7:                                                ; preds = %1
-  %8 = tail call i64 @llvm.umax.i64(i64 %0, i64 1)
+9:                                                ; preds = %2
+  %10 = icmp ne i32 %1, 0
+  %11 = load i32, ptr @current, align 4
+  %12 = icmp eq i32 %11, 0
+  %13 = select i1 %10, i1 %12, i1 false
+  br i1 %13, label %16, label %14
+
+14:                                               ; preds = %9
+  %15 = tail call i64 @llvm.umax.i64(i64 %0, i64 1)
+  br label %48
+
+16:                                               ; preds = %9
+  %17 = tail call i64 @llvm.umax.i64(i64 %0, i64 1)
+  %18 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @devices, i64 8), align 8
+  %19 = icmp eq ptr %18, null
+  br i1 %19, label %20, label %31
+
+20:                                               ; preds = %16
+  tail call fastcc void @probe()
+  %21 = load i1, ptr @ready, align 4
+  br i1 %21, label %24, label %22
+
+22:                                               ; preds = %20
+  %23 = load ptr, ptr @unusable_reason, align 8
+  tail call fastcc void @unusable(ptr noundef nonnull @__neuro_gpu_launcher, ptr noundef %23)
+  unreachable
+
+24:                                               ; preds = %20
+  call void @llvm.lifetime.start.p0(ptr nonnull %5)
+  store i64 0, ptr %5, align 8
+  %25 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 96), align 8
+  %26 = call i32 %25(ptr noundef nonnull %5, i64 noundef 67108864)
+  %27 = load i64, ptr %5, align 8
+  %28 = inttoptr i64 %27 to ptr
+  call void @llvm.lifetime.end.p0(ptr nonnull %5)
+  %29 = icmp eq i32 %26, 0
+  %30 = select i1 %29, ptr %28, ptr null
+  store ptr %30, ptr getelementptr inbounds nuw (i8, ptr @devices, i64 8), align 8
+  br label %31
+
+31:                                               ; preds = %24, %16
+  %32 = phi ptr [ %30, %24 ], [ %18, %16 ]
+  %33 = ptrtoint ptr %32 to i64
+  %34 = load i64, ptr getelementptr inbounds nuw (i8, ptr @devices, i64 16), align 16
+  %35 = add i64 %33, 255
+  %36 = add i64 %35, %34
+  %37 = and i64 %36, -256
+  %38 = sub i64 %37, %33
+  %39 = icmp eq ptr %32, null
+  %40 = icmp ugt i64 %38, 67108864
+  %41 = select i1 %39, i1 true, i1 %40
+  %42 = sub nuw nsw i64 67108864, %38
+  %43 = icmp ugt i64 %17, %42
+  %44 = select i1 %41, i1 true, i1 %43
+  br i1 %44, label %48, label %45
+
+45:                                               ; preds = %31
+  %46 = add nuw nsw i64 %38, %17
+  store i64 %46, ptr getelementptr inbounds nuw (i8, ptr @devices, i64 16), align 16
+  %47 = icmp eq i64 %37, 0
+  br i1 %47, label %48, label %57
+
+48:                                               ; preds = %14, %31, %45
+  %49 = phi i64 [ %15, %14 ], [ %17, %31 ], [ %17, %45 ]
+  call void @llvm.lifetime.start.p0(ptr nonnull %4)
+  store i64 0, ptr %4, align 8
+  %50 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 96), align 8
+  %51 = call i32 %50(ptr noundef nonnull %4, i64 noundef %49)
+  %52 = load i64, ptr %4, align 8
+  call void @llvm.lifetime.end.p0(ptr nonnull %4)
+  %53 = icmp eq i32 %51, 0
+  br i1 %53, label %57, label %54
+
+54:                                               ; preds = %48
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
-  store i64 0, ptr %3, align 8
-  %9 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 96), align 8
-  %10 = call i32 %9(ptr noundef nonnull %3, i64 noundef %8)
-  %11 = load i64, ptr %3, align 8
-  call void @llvm.lifetime.end.p0(ptr nonnull %3)
-  %12 = icmp eq i32 %10, 0
-  br i1 %12, label %16, label %13
-
-13:                                               ; preds = %7
-  call void @llvm.lifetime.start.p0(ptr nonnull %2)
-  %14 = call fastcc ptr @error_name(i32 noundef %10)
-  %15 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %2, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.10, ptr noundef %14)
-  call fastcc void @fail(ptr noundef nonnull %2)
+  %55 = call fastcc ptr @error_name(i32 noundef %51)
+  %56 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.10, ptr noundef %55)
+  call fastcc void @fail(ptr noundef nonnull %3)
   unreachable
 
-16:                                               ; preds = %7
-  %17 = inttoptr i64 %11 to ptr
-  ret ptr %17
+57:                                               ; preds = %48, %45
+  %58 = phi i64 [ %37, %45 ], [ %52, %48 ]
+  %59 = inttoptr i64 %58 to ptr
+  ret ptr %59
 }
 
-define dso_local ptr @__neuro_device_upload(ptr noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr {
-  %4 = alloca [128 x i8], align 16
+define dso_local ptr @__neuro_device_upload(ptr noundef %0, i64 noundef %1, i32 noundef %2, i32 noundef %3) local_unnamed_addr {
   %5 = alloca [128 x i8], align 16
-  %6 = alloca [256 x i8], align 16
+  %6 = alloca [128 x i8], align 16
+  %7 = alloca [256 x i8], align 16
   tail call fastcc void @probe()
-  %7 = load i1, ptr @ready, align 4
-  br i1 %7, label %10, label %8
+  %8 = load i1, ptr @ready, align 4
+  br i1 %8, label %11, label %9
 
-8:                                                ; preds = %3
-  %9 = load ptr, ptr @unusable_reason, align 8
-  tail call fastcc void @unusable(ptr noundef nonnull @TRANSFER, ptr noundef %9)
+9:                                                ; preds = %4
+  %10 = load ptr, ptr @unusable_reason, align 8
+  tail call fastcc void @unusable(ptr noundef nonnull @TRANSFER, ptr noundef %10)
   unreachable
 
-10:                                               ; preds = %3
-  %11 = icmp sgt i32 %2, -1
-  %12 = load i32, ptr @device_count, align 4
-  %13 = icmp slt i32 %2, %12
-  %14 = select i1 %11, i1 %13, i1 false
-  br i1 %14, label %17, label %15
+11:                                               ; preds = %4
+  %12 = icmp sgt i32 %2, -1
+  %13 = load i32, ptr @device_count, align 4
+  %14 = icmp slt i32 %2, %13
+  %15 = select i1 %12, i1 %14, i1 false
+  br i1 %15, label %18, label %16
 
-15:                                               ; preds = %10
+16:                                               ; preds = %11
+  call void @llvm.lifetime.start.p0(ptr nonnull %7)
+  %17 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %7, i64 noundef 256, ptr noundef nonnull @.str.9, i32 noundef %2, i32 noundef %13)
+  call fastcc void @report(ptr noundef nonnull %7, i32 noundef %17)
+  unreachable
+
+18:                                               ; preds = %11
+  %19 = tail call i32 @__neuro_device_switch(i32 noundef %2)
+  %20 = tail call ptr @__neuro_device_alloc(i64 noundef %1, i32 noundef %3)
+  %21 = tail call ptr @mgpuStreamCreate()
+  %22 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 120), align 8
+  %23 = ptrtoint ptr %20 to i64
+  %24 = ptrtoint ptr %0 to i64
+  %25 = tail call i32 %22(i64 noundef %23, i64 noundef %24, i64 noundef %1, ptr noundef %21)
+  %26 = icmp eq i32 %25, 0
+  br i1 %26, label %30, label %27
+
+27:                                               ; preds = %18
   call void @llvm.lifetime.start.p0(ptr nonnull %6)
-  %16 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %6, i64 noundef 256, ptr noundef nonnull @.str.9, i32 noundef %2, i32 noundef %12)
-  call fastcc void @report(ptr noundef nonnull %6, i32 noundef %16)
+  %28 = tail call fastcc ptr @error_name(i32 noundef %25)
+  %29 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %6, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.8, ptr noundef %28)
+  call fastcc void @fail(ptr noundef nonnull %6)
   unreachable
 
-17:                                               ; preds = %10
-  %18 = tail call i32 @__neuro_device_switch(i32 noundef %2)
-  %19 = tail call ptr @__neuro_device_alloc(i64 noundef %1)
-  %20 = tail call ptr @mgpuStreamCreate()
-  %21 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 120), align 8
-  %22 = ptrtoint ptr %19 to i64
-  %23 = ptrtoint ptr %0 to i64
-  %24 = tail call i32 %21(i64 noundef %22, i64 noundef %23, i64 noundef %1, ptr noundef %20)
-  %25 = icmp eq i32 %24, 0
-  br i1 %25, label %29, label %26
+30:                                               ; preds = %18
+  %31 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 88), align 8
+  %32 = tail call i32 %31(ptr noundef %21)
+  %33 = icmp eq i32 %32, 0
+  br i1 %33, label %37, label %34
 
-26:                                               ; preds = %17
+34:                                               ; preds = %30
   call void @llvm.lifetime.start.p0(ptr nonnull %5)
-  %27 = tail call fastcc ptr @error_name(i32 noundef %24)
-  %28 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.8, ptr noundef %27)
+  %35 = tail call fastcc ptr @error_name(i32 noundef %32)
+  %36 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.6, ptr noundef %35)
   call fastcc void @fail(ptr noundef nonnull %5)
   unreachable
 
-29:                                               ; preds = %17
-  %30 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 88), align 8
-  %31 = tail call i32 %30(ptr noundef %20)
-  %32 = icmp eq i32 %31, 0
-  br i1 %32, label %36, label %33
-
-33:                                               ; preds = %29
-  call void @llvm.lifetime.start.p0(ptr nonnull %4)
-  %34 = tail call fastcc ptr @error_name(i32 noundef %31)
-  %35 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %4, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.6, ptr noundef %34)
-  call fastcc void @fail(ptr noundef nonnull %4)
-  unreachable
-
-36:                                               ; preds = %29
-  %37 = tail call i32 @__neuro_device_switch(i32 noundef %18)
-  ret ptr %19
+37:                                               ; preds = %30
+  %38 = tail call i32 @__neuro_device_switch(i32 noundef %19)
+  ret ptr %20
 }
 
 define dso_local void @__neuro_device_copy(ptr noundef %0, ptr noundef %1, i64 noundef %2, i32 noundef %3) local_unnamed_addr {
@@ -1061,151 +1124,166 @@ define dso_local void @__neuro_device_copy(ptr noundef %0, ptr noundef %1, i64 n
   ret void
 }
 
-define dso_local ptr @__neuro_device_clone(ptr noundef %0, i64 noundef %1, i32 noundef %2) local_unnamed_addr {
-  %4 = alloca [128 x i8], align 16
-  %5 = tail call i32 @__neuro_device_switch(i32 noundef %2)
-  %6 = tail call ptr @__neuro_device_alloc(i64 noundef %1)
-  %7 = tail call ptr @mgpuStreamCreate()
-  %8 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 120), align 8
-  %9 = ptrtoint ptr %6 to i64
-  %10 = ptrtoint ptr %0 to i64
-  %11 = tail call i32 %8(i64 noundef %9, i64 noundef %10, i64 noundef %1, ptr noundef %7)
-  %12 = icmp eq i32 %11, 0
-  br i1 %12, label %16, label %13
+define dso_local ptr @__neuro_device_clone(ptr noundef %0, i64 noundef %1, i32 noundef %2, i32 noundef %3) local_unnamed_addr {
+  %5 = alloca [128 x i8], align 16
+  %6 = tail call i32 @__neuro_device_switch(i32 noundef %2)
+  %7 = tail call ptr @__neuro_device_alloc(i64 noundef %1, i32 noundef %3)
+  %8 = tail call ptr @mgpuStreamCreate()
+  %9 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 120), align 8
+  %10 = ptrtoint ptr %7 to i64
+  %11 = ptrtoint ptr %0 to i64
+  %12 = tail call i32 %9(i64 noundef %10, i64 noundef %11, i64 noundef %1, ptr noundef %8)
+  %13 = icmp eq i32 %12, 0
+  br i1 %13, label %17, label %14
 
-13:                                               ; preds = %3
-  call void @llvm.lifetime.start.p0(ptr nonnull %4)
-  %14 = tail call fastcc ptr @error_name(i32 noundef %11)
-  %15 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %4, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.8, ptr noundef %14)
-  call fastcc void @fail(ptr noundef nonnull %4)
+14:                                               ; preds = %4
+  call void @llvm.lifetime.start.p0(ptr nonnull %5)
+  %15 = tail call fastcc ptr @error_name(i32 noundef %12)
+  %16 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.8, ptr noundef %15)
+  call fastcc void @fail(ptr noundef nonnull %5)
   unreachable
 
-16:                                               ; preds = %3
-  %17 = tail call i32 @__neuro_device_switch(i32 noundef %5)
-  ret ptr %6
+17:                                               ; preds = %4
+  %18 = tail call i32 @__neuro_device_switch(i32 noundef %6)
+  ret ptr %7
 }
 
 define dso_local void @__neuro_device_free(ptr noundef %0, i32 noundef %1) local_unnamed_addr {
   %3 = alloca [128 x i8], align 16
   %4 = alloca [128 x i8], align 16
-  %5 = tail call i32 @__neuro_device_switch(i32 noundef %1)
-  %6 = tail call ptr @mgpuStreamCreate()
-  %7 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 88), align 8
-  %8 = tail call i32 %7(ptr noundef %6)
-  %9 = icmp eq i32 %8, 0
-  br i1 %9, label %13, label %10
+  %5 = sext i32 %1 to i64
+  %6 = getelementptr inbounds [24 x i8], ptr @devices, i64 %5
+  %7 = getelementptr inbounds nuw i8, ptr %6, i64 8
+  %8 = load ptr, ptr %7, align 8
+  %9 = ptrtoint ptr %8 to i64
+  %10 = icmp eq ptr %8, null
+  %11 = ptrtoint ptr %0 to i64
+  %12 = sub i64 %11, %9
+  %13 = icmp ugt i64 %12, 67108863
+  %14 = or i1 %10, %13
+  br i1 %14, label %15, label %33
 
-10:                                               ; preds = %2
+15:                                               ; preds = %2
+  %16 = tail call i32 @__neuro_device_switch(i32 noundef %1)
+  %17 = tail call ptr @mgpuStreamCreate()
+  %18 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 88), align 8
+  %19 = tail call i32 %18(ptr noundef %17)
+  %20 = icmp eq i32 %19, 0
+  br i1 %20, label %24, label %21
+
+21:                                               ; preds = %15
   call void @llvm.lifetime.start.p0(ptr nonnull %4)
-  %11 = tail call fastcc ptr @error_name(i32 noundef %8)
-  %12 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %4, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.6, ptr noundef %11)
+  %22 = tail call fastcc ptr @error_name(i32 noundef %19)
+  %23 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %4, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.6, ptr noundef %22)
   call fastcc void @fail(ptr noundef nonnull %4)
   unreachable
 
-13:                                               ; preds = %2
-  %14 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 112), align 8
-  %15 = ptrtoint ptr %0 to i64
-  %16 = tail call i32 %14(i64 noundef %15)
-  %17 = icmp eq i32 %16, 0
-  br i1 %17, label %21, label %18
+24:                                               ; preds = %15
+  %25 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 112), align 8
+  %26 = tail call i32 %25(i64 noundef %11)
+  %27 = icmp eq i32 %26, 0
+  br i1 %27, label %31, label %28
 
-18:                                               ; preds = %13
+28:                                               ; preds = %24
   call void @llvm.lifetime.start.p0(ptr nonnull %3)
-  %19 = tail call fastcc ptr @error_name(i32 noundef %16)
-  %20 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.7, ptr noundef %19)
+  %29 = tail call fastcc ptr @error_name(i32 noundef %26)
+  %30 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %3, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.7, ptr noundef %29)
   call fastcc void @fail(ptr noundef nonnull %3)
   unreachable
 
-21:                                               ; preds = %13
-  %22 = tail call i32 @__neuro_device_switch(i32 noundef %5)
+31:                                               ; preds = %24
+  %32 = tail call i32 @__neuro_device_switch(i32 noundef %16)
+  br label %33
+
+33:                                               ; preds = %2, %31
   ret void
 }
 
-define dso_local ptr @__neuro_device_move(ptr noundef %0, i64 noundef %1, i32 noundef %2, i32 noundef %3) local_unnamed_addr {
-  %5 = alloca [128 x i8], align 16
+define dso_local ptr @__neuro_device_move(ptr noundef %0, i64 noundef %1, i32 noundef %2, i32 noundef %3, i32 noundef %4) local_unnamed_addr {
   %6 = alloca [128 x i8], align 16
   %7 = alloca [128 x i8], align 16
-  %8 = alloca [256 x i8], align 16
+  %8 = alloca [128 x i8], align 16
+  %9 = alloca [256 x i8], align 16
   tail call fastcc void @probe()
-  %9 = load i1, ptr @ready, align 4
-  br i1 %9, label %12, label %10
+  %10 = load i1, ptr @ready, align 4
+  br i1 %10, label %13, label %11
 
-10:                                               ; preds = %4
-  %11 = load ptr, ptr @unusable_reason, align 8
-  tail call fastcc void @unusable(ptr noundef nonnull @TRANSFER, ptr noundef %11)
+11:                                               ; preds = %5
+  %12 = load ptr, ptr @unusable_reason, align 8
+  tail call fastcc void @unusable(ptr noundef nonnull @TRANSFER, ptr noundef %12)
   unreachable
 
-12:                                               ; preds = %4
-  %13 = icmp sgt i32 %3, -1
-  %14 = load i32, ptr @device_count, align 4
-  %15 = icmp slt i32 %3, %14
-  %16 = select i1 %13, i1 %15, i1 false
-  br i1 %16, label %19, label %17
+13:                                               ; preds = %5
+  %14 = icmp sgt i32 %3, -1
+  %15 = load i32, ptr @device_count, align 4
+  %16 = icmp slt i32 %3, %15
+  %17 = select i1 %14, i1 %16, i1 false
+  br i1 %17, label %20, label %18
 
-17:                                               ; preds = %12
+18:                                               ; preds = %13
+  call void @llvm.lifetime.start.p0(ptr nonnull %9)
+  %19 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %9, i64 noundef 256, ptr noundef nonnull @.str.9, i32 noundef %3, i32 noundef %15)
+  call fastcc void @report(ptr noundef nonnull %9, i32 noundef %19)
+  unreachable
+
+20:                                               ; preds = %13
+  %21 = icmp eq i32 %2, %3
+  br i1 %21, label %52, label %22
+
+22:                                               ; preds = %20
+  %23 = tail call i32 @__neuro_device_switch(i32 noundef %2)
+  %24 = tail call ptr @mgpuStreamCreate()
+  %25 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 88), align 8
+  %26 = tail call i32 %25(ptr noundef %24)
+  %27 = icmp eq i32 %26, 0
+  br i1 %27, label %31, label %28
+
+28:                                               ; preds = %22
   call void @llvm.lifetime.start.p0(ptr nonnull %8)
-  %18 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %8, i64 noundef 256, ptr noundef nonnull @.str.9, i32 noundef %3, i32 noundef %14)
-  call fastcc void @report(ptr noundef nonnull %8, i32 noundef %18)
+  %29 = tail call fastcc ptr @error_name(i32 noundef %26)
+  %30 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %8, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.6, ptr noundef %29)
+  call fastcc void @fail(ptr noundef nonnull %8)
   unreachable
 
-19:                                               ; preds = %12
-  %20 = icmp eq i32 %2, %3
-  br i1 %20, label %51, label %21
+31:                                               ; preds = %22
+  %32 = tail call i32 @__neuro_device_switch(i32 noundef %3)
+  %33 = tail call ptr @__neuro_device_alloc(i64 noundef %1, i32 noundef %4)
+  %34 = tail call ptr @mgpuStreamCreate()
+  %35 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 120), align 8
+  %36 = ptrtoint ptr %33 to i64
+  %37 = ptrtoint ptr %0 to i64
+  %38 = tail call i32 %35(i64 noundef %36, i64 noundef %37, i64 noundef %1, ptr noundef %34)
+  %39 = icmp eq i32 %38, 0
+  br i1 %39, label %43, label %40
 
-21:                                               ; preds = %19
-  %22 = tail call i32 @__neuro_device_switch(i32 noundef %2)
-  %23 = tail call ptr @mgpuStreamCreate()
-  %24 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 88), align 8
-  %25 = tail call i32 %24(ptr noundef %23)
-  %26 = icmp eq i32 %25, 0
-  br i1 %26, label %30, label %27
-
-27:                                               ; preds = %21
+40:                                               ; preds = %31
   call void @llvm.lifetime.start.p0(ptr nonnull %7)
-  %28 = tail call fastcc ptr @error_name(i32 noundef %25)
-  %29 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %7, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.6, ptr noundef %28)
+  %41 = tail call fastcc ptr @error_name(i32 noundef %38)
+  %42 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %7, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.8, ptr noundef %41)
   call fastcc void @fail(ptr noundef nonnull %7)
   unreachable
 
-30:                                               ; preds = %21
-  %31 = tail call i32 @__neuro_device_switch(i32 noundef %3)
-  %32 = tail call ptr @__neuro_device_alloc(i64 noundef %1)
-  %33 = tail call ptr @mgpuStreamCreate()
-  %34 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 120), align 8
-  %35 = ptrtoint ptr %32 to i64
-  %36 = ptrtoint ptr %0 to i64
-  %37 = tail call i32 %34(i64 noundef %35, i64 noundef %36, i64 noundef %1, ptr noundef %33)
-  %38 = icmp eq i32 %37, 0
-  br i1 %38, label %42, label %39
+43:                                               ; preds = %31
+  %44 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 88), align 8
+  %45 = tail call i32 %44(ptr noundef %34)
+  %46 = icmp eq i32 %45, 0
+  br i1 %46, label %50, label %47
 
-39:                                               ; preds = %30
+47:                                               ; preds = %43
   call void @llvm.lifetime.start.p0(ptr nonnull %6)
-  %40 = tail call fastcc ptr @error_name(i32 noundef %37)
-  %41 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %6, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.8, ptr noundef %40)
+  %48 = tail call fastcc ptr @error_name(i32 noundef %45)
+  %49 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %6, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.6, ptr noundef %48)
   call fastcc void @fail(ptr noundef nonnull %6)
   unreachable
 
-42:                                               ; preds = %30
-  %43 = load ptr, ptr getelementptr inbounds nuw (i8, ptr @drv, i64 88), align 8
-  %44 = tail call i32 %43(ptr noundef %33)
-  %45 = icmp eq i32 %44, 0
-  br i1 %45, label %49, label %46
-
-46:                                               ; preds = %42
-  call void @llvm.lifetime.start.p0(ptr nonnull %5)
-  %47 = tail call fastcc ptr @error_name(i32 noundef %44)
-  %48 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr noundef nonnull dereferenceable(1) %5, i64 noundef 128, ptr noundef nonnull @.str.22, ptr noundef nonnull @.str.6, ptr noundef %47)
-  call fastcc void @fail(ptr noundef nonnull %5)
-  unreachable
-
-49:                                               ; preds = %42
+50:                                               ; preds = %43
   tail call void @__neuro_device_free(ptr noundef %0, i32 noundef %2)
-  %50 = tail call i32 @__neuro_device_switch(i32 noundef %22)
-  br label %51
+  %51 = tail call i32 @__neuro_device_switch(i32 noundef %23)
+  br label %52
 
-51:                                               ; preds = %19, %49
-  %52 = phi ptr [ %32, %49 ], [ %0, %19 ]
-  ret ptr %52
+52:                                               ; preds = %20, %50
+  %53 = phi ptr [ %33, %50 ], [ %0, %20 ]
+  ret ptr %53
 }
 
 declare ptr @dlopen(ptr noundef, i32 noundef) local_unnamed_addr

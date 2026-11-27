@@ -284,7 +284,7 @@ impl<'f> Functions<'f> {
             return Some(Callee {
                 name: &function.name,
                 captures: &[],
-                params: &function.params,
+                params: visible_params(function),
                 return_type: &function.return_type,
                 body: &function.body,
             });
@@ -297,6 +297,15 @@ impl<'f> Functions<'f> {
             return_type: &closure.return_type,
             body: &closure.body,
         })
+    }
+}
+
+/// `function`'s parameters a call writes: a `@track_caller` function's hidden location is
+/// left out, so an inlined body's panics name the line they are written on.
+pub(super) fn visible_params(function: &HirFunction) -> &[neuro_hir::HirParam] {
+    match function.params.split_last() {
+        Some((last, visible)) if last.name == neuro_hir::CALLER_LOCATION_PARAM => visible,
+        _ => &function.params,
     }
 }
 

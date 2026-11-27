@@ -390,6 +390,19 @@ impl Lowerer {
                 span,
             ));
         }
+        // A binding borrowing a function value is called as `(*name)(args)`.
+        if let Some(HirType::Reference { inner, .. }) = self.lookup_local(name)
+            && matches!(*inner, HirType::Function { .. })
+        {
+            let callee = Expr::Deref {
+                operand: Box::new(Expr::Identifier(shared_types::Identifier {
+                    name: name.to_string(),
+                    span,
+                })),
+                span,
+            };
+            return self.lower_value_call(&callee, args, span);
+        }
 
         // A call to a generic function: infer its type arguments, queue the
         // matching monomorphized instance, and emit a call to that instance's name.

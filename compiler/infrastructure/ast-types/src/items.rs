@@ -249,6 +249,9 @@ pub struct MethodDef {
     pub return_lifetimes: usize,
     pub body: Vec<Stmt>,
     pub attributes: Vec<Attribute>,
+    /// The module a trait's default body was written in, for the copy of it an impl
+    /// receives; `None` for a method written in its impl, which belongs to the impl's module.
+    pub module: Option<ModuleId>,
     pub span: Span,
 }
 

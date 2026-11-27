@@ -38,6 +38,9 @@ pub struct ResolvedModule {
     pub path: String,
     /// The file the module was read from.
     pub file: PathBuf,
+    /// The module an inline block is written in, by the id its items carry; `None` for a
+    /// file. A block sees its enclosing modules' private names, fields included.
+    pub parent: Option<ModuleId>,
 }
 
 pub(crate) struct Module {
@@ -843,6 +846,9 @@ impl ModuleGraph {
         }
         let mut items = Vec::new();
         let mut modules = Vec::new();
+        // Where each trait was declared, so a default body copied into an impl elsewhere is
+        // still checked as the trait's module.
+        let mut trait_modules: HashMap<String, ModuleId> = HashMap::new();
         for id in library.into_iter().chain(files) {
             let stamp = stamps.get(&id).copied().unwrap_or(PRELUDE_MODULE);
             // Every reference was already rewritten to the canonical name, so renaming
@@ -851,6 +857,9 @@ impl ModuleGraph {
                 if let Some(name) = declared_name(&mut item) {
                     name.name = self.canonical(id, &name.name);
                 }
+                if let Item::Trait(def) = &item {
+                    trait_modules.insert(def.name.name.clone(), stamp);
+                }
                 stamp_module(&mut item, stamp);
                 items.push(item);
             }
@@ -858,10 +867,13 @@ impl ModuleGraph {
                 modules.push(ResolvedModule {
                     path: self.modules[id].path.clone(),
                     file: self.modules[id].file.clone(),
+                    parent: self.modules[id]
+                        .parent
+                        .and_then(|parent| stamps.get(&parent).copied()),
                 });
             }
         }
-        crate::defaults::inject_trait_defaults(&mut items);
+        crate::defaults::inject_trait_defaults(&mut items, &trait_modules);
         crate::defaults::inherit_assoc_types(&mut items);
         crate::ResolvedProgram { items, modules }
     }

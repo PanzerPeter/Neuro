@@ -171,7 +171,7 @@ impl<'ctx> CodegenContext<'ctx> {
             }
 
             // A `pool` yields unit; its value is the arena region around the body.
-            HirExprKind::Pool { stmts, .. } => self.codegen_pool_expr(stmts),
+            HirExprKind::Pool { stmts, routed, .. } => self.codegen_pool_expr(stmts, routed),
 
             // Borrow `&place` / `&mut place`: the value of the borrow is
             // the storage pointer of the place. Every local/parameter is an alloca, so
@@ -381,6 +381,11 @@ impl<'ctx> CodegenContext<'ctx> {
                         self.codegen_tensor_bytes_intrinsic(name, args, &result)?,
                     ));
                 }
+                if super::collections::BYTE_COPIES.contains(&name.as_str())
+                    && !self.functions.contains_key(name)
+                {
+                    return self.codegen_byte_copy(name, args);
+                }
                 if CodegenContext::is_os_intrinsic(name) && !self.functions.contains_key(name) {
                     let neuro_hir::HirType::Function { ret, .. } = &callee.ty else {
                         return Err(CodegenError::InternalError(format!(
@@ -389,6 +394,11 @@ impl<'ctx> CodegenContext<'ctx> {
                     };
                     let result = Type::from_hir(ret);
                     return Ok(Some(self.codegen_os_intrinsic(name, args, &result)?));
+                }
+                if self.tracks_caller.contains(name) {
+                    let mut located = args.to_vec();
+                    located.push(self.caller_location(*span));
+                    return self.codegen_call(name, &located);
                 }
                 self.codegen_call(name, args)
             }

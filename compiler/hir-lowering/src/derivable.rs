@@ -18,6 +18,9 @@ use crate::{Lowerer, LoweringError};
 const CLONE_METHOD: &str = "clone";
 const FMT_DEBUG_METHOD: &str = "fmt_debug";
 const HASH_METHOD: &str = "hash";
+/// `PoolAware`'s methods, which a tensor answers without an `impl`.
+const REGISTER_WITH_POOL_METHOD: &str = "register_with_pool";
+const BULK_RELEASE_METHOD: &str = "bulk_release";
 const DEBUG_TRAIT: &str = "Debug";
 const CLONE_TRAIT: &str = "Clone";
 const PUSH_STR_METHOD: &str = "push_str";
@@ -71,6 +74,17 @@ impl Lowerer {
             }
             HASH_METHOD if args.is_empty() => {
                 method_call(object.clone(), HASH_METHOD, Vec::new(), HirType::U64, span)
+            }
+            // `PoolAware` on a tensor: the arena already owns, or does not own, its buffer,
+            // so registering it and releasing it in bulk both do nothing.
+            REGISTER_WITH_POOL_METHOD | BULK_RELEASE_METHOD
+                if matches!(object.ty.referent(), HirType::Tensor { .. }) =>
+            {
+                HirExpr::new(
+                    HirExprKind::Block { stmts: Vec::new() },
+                    HirType::Void,
+                    span,
+                )
             }
             FMT_DEBUG_METHOD if args.len() == 1 => {
                 self.emit_field_debug_helpers(object.ty.referent(), span);

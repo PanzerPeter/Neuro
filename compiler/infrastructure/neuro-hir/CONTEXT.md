@@ -17,6 +17,9 @@ Provide the typed High-Level IR node definitions: the stable, backend-agnostic c
   `AxisNames::{position_of, declared}`
 - Constant: `REDUCE_LANES`, the lane width that fixes a long float reduction's order for
   every backend, so the host and a GPU fold a sum identically
+- Constant: `CALLER_LOCATION_PARAM`, the name of a `@track_caller` function's hidden trailing
+  `string` parameter. Lowering adds the parameter; a call in HIR carries only the visible
+  arguments, and the backend supplies the location
 
 ## Shared Kernel
 - shared-types: `Span`, `Literal`, `FormatSpec` embedded in HIR nodes
@@ -194,11 +197,13 @@ guarantees `else_block` diverges, so a backend may terminate it with `unreachabl
 `HirStmt::Expr` wrapping it, typed `void`. Two shapes for one construct is what let a tail
 `loop` be silently compiled as a discarded value.
 
-**A pool block survives lowering.** `HirExprKind::Pool { label, stmts }` is the arena block,
+**A pool block survives lowering.** `HirExprKind::Pool { label, stmts, routed }` is the arena block,
 typed `void` whatever its body ends with. It is not desugared to a plain block because the
 region is the node: the backend needs the boundary to know which allocations it emits come
 from the arena and where the bulk release goes. `label` reaches the HIR for symmetry with the
 AST and is not read by any backend; the escape rules it names are already enforced by then.
+`routed` names the bindings a store in the body moves whole, so a backend builds a `val` of one
+of those names with the arena off: the checker lets such a `val` leave the block.
 
 **Enumerated loops are an option on the loop, not an adapter.** `HirStmt::ForRange` and
 `HirStmt::ForEach` carry `index: Option<String>`, the `u64` position binding of

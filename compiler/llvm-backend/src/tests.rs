@@ -596,8 +596,10 @@ fn a_helper_first_reached_inside_a_pool_stays_on_the_heap() {
     assert!(body.contains("@__neuro_arena_alloc("), "{body}");
 }
 
-/// The bump path takes a request only strictly below the capacity, so no pointer it
-/// returns is the chunk's limit, and only when `used + size` did not wrap.
+/// The bump path takes a request only strictly below the chunk's capacity, so no pointer
+/// it returns is the chunk's limit, and only when `used + size` did not wrap. A request
+/// the chunk cannot hold moves on to the next, reserving one twice the size when the chain
+/// ends, and a size so large that `size + align` wraps goes to the heap at once.
 #[test]
 fn the_bump_path_refuses_the_limit_and_a_wrapped_size() {
     let source = r#"
@@ -610,11 +612,47 @@ fn the_bump_path_refuses_the_limit_and_a_wrapped_size() {
     "#;
     let ir = module_ir(source, OptimizationLevelSetting::O0);
     let body = function_body(&ir, "__neuro_arena_alloc");
-    assert!(body.contains("icmp ult i64 %arena.end, 67108864"), "{body}");
+    assert!(
+        body.contains("icmp ult i64 %arena.end, %chunk.size"),
+        "{body}"
+    );
     assert!(
         body.contains("icmp uge i64 %arena.end, %arena.used"),
         "{body}"
     );
+    assert!(body.contains("icmp ult i64 %arena.need, "), "{body}");
+    assert!(body.contains("add i64 %chunk.size, %chunk.size"), "{body}");
+    assert!(
+        body.contains("call ptr @malloc(i64 %chunk.size.new)"),
+        "{body}"
+    );
+}
+
+/// A collection a `pool` body owns grows on the arena; one declared before the block grows
+/// on the heap however deep inside it the push is written.
+#[test]
+fn only_a_collection_the_block_owns_grows_on_the_arena() {
+    let source = r#"
+        func main() -> i32 {
+            mut outer: Vec<i32> = Vec::new()
+            pool {
+                mut own: Vec<i32> = Vec::new()
+                own.push(1)
+                outer.push(2)
+            }
+            return 0
+        }
+    "#;
+    let ir = module_ir(source, OptimizationLevelSetting::O0);
+    let body = function_body(&ir, "main");
+    assert!(
+        body.contains("@__neuro_vec_reserve.arena(ptr %own"),
+        "{body}"
+    );
+    assert!(body.contains("@__neuro_vec_reserve(ptr %outer"), "{body}");
+    let arena = function_body(&ir, "__neuro_arena_realloc");
+    assert!(arena.contains("@__neuro_arena_alloc("), "{arena}");
+    assert!(arena.contains("@realloc("), "{arena}");
 }
 
 /// The same allocation outside a pool stays on libc: the bump path is entered by

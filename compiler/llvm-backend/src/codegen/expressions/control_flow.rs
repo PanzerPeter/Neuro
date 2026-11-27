@@ -159,6 +159,7 @@ impl<'ctx> CodegenContext<'ctx> {
     pub(crate) fn codegen_pool_expr(
         &mut self,
         stmts: &[HirStmt],
+        routed: &[String],
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
         let mark = self.emit_arena_mark()?;
         let device_mark = match self.body_memory {
@@ -181,12 +182,14 @@ impl<'ctx> CodegenContext<'ctx> {
         self.pool_depth += 1;
         self.pool_marks.push(mark);
         self.pool_locals.push(HashSet::new());
+        self.pool_routed.push(routed.iter().cloned().collect());
         self.pool_exits.push(exit);
         // The pool's tail stays a yielded value: its arena is released below, and a value
         // the tail built there is reclaimed with it rather than by a drop.
         let result = self.codegen_block_expr(stmts, true);
         let _ = self.pool_exits.pop();
         let _ = self.pool_locals.pop();
+        let _ = self.pool_routed.pop();
         let _ = self.pool_marks.pop();
         self.pool_depth -= 1;
         result?;

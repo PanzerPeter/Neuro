@@ -518,6 +518,7 @@ impl Parser {
             return_lifetimes,
             body,
             attributes,
+            module: None,
             span: start.span.merge(end_span),
         })
     }

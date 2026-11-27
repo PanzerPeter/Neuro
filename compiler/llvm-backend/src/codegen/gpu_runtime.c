@@ -549,7 +549,8 @@ void mgpuMemcpy(void *dst, void *src, size_t size, gpu_stream stream) {
 static const char ALLOCATION_FAILED[] =
     "device memory allocation failed: no GPU is available, or it is out of memory";
 
-void *_mlir_memref_to_llvm_alloc(uint64_t size) {
+// `size` bytes from the current device's chunk, or null when they do not fit there.
+static void *arena_take(uint64_t size) {
     struct device *device = &devices[current];
     if (device->arena == NULL) {
         // A failed reservation leaves the arena empty, and every request then spills.
@@ -560,11 +561,22 @@ void *_mlir_memref_to_llvm_alloc(uint64_t size) {
     // driver's guarantee.
     uintptr_t cursor = base + device->arena_offset;
     uint64_t start = ((cursor + ARENA_ALIGN - 1) & ~(ARENA_ALIGN - 1)) - base;
-    void *buffer;
-    if (base != 0 && start <= ARENA_CAPACITY && size <= ARENA_CAPACITY - start) {
-        device->arena_offset = start + size;
-        buffer = (void *)(base + start);
-    } else {
+    if (base == 0 || start > ARENA_CAPACITY || size > ARENA_CAPACITY - start) {
+        return NULL;
+    }
+    device->arena_offset = start + size;
+    return (void *)(base + start);
+}
+
+// Whether `pointer` lies in `device`'s chunk.
+static int in_arena(int device, void *pointer) {
+    uintptr_t base = (uintptr_t)devices[device].arena;
+    return base != 0 && (uintptr_t)pointer - base < ARENA_CAPACITY;
+}
+
+void *_mlir_memref_to_llvm_alloc(uint64_t size) {
+    void *buffer = arena_take(size);
+    if (buffer == NULL) {
         buffer = mgpuMemAlloc(size, NULL, 0);
     }
     if (buffer == NULL) {
@@ -576,8 +588,7 @@ void *_mlir_memref_to_llvm_alloc(uint64_t size) {
 // Nothing for a buffer in the chunk, which a mark restore reclaims, nor for null, the
 // scratch a resident operand never took. A spilled buffer goes back to the driver.
 void _mlir_memref_to_llvm_free(void *pointer) {
-    uintptr_t base = (uintptr_t)devices[current].arena;
-    if (pointer == NULL || (base != 0 && (uintptr_t)pointer - base < ARENA_CAPACITY)) {
+    if (pointer == NULL || in_arena(current, pointer)) {
         return;
     }
     mgpuMemFree(pointer, NULL);
@@ -593,8 +604,12 @@ void __neuro_device_restore(uint64_t mark) {
     devices[current].arena_offset = mark;
 }
 
-// A device tensor's buffer is an allocation of its own rather than a piece of the device
-// arena: it lives until the tensor is dropped, which no call's mark can see.
+// A device tensor's buffer is an allocation of its own, released at its drop, unless the
+// code that builds it stands in a `pool` body and passes `pooled`: the buffer is then a
+// piece of GPU 0's arena, which the block's restore reclaims, and its drop does nothing.
+// A call's mark is taken after such a buffer, so the call's restore leaves it alone.
+// ponytail: GPU 0 only, the device a `pool` block marks; another GPU's tensor built in a
+// block still takes its own allocation until a block marks every device's arena.
 
 void __neuro_device_check(int32_t device) {
     ensure_ready_for(TRANSFER);
@@ -608,19 +623,22 @@ void __neuro_device_check(int32_t device) {
 }
 
 // On the current device.
-void *__neuro_device_alloc(uint64_t size) {
+void *__neuro_device_alloc(uint64_t size, int32_t pooled) {
     ensure_ready_for(TRANSFER);
-    void *pointer = NULL;
+    void *pointer = pooled && current == 0 ? arena_take(size == 0 ? 1 : size) : NULL;
+    if (pointer != NULL) {
+        return pointer;
+    }
     // A tensor with a zero extent still gets an address of its own.
     check(allocate(&pointer, size == 0 ? 1 : size, 0), NAME("cuMemAlloc", "hipMalloc"));
     return pointer;
 }
 
 // Waits for the copy: the caller releases the host buffer next.
-void *__neuro_device_upload(void *host, uint64_t size, int32_t device) {
+void *__neuro_device_upload(void *host, uint64_t size, int32_t device, int32_t pooled) {
     __neuro_device_check(device);
     int32_t previous = __neuro_device_switch(device);
-    void *buffer = __neuro_device_alloc(size);
+    void *buffer = __neuro_device_alloc(size, pooled);
     gpu_stream stream = mgpuStreamCreate();
     mgpuMemcpy(buffer, host, size, stream);
     mgpuStreamSynchronize(stream);
@@ -641,16 +659,20 @@ void __neuro_device_copy(void *to, void *from, uint64_t size, int32_t device) {
 
 // A new buffer on `device` holding `buffer`'s bytes. The copy is queued, not waited for:
 // only the device reads either buffer until a copy or a free drains the stream.
-void *__neuro_device_clone(void *buffer, uint64_t size, int32_t device) {
+void *__neuro_device_clone(void *buffer, uint64_t size, int32_t device, int32_t pooled) {
     int32_t previous = __neuro_device_switch(device);
-    void *copy = __neuro_device_alloc(size);
+    void *copy = __neuro_device_alloc(size, pooled);
     mgpuMemcpy(copy, buffer, size, mgpuStreamCreate());
     __neuro_device_switch(previous);
     return copy;
 }
 
-// A kernel still queued may read the buffer, so the stream drains first.
+// A kernel still queued may read the buffer, so the stream drains first. An arena buffer
+// is reclaimed by its block's restore instead.
 void __neuro_device_free(void *buffer, int32_t device) {
+    if (in_arena(device, buffer)) {
+        return;
+    }
     int32_t previous = __neuro_device_switch(device);
     mgpuStreamSynchronize(mgpuStreamCreate());
     check(release(buffer), NAME("cuMemFree", "hipFree"));
@@ -660,7 +682,8 @@ void __neuro_device_free(void *buffer, int32_t device) {
 // `buffer`, living on `from`, moved to `to`: itself when they are the same device, and
 // otherwise a copy on `to` with `buffer` released. Unified addressing lets one copy read
 // another device's memory; the driver routes it peer to peer or through the host.
-void *__neuro_device_move(void *buffer, uint64_t size, int32_t from, int32_t to) {
+void *__neuro_device_move(void *buffer, uint64_t size, int32_t from, int32_t to,
+                          int32_t pooled) {
     __neuro_device_check(to);
     if (from == to) {
         return buffer;
@@ -669,7 +692,7 @@ void *__neuro_device_move(void *buffer, uint64_t size, int32_t from, int32_t to)
     int32_t previous = __neuro_device_switch(from);
     mgpuStreamSynchronize(mgpuStreamCreate());
     __neuro_device_switch(to);
-    void *moved = __neuro_device_alloc(size);
+    void *moved = __neuro_device_alloc(size, pooled);
     gpu_stream stream = mgpuStreamCreate();
     mgpuMemcpy(moved, buffer, size, stream);
     mgpuStreamSynchronize(stream);

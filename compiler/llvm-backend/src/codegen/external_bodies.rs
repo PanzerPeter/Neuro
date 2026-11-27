@@ -406,26 +406,34 @@ impl<'ctx> CodegenContext<'ctx> {
         func_types: &HashMap<String, Type>,
     ) -> CodegenResult<()> {
         self.codegen_body_choice(func_def, (symbol, host), func_types, |this, function| {
-            let ptr_type = this.context.ptr_type(AddressSpace::default());
-            let mut resident = this.context.bool_type().const_zero();
-            for (index, param) in func_def.params.iter().enumerate() {
-                let value = function.get_nth_param(index as u32).ok_or_else(|| {
-                    CodegenError::InternalError(format!("missing parameter {index}"))
-                })?;
-                let handle = match Type::from_hir(&param.ty) {
-                    Type::Tensor { .. } => value.into_pointer_value(),
-                    Type::Reference { inner, .. } if matches!(*inner, Type::Tensor { .. }) => this
-                        .builder
-                        .build_load(ptr_type, value.into_pointer_value(), "operand.handle")?
-                        .into_pointer_value(),
-                    _ => continue,
-                };
-                let on_host = this.dlpack_on_host(handle)?;
-                let here = this.builder.build_not(on_host, "operand.resident")?;
-                resident = this.builder.build_or(resident, here, "device.chosen")?;
-            }
-            Ok(resident)
+            let values: Vec<_> = function.get_param_iter().collect();
+            this.any_operand_on_device(func_def, &values)
         })
+    }
+
+    /// Whether any tensor among `values`, the arguments of `func_def`'s parameters, lives
+    /// on a device, which is where a `FollowsOperands` call then runs.
+    pub(crate) fn any_operand_on_device(
+        &mut self,
+        func_def: &HirFunction,
+        values: &[BasicValueEnum<'ctx>],
+    ) -> CodegenResult<IntValue<'ctx>> {
+        let ptr_type = self.context.ptr_type(AddressSpace::default());
+        let mut resident = self.context.bool_type().const_zero();
+        for (param, value) in func_def.params.iter().zip(values) {
+            let handle = match Type::from_hir(&param.ty) {
+                Type::Tensor { .. } => value.into_pointer_value(),
+                Type::Reference { inner, .. } if matches!(*inner, Type::Tensor { .. }) => self
+                    .builder
+                    .build_load(ptr_type, value.into_pointer_value(), "operand.handle")?
+                    .into_pointer_value(),
+                _ => continue,
+            };
+            let on_host = self.dlpack_on_host(handle)?;
+            let here = self.builder.build_not(on_host, "operand.resident")?;
+            resident = self.builder.build_or(resident, here, "device.chosen")?;
+        }
+        Ok(resident)
     }
 
     /// Define `func_def` as a branch between two bodies of its own: the staged device one
@@ -897,7 +905,11 @@ mod tests {
             "br i1 %device.any_resident, label %device.result, label %host.result",
             0,
         );
-        let resident = position(scale, "call ptr @__neuro_device_alloc(i64 8)", choice);
+        let resident = position(
+            scale,
+            "call ptr @__neuro_device_alloc(i64 8, i32 0)",
+            choice,
+        );
         let returned = position(scale, "host.result:", resident);
         let on_device = &scale[resident..returned];
         assert!(

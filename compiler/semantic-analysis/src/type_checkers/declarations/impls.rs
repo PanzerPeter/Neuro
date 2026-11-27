@@ -665,6 +665,11 @@ impl TypeChecker {
                 _ => continue,
             };
 
+            // A trait's default body is checked as the module that wrote it.
+            let impl_module = std::mem::replace(
+                &mut self.current_module,
+                method.module.unwrap_or(def.module),
+            );
             let saved_scope =
                 self.enter_method_body(&struct_name, method, &param_types, &return_type);
             let warnings_before = self.warnings.len();
@@ -697,6 +702,7 @@ impl TypeChecker {
 
             self.drop_allowed_warnings(warnings_before, &method.attributes);
             self.leave_method_body(saved_scope);
+            self.current_module = impl_module;
         }
 
         self.self_assoc = saved_assoc;

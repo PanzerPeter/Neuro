@@ -22,6 +22,10 @@ pub(crate) fn os_intrinsic_signature(name: &str) -> Option<(Vec<Type>, Type)> {
         mutable: false,
     };
     let text_and_status = || Type::Tuple(vec![Type::String, Type::I32]);
+    let bytes = || Type::Reference {
+        inner: Box::new(Type::Slice(Box::new(Type::U8))),
+        mutable: false,
+    };
     let signature = match name {
         "__read_text" | "__remove_file" | "__env_var" => (vec![text()], text_and_status()),
         "__read_bytes" => (
@@ -47,6 +51,25 @@ pub(crate) fn os_intrinsic_signature(name: &str) -> Option<(Vec<Type>, Type)> {
             text_and_status(),
         ),
         "__read_line" => (vec![], text_and_status()),
+        // Byte copies the backend emits inline: a run of bytes or a text's bytes appended in
+        // one copy, and a run the caller has checked is UTF-8 copied out as text.
+        "__extend_bytes" | "__extend_text" => (
+            vec![
+                Type::Reference {
+                    inner: Box::new(Type::Collection {
+                        kind: CollectionKind::Vec,
+                        args: vec![Type::U8],
+                    }),
+                    mutable: true,
+                },
+                match name {
+                    "__extend_text" => text(),
+                    _ => bytes(),
+                },
+            ],
+            Type::Void,
+        ),
+        "__utf8_text" => (vec![bytes()], Type::String),
         "__arg_count" | "__monotonic_nanos" => (vec![], Type::U64),
         "__arg" => (vec![Type::U64], Type::String),
         _ => return None,
@@ -107,6 +130,9 @@ mod tests {
             "__arg_count",
             "__arg",
             "__monotonic_nanos",
+            "__extend_bytes",
+            "__extend_text",
+            "__utf8_text",
         ] {
             assert!(os_intrinsic_signature(name).is_some(), "{name}");
             assert!(name.contains("__"), "{name} could be declared by a program");

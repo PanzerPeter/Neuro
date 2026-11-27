@@ -16,6 +16,8 @@ use crate::types::Type;
 
 /// The shared capacity-growth helper: `__neuro_vec_reserve(header, elem_size)`.
 const RESERVE_HELPER: &str = "__neuro_vec_reserve";
+/// The same helper for a collection a `pool` body owns, growing on the arena.
+const ARENA_RESERVE_HELPER: &str = "__neuro_vec_reserve.arena";
 
 /// The drop-scope name of the header a consuming loop takes over. It contains `__`, which
 /// semantic analysis rejects in any declared name, so no move site can reach the entry.
@@ -51,6 +53,118 @@ impl<'ctx> CodegenContext<'ctx> {
             "vec.len1",
         )?;
         self.store_header_field(header, FIELD_LEN, next)?;
+        Ok(())
+    }
+
+    /// One of [`super::BYTE_COPIES`]. Only `__utf8_text` has a value.
+    pub(crate) fn codegen_byte_copy(
+        &mut self,
+        name: &str,
+        args: &[HirExpr],
+    ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
+        let run = |this: &mut Self,
+                   arg: &HirExpr|
+         -> CodegenResult<(PointerValue<'ctx>, IntValue<'ctx>)> {
+            let BasicValueEnum::StructValue(fat) = this.codegen_expr(arg)? else {
+                return Err(CodegenError::InternalError(format!(
+                    "`{name}` was not handed a slice or a text"
+                )));
+            };
+            let data = this
+                .builder
+                .build_extract_value(fat, 0, "copy.src")?
+                .into_pointer_value();
+            let count = match Type::from_hir(&arg.ty).referent() {
+                Type::String => this.string_len(fat)?,
+                _ => this
+                    .builder
+                    .build_extract_value(fat, 1, "copy.n")?
+                    .into_int_value(),
+            };
+            Ok((data, count))
+        };
+        match args {
+            [bytes] if name == "__utf8_text" => {
+                let (source, count) = run(self, bytes)?;
+                let alloc = self.alloc_fn()?;
+                let buffer = self
+                    .builder
+                    .build_call(alloc, &[count.into()], "text.buf")?
+                    .try_as_basic_value()
+                    .basic()
+                    .ok_or_else(|| CodegenError::InternalError("malloc returned void".into()))?
+                    .into_pointer_value();
+                self.build_memcpy_call(buffer, source, count)?;
+                Ok(Some(self.build_owned_string_value(buffer, count)?))
+            }
+            [bytes, more] => {
+                let header = self.codegen_expr(bytes)?.into_pointer_value();
+                let (source, count) = run(self, more)?;
+                self.emit_extend(header, source, count)?;
+                Ok(None)
+            }
+            _ => Err(CodegenError::InternalError(format!(
+                "`{name}` was handed {} arguments",
+                args.len()
+            ))),
+        }
+    }
+
+    /// `count` bytes at `source` appended to the `Vec<u8>` at `header` in one copy, its
+    /// buffer grown once to `max(len + count, cap * 2)` when they do not fit.
+    fn emit_extend(
+        &mut self,
+        header: PointerValue<'ctx>,
+        source: PointerValue<'ctx>,
+        count: IntValue<'ctx>,
+    ) -> CodegenResult<()> {
+        let function = self
+            .current_function
+            .ok_or_else(|| CodegenError::InternalError("a byte copy outside a function".into()))?;
+        let len = self.load_header_field(header, FIELD_LEN, "extend.len")?;
+        let cap = self.load_header_field(header, FIELD_CAP, "extend.cap")?;
+        let need = self.builder.build_int_add(len, count, "extend.need")?;
+        let short = self
+            .builder
+            .build_int_compare(IntPredicate::UGT, need, cap, "extend.short")?;
+        let grow = self.context.append_basic_block(function, "extend.grow");
+        let copy = self.context.append_basic_block(function, "extend.copy");
+        self.builder.build_conditional_branch(short, grow, copy)?;
+
+        self.builder.position_at_end(grow);
+        let i64_type = self.context.i64_type();
+        let doubled =
+            self.builder
+                .build_int_mul(cap, i64_type.const_int(2, false), "extend.double")?;
+        let roomy =
+            self.builder
+                .build_int_compare(IntPredicate::UGT, doubled, need, "extend.roomy")?;
+        let new_cap = self
+            .builder
+            .build_select(roomy, doubled, need, "extend.cap.new")?
+            .into_int_value();
+        let realloc = self.growth_realloc_fn(self.grows_in_arena(header))?;
+        let old = self.load_header_buffer(header)?;
+        let grown = self
+            .builder
+            .build_call(
+                realloc,
+                &[old.into(), cap.into(), new_cap.into()],
+                "extend.buf",
+            )?
+            .try_as_basic_value()
+            .basic()
+            .ok_or_else(|| CodegenError::InternalError("realloc returned void".into()))?
+            .into_pointer_value();
+        self.store_header_buffer(header, grown)?;
+        self.store_header_field(header, FIELD_CAP, new_cap)?;
+        self.builder.build_unconditional_branch(copy)?;
+
+        self.builder.position_at_end(copy);
+        let buffer = self.load_header_buffer(header)?;
+        let end = self.byte_offset(buffer, len, "extend.end")?;
+        self.build_memcpy_call(end, source, count)?;
+        self.store_header_field(header, FIELD_LEN, need)?;
         Ok(())
     }
 
@@ -542,7 +656,7 @@ impl<'ctx> CodegenContext<'ctx> {
     ) -> CodegenResult<()> {
         let elem_llvm = self.collection_value_type(element_ty)?;
         let stride = self.size_of_type(elem_llvm)?;
-        let reserve = self.build_reserve_helper()?;
+        let reserve = self.build_reserve_helper(self.grows_in_arena(header))?;
         self.builder
             .build_call(reserve, &[header.into(), stride.into()], "")?;
         Ok(())
@@ -552,8 +666,11 @@ impl<'ctx> CodegenContext<'ctx> {
     /// reallocate to `max(INITIAL, cap * 2)` elements and record the new capacity.
     ///
     /// Byte-sized rather than element-typed, so every `Vec<T>` in the module shares it.
+    /// `in_arena` picks the variant growing on the arena, for a collection a `pool` body
+    /// owns ([`Self::grows_in_arena`]).
     pub(super) fn build_reserve_helper(
         &mut self,
+        in_arena: bool,
     ) -> CodegenResult<inkwell::values::FunctionValue<'ctx>> {
         let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
         let i64_ty = self.context.i64_type();
@@ -561,8 +678,13 @@ impl<'ctx> CodegenContext<'ctx> {
             .context
             .void_type()
             .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+        let realloc = self.growth_realloc_fn(in_arena)?;
+        let name = match in_arena {
+            true => ARENA_RESERVE_HELPER,
+            false => RESERVE_HELPER,
+        };
 
-        self.get_or_build_helper(RESERVE_HELPER, fn_type, |ctx, func| {
+        self.get_or_build_helper(name, fn_type, |ctx, func| {
             let entry = ctx.context.append_basic_block(func, "entry");
             let grow_bb = ctx.context.append_basic_block(func, "grow");
             let done_bb = ctx.context.append_basic_block(func, "done");
@@ -600,10 +722,14 @@ impl<'ctx> CodegenContext<'ctx> {
             let bytes = ctx.builder.build_int_mul(new_cap, stride, "new.bytes")?;
 
             let old = ctx.load_header_buffer(header)?;
-            let realloc = ctx.get_or_declare_realloc();
+            let old_bytes = ctx.builder.build_int_mul(cap, stride, "old.bytes")?;
             let grown = ctx
                 .builder
-                .build_call(realloc, &[old.into(), bytes.into()], "grown")?
+                .build_call(
+                    realloc,
+                    &[old.into(), old_bytes.into(), bytes.into()],
+                    "grown",
+                )?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| CodegenError::InternalError("realloc returned void".into()))?

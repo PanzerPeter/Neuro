@@ -285,6 +285,156 @@ func main() -> i32 {
     }
 }
 
+/// In a program that transfers, a host operation inside a `pool` body still allocates its
+/// result from the arena: the call branches on where its operands live and computes the
+/// host body in place, where a call into the operation would allocate on the heap.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_host_operation_in_a_pool_allocates_from_the_arena() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    val a: Tensor<f32, [256, 256]> = Tensor::ones()
+    val b = a.to(Device::CPU)
+    mut total: f32 = 0.0f32
+    pool {
+        mut i = 0
+        while i < 50 {
+            val c = &b + &b
+            total = total + c[1, 1]
+            i += 1
+        }
+    }
+    println("{total}")
+    return 0
+}
+"#;
+    let test = CompileTest::new();
+    for hide_devices in [false, true] {
+        assert_ran(&run(&test, "pooled.nr", SOURCE, hide_devices), 0, "100.0\n");
+    }
+    let source = test.write_source("pooled_ir.nr", SOURCE);
+    let ir_path = source.with_extension("ll");
+    let output = Command::new(env!("CARGO_BIN_EXE_neuroc"))
+        .args(["compile", "--emit", "llvm-ir", "-o"])
+        .arg(&ir_path)
+        .arg(&source)
+        .output()
+        .expect("neuroc runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ir = std::fs::read_to_string(&ir_path).expect("the IR is written");
+    let main = ir
+        .split("define i32 @main(")
+        .nth(1)
+        .and_then(|body| body.split("\n}\n").next())
+        .expect("main is defined");
+    assert!(main.contains("@__neuro_arena_aligned_alloc("), "{main}");
+}
+
+/// A device operation inside a `pool` body still runs on the device, beside a host one
+/// computed in place, and neither leaks.
+#[cfg(target_os = "linux")]
+#[test]
+fn device_and_host_operations_share_a_pool() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    val a = Tensor::<f32, [64, 64]>::ones()
+    val g = a.clone().to(Device::GPU(0))
+    mut host: f32 = 0.0f32
+    mut device: f32 = 0.0f32
+    pool {
+        mut i = 0
+        while i < 200 {
+            val h = &a + &a
+            host = host + h[1, 1]
+            val d = &g + &g
+            val back = d.to(Device::CPU)
+            device = device + back[2, 2]
+            i += 1
+        }
+    }
+    println("{host} {device}")
+    return 0
+}
+"#;
+    let test = CompileTest::new();
+    let output = run(&test, "shared_pool.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    assert_ran(&output, 0, "400.0 400.0\n");
+}
+
+/// A transfer or clone written in a `pool` body takes its device buffer from the device
+/// arena, which the block's restore reclaims, while a transfer stored past the block keeps a
+/// buffer of its own: the second block's transfers reuse the arena, and `keep` still reads
+/// back its sevens.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_device_buffer_built_in_a_pool_comes_from_the_device_arena() {
+    const SOURCE: &str = r#"
+func main() -> i32 {
+    mut keep = Tensor::<f32, [1024]>::zeros().to(Device::GPU(0))
+    pool {
+        keep = (Tensor::<f32, [1024]>::ones() * 7.0f32).to(Device::GPU(0))
+    }
+    mut sum: f32 = 0.0f32
+    pool {
+        mut i = 0
+        while i < 300 {
+            val filler = Tensor::<f32, [1024, 64]>::ones().to(Device::GPU(0))
+            val twin = filler.clone()
+            val back = twin.to(Device::CPU)
+            sum = sum + back[3, 3]
+            i += 1
+        }
+    }
+    val k = keep.to(Device::CPU)
+    println("{k[0]} {k[1023]} {sum}")
+    return 0
+}
+"#;
+    let test = CompileTest::new();
+    let source = test.write_source("device_pool_ir.nr", SOURCE);
+    let ir_path = source.with_extension("ll");
+    let output = Command::new(env!("CARGO_BIN_EXE_neuroc"))
+        .args(["compile", "--emit", "llvm-ir", "-o"])
+        .arg(&ir_path)
+        .arg(&source)
+        .output()
+        .expect("neuroc runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let ir = std::fs::read_to_string(&ir_path).expect("the IR is written");
+    for (call, pooled) in [
+        ("@__neuro_device_upload(", "i64 262144, i32 %"),
+        ("@__neuro_device_clone(", "i64 262144, i32 %"),
+        ("@__neuro_device_upload(", "i64 4096, i32 %"),
+    ] {
+        let line = ir
+            .lines()
+            .find(|line| line.contains(&format!("call ptr {call}")) && line.contains(pooled))
+            .unwrap_or_else(|| panic!("no {call} {pooled}"));
+        let flag = if pooled.contains("262144") {
+            "i32 1)"
+        } else {
+            "i32 0)"
+        };
+        assert!(line.ends_with(flag), "{line}");
+    }
+    let output = run(&test, "device_pool.nr", SOURCE, false);
+    if without_gpu(&output) {
+        return;
+    }
+    assert_ran(&output, 0, "7.0 7.0 300.0\n");
+}
+
 /// Integer tensors take the device forms float ones do, checks included: operators, `@`,
 /// reductions, a sort, `einsum`, a traversal whose closure does integer arithmetic and a
 /// compound assignment give the host's answers at both tiers. A mismatch count of zero.

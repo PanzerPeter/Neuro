@@ -1,5 +1,5 @@
 // The host's sort for an integer run at least `RADIX_BUCKETS` long: LSD radix, one byte a
-// pass, in `scf.for` loops over buffers. A pass counts each digit, turns the counts into
+// pass, in `scf.for` loops over buffers, inside `host.rs`'s loop over runs. A pass counts each digit, turns the counts into
 // first slots, then places every position at its digit's next slot in run order, which is
 // what keeps it stable. Flipping the sign bit turns a signed order into an unsigned one, and
 // flipping every bit reverses it for `descending`, equal keys still in run order.
@@ -8,7 +8,7 @@
 // host against device memory, and a radix pass written in `linalg` would need a scan and a
 // scatter.
 
-use super::{RADIX_BUCKETS, Runs, order_type, read, repeat, scf_yield};
+use super::{RADIX_BUCKETS, Runs, read, repeat, scf_yield};
 use crate::{
     errors::MlirError,
     guards::Element,
@@ -19,9 +19,8 @@ use melior::{
     Context,
     dialect::{arith, memref},
     ir::{
-        Attribute, Block, BlockLike, Identifier, Location, Type, Value,
+        Block, BlockLike, Location, Type, Value,
         attribute::IntegerAttribute,
-        operation::OperationBuilder,
         r#type::{IntegerType, MemRefType},
     },
 };
@@ -29,80 +28,54 @@ use melior::{
 /// The bits of one radix digit, the ones [`RADIX_BUCKETS`] counts.
 const DIGIT_BITS: u32 = 8;
 
-/// The stable order of every run by LSD radix, one [`DIGIT_BITS`] digit of the `bits`-wide
-/// key a pass, built in two order buffers the passes write in turn.
-///
-/// The loops work on `memref`s and hand the result over as a tensor only at the end: as
-/// tensor values carried through the loops, one-shot bufferization's analysis grows
-/// exponentially with the passes, minutes for the eight of a 64-bit key.
-pub(super) fn radix_order<'c, 'a>(
+/// The counts buffer every radix pass tallies its digits in, allocated once in `block`.
+pub(super) fn radix_counts<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
-    runs: &Runs<'c, 'a, '_>,
-    extents: &[usize],
-    bits: u32,
 ) -> Result<Value<'c, 'a>, MlirError> {
-    let index = Type::index(context);
-    let shape: Vec<i64> = extents.iter().map(|&extent| extent as i64).collect();
-    let length = extents[runs.axis];
-    let order_shape: Vec<Option<usize>> = extents.iter().map(|&extent| Some(extent)).collect();
-    let buffer_type = MemRefType::new(index, &shape, None, None);
-    let counts_type = MemRefType::new(index, &[RADIX_BUCKETS as i64], None, None);
-    let allocate = |ty| append(block, memref::alloc(context, ty, &[], &[], None, location));
-    let orders = [allocate(buffer_type)?, allocate(buffer_type)?];
-    let counts = allocate(counts_type)?;
-    let passes = (bits / DIGIT_BITS) as usize;
-    let run_count = extents.iter().product::<usize>() / length;
-
-    let body = Block::new(&[(index, location)]);
-    {
-        let run: Value = body.argument(0)?.into();
-        let at = run_coordinates(context, location, &body, runs, extents, run)?;
-        let radix = Radix {
-            context,
-            location,
-            runs,
-            length,
-            at: &at,
-            counts,
-            bits,
-        };
-        let mut previous = None;
-        for (pass, &order) in orders.iter().cycle().take(passes).enumerate() {
-            radix.clear(&body)?;
-            radix.tally(&body, previous, pass)?;
-            radix.firsts(&body)?;
-            radix.place(&body, order, previous, pass)?;
-            previous = Some(order);
-        }
-        scf_yield(&body, location, &[])?;
-    }
-    radix_loop(context, location, block, run_count, &[], body)?;
+    let counts_type = MemRefType::new(Type::index(context), &[RADIX_BUCKETS as i64], None, None);
     append(
         block,
-        OperationBuilder::new("bufferization.to_tensor", location)
-            .add_operands(&[orders[(passes - 1) % 2]])
-            .add_attributes(&[(
-                Identifier::new(context, "restrict"),
-                Attribute::unit(context),
-            )])
-            .add_results(&[order_type(context, &order_shape)])
-            .build()?,
+        memref::alloc(context, counts_type, &[], &[], None, location),
     )
+}
+
+/// Sort the run at `at` by LSD radix, one [`DIGIT_BITS`] digit of the `bits`-wide key a
+/// pass, its passes writing `out` and `scratch` in turn so the last one writes `out`.
+pub(super) fn radix_run<'c>(
+    radix: &Radix<'c, '_, '_>,
+    body: &Block<'c>,
+    out: Value<'c, '_>,
+    scratch: Value<'c, '_>,
+) -> Result<(), MlirError> {
+    let passes = (radix.bits / DIGIT_BITS) as usize;
+    let orders = match passes % 2 {
+        1 => [out, scratch],
+        _ => [scratch, out],
+    };
+    let mut previous = None;
+    for (pass, &order) in orders.iter().cycle().take(passes).enumerate() {
+        radix.clear(body)?;
+        radix.tally(body, previous, pass)?;
+        radix.firsts(body)?;
+        radix.place(body, order, previous, pass)?;
+        previous = Some(order);
+    }
+    Ok(())
 }
 
 /// The radix sort's loops over one run, whose coordinates are `at`, counting digits in
 /// `counts`.
-struct Radix<'c, 'v, 'r> {
-    context: &'c Context,
-    location: Location<'c>,
-    runs: &'r Runs<'c, 'v, 'r>,
+pub(super) struct Radix<'c, 'v, 'r> {
+    pub(super) context: &'c Context,
+    pub(super) location: Location<'c>,
+    pub(super) runs: &'r Runs<'c, 'v, 'r>,
     /// The length of one run, which every pass counts its positions by.
-    length: usize,
-    at: &'r [Value<'c, 'v>],
-    counts: Value<'c, 'v>,
-    bits: u32,
+    pub(super) length: Value<'c, 'v>,
+    pub(super) at: &'r [Value<'c, 'v>],
+    pub(super) counts: Value<'c, 'v>,
+    pub(super) bits: u32,
 }
 
 impl<'c> Radix<'c, '_, '_> {
@@ -116,7 +89,7 @@ impl<'c> Radix<'c, '_, '_> {
             step.append_operation(memref::store(zero, self.counts, &[digit], self.location));
             scf_yield(&step, self.location, &[])?;
         }
-        radix_loop(self.context, self.location, block, RADIX_BUCKETS, &[], step)?;
+        radix_loop(self.context, self.location, block, None, &[], step)?;
         Ok(())
     }
 
@@ -140,7 +113,7 @@ impl<'c> Radix<'c, '_, '_> {
             step.append_operation(memref::store(count, self.counts, &[digit], location));
             scf_yield(&step, location, &[])?;
         }
-        radix_loop(self.context, location, block, self.length, &[], step)?;
+        radix_loop(self.context, location, block, Some(self.length), &[], step)?;
         Ok(())
     }
 
@@ -158,7 +131,7 @@ impl<'c> Radix<'c, '_, '_> {
             scf_yield(&step, location, &[total])?;
         }
         let zero = index_constant(self.context, location, block, 0)?;
-        radix_loop(self.context, location, block, RADIX_BUCKETS, &[zero], step)?;
+        radix_loop(self.context, location, block, None, &[zero], step)?;
         Ok(())
     }
 
@@ -186,7 +159,7 @@ impl<'c> Radix<'c, '_, '_> {
             step.append_operation(memref::store(next, self.counts, &[digit], location));
             scf_yield(&step, location, &[])?;
         }
-        radix_loop(self.context, location, block, self.length, &[], step)?;
+        radix_loop(self.context, location, block, Some(self.length), &[], step)?;
         Ok(())
     }
 
@@ -260,43 +233,21 @@ impl<'c> Radix<'c, '_, '_> {
     }
 }
 
-/// An `scf.for` over `0..count` in `block`, carrying `initial` through `step`.
+/// An `scf.for` over `0..count` in `block`, carrying `initial` through `step`: `count` is a
+/// run's length, or [`RADIX_BUCKETS`] when `None`.
 fn radix_loop<'c, 'a>(
     context: &'c Context,
     location: Location<'c>,
     block: &'a Block<'c>,
-    count: usize,
+    count: Option<Value<'c, '_>>,
     initial: &[Value<'c, '_>],
     step: Block<'c>,
 ) -> Result<Vec<Value<'c, 'a>>, MlirError> {
     let zero = index_constant(context, location, block, 0)?;
     let one = index_constant(context, location, block, 1)?;
-    let count = index_constant(context, location, block, count)?;
+    let count = match count {
+        Some(count) => count,
+        None => index_constant(context, location, block, RADIX_BUCKETS)?,
+    };
     repeat(location, block, (zero, count, one), initial, step)
-}
-
-/// The coordinates of run number `run`, counted row-major over every axis but the sorted
-/// one, which holds 0.
-fn run_coordinates<'c, 'a>(
-    context: &'c Context,
-    location: Location<'c>,
-    block: &'a Block<'c>,
-    runs: &Runs<'c, '_, '_>,
-    extents: &[usize],
-    run: Value<'c, 'a>,
-) -> Result<Vec<Value<'c, 'a>>, MlirError> {
-    let constant = |value| index_constant(context, location, block, value);
-    let mut stride: usize = extents.iter().product::<usize>() / extents[runs.axis];
-    let mut at = Vec::with_capacity(extents.len());
-    for (axis, &extent) in extents.iter().enumerate() {
-        if axis == runs.axis {
-            at.push(constant(0)?);
-            continue;
-        }
-        stride /= extent;
-        let mut coordinate = append(block, arith::divui(run, constant(stride)?, location))?;
-        coordinate = append(block, arith::remui(coordinate, constant(extent)?, location))?;
-        at.push(coordinate);
-    }
-    Ok(at)
 }

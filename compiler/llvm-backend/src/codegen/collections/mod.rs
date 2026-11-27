@@ -28,6 +28,11 @@ use crate::types::{CollectionKind, Type};
 
 /// Header field indices. The four fields are described on
 /// [`crate::type_mapping::TypeMapper::collection_header_type`].
+/// The library's inline byte copies: `__extend_bytes(bytes: &mut Vec<u8>, more: &[u8])` and
+/// `__extend_text(bytes: &mut Vec<u8>, text: &string)` append in one copy, and
+/// `__utf8_text(run: &[u8]) -> string` copies a run the caller checked is UTF-8 out as text.
+pub(crate) const BYTE_COPIES: [&str; 3] = ["__extend_bytes", "__extend_text", "__utf8_text"];
+
 pub(super) const FIELD_BUFFER: u32 = 0;
 pub(super) const FIELD_LEN: u32 = 1;
 pub(super) const FIELD_CAP: u32 = 2;

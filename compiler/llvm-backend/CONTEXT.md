@@ -44,6 +44,15 @@ to render `file:line:col` in panic-family runtime diagnostics: a span resolves t
 falls in, a module's or the prelude's. The column counts characters, as `neuroc`'s compile-time
 diagnostics do. It affects nothing else.
 
+`@track_caller` needs no table of its own: a function whose last HIR parameter is
+`neuro_hir::CALLER_LOCATION_PARAM` is recorded in `tracks_caller` at declaration, and
+`codegen_call_dispatch` appends `caller_location(span)` to every direct call of one: the rendered
+` at file:line:col` of the call as a static `string`, or, inside another such function, its own
+parameter passed on. A panic-family builtin emitted while that parameter is a live variable
+(`codegen_located_panic_builtin`) prints it through `emit_outlined_located_panic`, one cold thunk
+per prefix taking the message and the location as `(ptr, len)` pairs. A closure body is its own
+function and never sees the parameter.
+
 `optimization` selects two independent things. It picks the `TargetMachine`'s level, which
 governs instruction selection and register allocation; and it picks the LLVM IR pass
 pipeline (`default<O1>` / `default<O2>` / `default<O3>`) run over the verified module before
@@ -189,7 +198,10 @@ host body and no device one (`HirTarget::HostOperation`, or a `FollowsOperands` 
 no device body) is expanded where it is made: `build_module` records it in `expanded_calls`,
 skips its definition, and `codegen_call` hands the evaluated arguments to `emit_external_call`.
 The result is then the caller's own allocation, so a `pool` body keeps its arena, which an
-allocation inside a callee never reaches.
+allocation inside a callee never reaches. A `FollowsOperands` function with both bodies is kept and
+recorded in `residency_calls`: `codegen_residency_call` branches on `any_operand_on_device` at the
+call, calls the function on the device branch and expands the host body on the other, the two
+results meeting in a phi. A call handed a function value keeps the plain call.
 
 `ExternalBodies::memory` (`BodyMemory`) says where a symbol's buffers must live, and
 `codegen_external_body` takes it per function. `Host` passes
@@ -271,6 +283,13 @@ in (a device tensor through `device_download`, chosen by `split_on_home`) and re
 The library has checked the length and the rank, and every target is little-endian as the format
 is.
 
+**Byte copies.** Three more library intrinsics that the same tables type (`BYTE_COPIES`), emitted
+inline by `codegen_byte_copy` in `collections/vectors.rs` rather than as runtime calls:
+`__extend_bytes(&mut Vec<u8>, &[u8])` and `__extend_text(&mut Vec<u8>, &string)` grow the vector
+once to `max(len + n, 2 * cap)` through `growth_realloc_fn` and `memcpy` the run in, and
+`__utf8_text(&[u8]) -> string` copies a run the caller has checked is UTF-8 into an owned string.
+`std::safetensors` assembles a file and decodes header names with them.
+
 **The GPU runtime.** A module that defines `__neuro_gpu_panic` links `codegen/gpu_runtime.ll`
 for `GpuVendor::Nvidia` or `codegen/gpu_runtime_hip.ll` for `GpuVendor::Amd`
 (`link_gpu_runtime`): one with any `Device` bodies defines it before the first function, and a
@@ -299,7 +318,11 @@ loaded module per device: device 0's is loaded by the startup constructor, anoth
 that name none (the launchers', the arena's) act on it; device 0 is current except inside a
 staged call or a transfer, and each switches back. The device-tensor calls take the device a
 buffer is on, read from the handle's DLPack `device` field. `__neuro_device_check` refuses an
-index at or past the device count. The runtime assumes one thread, since a context is current per
+index at or past the device count. `_alloc`, `_upload`, `_clone` and `_move` take a trailing `i32
+pooled`, which `device_pooled` sets where `allocating_in_pool_body` holds in a program whose `pool`
+blocks restore the device arena: the buffer then comes from GPU 0's arena (another GPU's still
+takes its own), `__neuro_device_free` does nothing for an arena buffer, and a routed store, emitted
+with `pool_depth` 0, passes 0. The runtime assumes one thread, since a context is current per
 thread. The executable needs `dlopen`, which `neuroc` links `-ldl` for.
 
 **`@gpu(fallback: true)`.** A `Device` body whose `HirFunction::target` is `GpuOrHost` goes
@@ -1557,12 +1580,17 @@ wrote into the old buffer and lost the write. This is the assignment rule "the n
 applied to the address as much as to the displaced value.
 
 ## Pool Arena ABI
-`arena.rs` carries the allocator behind `pool { }`: two internal globals,
-`__neuro_arena_base` (the chunk, `malloc`ed lazily on the first `pool` a run reaches) and
-`__neuro_arena_offset` (the first free byte in it). `codegen_pool_expr` calls
-`__neuro_arena_mark` to read the offset, emits the body, and calls `__neuro_arena_release` with
-that mark, which is the whole bulk free. Nesting needs nothing more: an inner block's mark is a
-larger offset. A body that cannot fall through (a panic) gets no release, since the process is
+`arena.rs` carries the allocator behind `pool { }`: a chain of chunks in internal globals,
+`__neuro_arena_chunks` / `__neuro_arena_sizes` (fixed tables of `ARENA_MAX_CHUNKS` bases and
+sizes), `__neuro_arena_count` (chunks reserved), `__neuro_arena_chunk` (the one the bump pointer
+is in) and `__neuro_arena_offset` (its first free byte). The first chunk, `ARENA_FIRST_CHUNK`, is
+`malloc`ed on the first `pool` a run reaches. A request the current chunk cannot hold moves to
+the next, reusing a reserved one from its start or reserving one at least twice the size and
+big enough for the request; past the last chunk, or when `malloc` fails, it goes to the heap.
+`codegen_pool_expr` calls `__neuro_arena_mark` to read the position (chunk index above
+`MARK_OFFSET_BITS` of offset), emits the body, and calls `__neuro_arena_release` with that mark,
+which is the whole bulk free; chunks past it stay reserved for reuse. Nesting needs nothing
+more: an inner block's mark is a later position. A body that cannot fall through (a panic) gets no release, since the process is
 leaving anyway.
 
 **Which allocations the arena captures is decided at compile time, by `pool_depth`.** Every
@@ -1594,20 +1622,28 @@ write, whose referent belongs to whoever handed the reference over; a binding of
 pool, whose own arena outlives this block's release; and any binding the set happens to miss,
 which costs the arena's speed on that store and never its safety. `semantic-analysis` rejects
 the stores routing cannot save (a value that already holds arena memory when the statement
-starts) so the two sides meet at the same line.
+starts) so the two sides meet at the same line. The one value a block allocates before the
+store and may still give away is a `val` named in the `HirExprKind::Pool::routed` it entered
+(`pool_routed`): `codegen_var_decl` emits such an initializer at `pool_depth` zero unless the
+binding is pool-registered, so a later `out = name` moves heap memory.
 
 **Every release goes through a wrapper**, `__neuro_release` and `__neuro_aligned_release`
 (`release_fn` / `aligned_release_fn`), which return without calling libc when the pointer lies
-inside the chunk. Arena memory is reclaimed by the mark restore, and handing it to `free` would
+inside a reserved chunk (`__neuro_arena_owns`, a walk over the chunk table that ends at once
+while none is reserved). Arena memory is reclaimed by the mark restore, and handing it to `free` would
 corrupt the heap. The wrapper is unconditional rather than pool-dependent because a buffer
 allocated inside a pool can be released anywhere, including in a function emitted earlier; only
 the pointer says which allocator owns it. In a program with no `pool` nothing ever stores a
 non-null base, so the optimizer folds the check away (not at `-O0`).
 
 The two libc pairs stay distinct through the wrappers, since `free` cannot release an
-over-aligned block on Windows. `realloc` is NOT wrapped and needs no arena path: the only
-buffers it grows (a `Vec`'s and a `StringBuilder`'s) are produced by `realloc` from a null
-pointer, so they never come from the arena at all. A map's table takes libc `malloc` directly:
+over-aligned block on Windows. A growable buffer (a `Vec`'s, a `BTreeMap`'s slots, a
+`StringBuilder`'s) grows through `growth_realloc_fn(in_arena)`, `(ptr, old_bytes, new_bytes)`:
+`__neuro_arena_realloc` for a collection whose header is a binding of the innermost `pool` body
+(`grows_in_arena`, the `.arena` reserve helpers; a `HashMap` table is allocated from `alloc_fn` on the same test), which extends the last allocation in place or
+copies into a fresh block, and `__neuro_realloc` for every other, which copies an arena buffer out
+to `malloc` and hands a heap one to libc `realloc`. A buffer moves with its value, so each takes
+either kind. A map's table takes libc `malloc` directly:
 it belongs to the map, which may outlive the block that grows it (BUG-045). The growth path frees
 the old table through the wrapper.
 
@@ -1709,7 +1745,8 @@ compile-time constant the optimizer can fold away, and so are `remove(i)` (a `me
 tail) and `swap_remove(i)` (the last element moved in). `pop`, `get`, `get_mut`, a map's `remove`
 and `insert` build their `Option` with `codegen_enum_value`; the insert helper returns whether it
 displaced and writes the displaced value through an out-pointer. `Vec::with_capacity(n)`
-(`CollectionNew { capacity }`) `realloc`s the buffer up front, so growth stays on libc.
+(`CollectionNew { capacity }`) allocates the buffer up front through `alloc_fn`, on the arena
+inside a `pool` body like any other allocation written there.
 
 **A consuming `for` over a `Vec`** whose elements own something takes the header into a
 loop-owned copy (`take_vec_for_loop`), zeroes the owner's so its own drop frees nothing, and

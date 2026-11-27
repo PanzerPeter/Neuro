@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use ast_types::{GenericArg, ImplDef, Item, MethodDef, TraitMethod, Type};
+use ast_types::{GenericArg, ImplDef, Item, MethodDef, ModuleId, TraitMethod, Type};
 use shared_types::Identifier;
 
 /// Copy each bodied trait method into every `impl Trait for Type` that does not write it.
@@ -16,7 +16,10 @@ use shared_types::Identifier;
 /// trait's module meant. A method the impl writes itself overrides the default. The parser
 /// leaves to this pass the defaults whose type parameters share a name with the impl's,
 /// which are copied here with those parameters renamed.
-pub(crate) fn inject_trait_defaults(items: &mut [Item]) {
+///
+/// The copy is checked as the trait's module (`trait_modules`, by canonical name), since a
+/// field it reads or a struct it builds was written there.
+pub(crate) fn inject_trait_defaults(items: &mut [Item], trait_modules: &HashMap<String, ModuleId>) {
     let mut defaults: HashMap<String, Vec<TraitMethod>> = HashMap::new();
     for item in items.iter() {
         if let Item::Trait(def) = item {
@@ -33,10 +36,10 @@ pub(crate) fn inject_trait_defaults(items: &mut [Item]) {
     }
     for item in items.iter_mut() {
         let Item::Impl(imp) = item else { continue };
-        let Some(trait_defaults) = imp
+        let Some((trait_name, trait_defaults)) = imp
             .trait_name
-            .as_ref()
-            .and_then(|name| defaults.get(&name.name))
+            .clone()
+            .and_then(|name| defaults.get(&name.name).map(|found| (name, found)))
         else {
             continue;
         };
@@ -58,6 +61,7 @@ pub(crate) fn inject_trait_defaults(items: &mut [Item]) {
                 return_lifetimes: 0,
                 body: body.clone(),
                 attributes: Vec::new(),
+                module: trait_modules.get(&trait_name.name).copied(),
                 span: method.span,
             };
             // `func f<T>` provided to `impl<T> Tr for C<T>`: the method's `T` is renamed so

@@ -790,6 +790,11 @@ impl TypeChecker {
                     });
                 }
                 let init_errored = self.errors.len() > errors_before;
+                // Read before the binding exists, while the initializer's names mean what
+                // it reads.
+                let init_routable = init
+                    .as_ref()
+                    .is_some_and(|init| self.routable_initializer(init));
                 // The annotation is the binding site of the dynamic names it writes that
                 // are not in scope yet: each takes the extent the initializer has there.
                 let declared_ty = declared_ty
@@ -906,6 +911,9 @@ impl TypeChecker {
                     self.symbols.mark_annotated(&holder);
                 }
                 self.symbols.commit_pending(&name.name);
+                if !self.pool_stack.is_empty() {
+                    self.note_routable_local(&name.name, *mutable, init_routable);
+                }
 
                 Some(())
             }

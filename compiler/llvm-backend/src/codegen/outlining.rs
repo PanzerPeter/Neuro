@@ -107,6 +107,66 @@ impl<'ctx> CodegenContext<'ctx> {
         Ok(thunk)
     }
 
+    /// Terminate the current block with a call to the outlined thunk that prints `prefix`,
+    /// the runtime `message` when there is one, then the runtime `location` and a newline,
+    /// and aborts: a panic in a `@track_caller` body, whose location its caller passed in.
+    pub(crate) fn emit_outlined_located_panic(
+        &mut self,
+        prefix: &str,
+        message: Option<BasicValueEnum<'ctx>>,
+        location: BasicValueEnum<'ctx>,
+    ) -> CodegenResult<()> {
+        let mut args = Vec::new();
+        for text in message.into_iter().chain([location]) {
+            let fat = text.into_struct_value();
+            args.push(
+                self.builder
+                    .build_extract_value(fat, 0, "panic.ptr")?
+                    .into(),
+            );
+            args.push(self.string_len(fat)?.into());
+        }
+        let thunk = self.cold_located_panic_thunk(prefix, message.is_some())?;
+        self.emit_cold_call(thunk, &args)
+    }
+
+    /// Get or create the thunk [`Self::emit_outlined_located_panic`] calls: one `(ptr, i64)`
+    /// pair per runtime text it writes after `prefix`.
+    fn cold_located_panic_thunk(
+        &mut self,
+        prefix: &str,
+        with_message: bool,
+    ) -> CodegenResult<FunctionValue<'ctx>> {
+        // No diagnostic text holds a NUL, so the marker keeps these apart from the fixed
+        // thunks sharing the table (and its numbering).
+        let key = (with_message, format!("\0located\0{prefix}"));
+        if let Some(existing) = self.cold_thunks.get(&key) {
+            return Ok(*existing);
+        }
+        let ptr_type = self.context.ptr_type(inkwell::AddressSpace::default());
+        let texts = if with_message { 2 } else { 1 };
+        let params: Vec<inkwell::types::BasicMetadataTypeEnum> = (0..texts)
+            .flat_map(|_| [ptr_type.into(), self.context.i64_type().into()])
+            .collect();
+        let thunk = self.declare_cold_thunk(self.context.void_type().fn_type(&params, false));
+        self.build_thunk_body(thunk, |ctx| {
+            ctx.emit_write_cstr(prefix)?;
+            for text in 0..texts {
+                let (ptr, len) = thunk
+                    .get_nth_param(2 * text)
+                    .zip(thunk.get_nth_param(2 * text + 1))
+                    .ok_or_else(|| {
+                        CodegenError::InternalError("located panic thunk lost a parameter".into())
+                    })?;
+                ctx.emit_write(ptr, len.into_int_value())?;
+            }
+            ctx.emit_write_cstr("\n")?;
+            ctx.emit_abort_unreachable()
+        })?;
+        self.cold_thunks.insert(key, thunk);
+        Ok(thunk)
+    }
+
     /// Get or create the `(ptr, i64)` thunk printing `panic: <message><suffix>`.
     fn cold_message_panic_thunk(&mut self, suffix: &str) -> CodegenResult<FunctionValue<'ctx>> {
         let key = (true, suffix.to_string());

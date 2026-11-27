@@ -49,6 +49,7 @@ fn impl_item(type_name: &str, method_names: &[&str]) -> Item {
                 return_lifetimes: 0,
                 body: Vec::new(),
                 attributes: Vec::new(),
+                module: None,
                 span: Span::new(0, 0),
             })
             .collect(),

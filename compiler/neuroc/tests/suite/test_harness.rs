@@ -202,7 +202,9 @@ func not_close() {
         "test sums_are_close ... ok",
         "test infinities_and_nan ... ok",
         "test not_close ... FAILED",
-        "panic: assert_close: 1.0 is not within 0.1 of 1.5 at <std>/testing.nr:",
+        // `assert_close` is `@track_caller`: the panic names the test's line.
+        "panic: assert_close: 1.0 is not within 0.1 of 1.5 at ",
+        "close.nr:25:5\n",
     ] {
         assert!(text.contains(line), "missing {line:?} in:\n{text}");
     }

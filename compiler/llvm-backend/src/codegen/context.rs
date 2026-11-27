@@ -409,6 +409,10 @@ pub(crate) struct CodegenContext<'ctx> {
     /// identically share one body instead of emitting the diagnostic machinery twice.
     pub(crate) cold_thunks: HashMap<(bool, String), FunctionValue<'ctx>>,
 
+    /// The `@track_caller` functions, whose last parameter is
+    /// [`neuro_hir::CALLER_LOCATION_PARAM`]: a direct call appends its own location.
+    pub(crate) tracks_caller: HashSet<String>,
+
     /// How many `pool` blocks enclose the code being emitted. Non-zero routes each
     /// allocation emitted here to the arena instead of libc; the depth itself is a
     /// compile-time count, since a nested pool shares the one arena.
@@ -429,6 +433,11 @@ pub(crate) struct CodegenContext<'ctx> {
     /// store and never its safety.
     pub(crate) pool_locals: Vec<HashSet<PointerValue<'ctx>>>,
 
+    /// One set per open `pool` region, beside `pool_locals`: the names its body moves
+    /// whole into a place (`HirExprKind::Pool::routed`). A `val` of one of these names is
+    /// built with the arena off, so the move may carry it past the block.
+    pub(crate) pool_routed: Vec<HashSet<String>>,
+
     /// `Device` when any linked body runs on a device, which has each `pool` block
     /// release the device arena at its exit too.
     pub(crate) body_memory: crate::BodyMemory,
@@ -438,6 +447,10 @@ pub(crate) struct CodegenContext<'ctx> {
     /// operation outlined to run where its operands live, in a program with no device body
     /// for it, so it always runs on the host.
     pub(crate) expanded_calls: HashMap<String, (neuro_hir::HirFunction, String)>,
+    /// The operations outlined to run where their operands live that have both a device
+    /// and a host body, each with its host body's symbol. A call to one branches on where
+    /// its operands are and expands the host body in place, as an `expanded_calls` call is.
+    pub(crate) residency_calls: HashMap<String, (neuro_hir::HirFunction, String)>,
 
     /// Whose runtime a device body or tensor links, and what DLPack calls its memory.
     pub(crate) gpu_vendor: crate::GpuVendor,
@@ -489,14 +502,17 @@ impl<'ctx> CodegenContext<'ctx> {
             name_scopes: Vec::new(),
             enum_variants: HashMap::new(),
             cold_thunks: HashMap::new(),
+            tracks_caller: HashSet::new(),
             process_exit_points: Vec::new(),
             pool_depth: 0,
             pool_marks: Vec::new(),
             pool_exits: Vec::new(),
             pool_locals: Vec::new(),
+            pool_routed: Vec::new(),
             body_memory: crate::BodyMemory::Host,
             external_guards: HashMap::new(),
             expanded_calls: HashMap::new(),
+            residency_calls: HashMap::new(),
             gpu_vendor: crate::GpuVendor::Nvidia,
         }
     }

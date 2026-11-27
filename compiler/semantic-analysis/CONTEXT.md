@@ -5,7 +5,10 @@ Validate the type correctness and scope rules of a parsed Neuro program before c
 
 ## Entry Point
 - Type: Library function
-- Input: `items: &[Item]`
+- `type_check_program(items, enclosing)`: `items: &[Item]` and `enclosing: &[Option<ModuleId>]`,
+  the module each inline block is written in by module id (`None` for a file), which decides
+  which private fields a block may reach. `type_check(items)` is the same with no nesting, for
+  callers that hand over one module.
 - Output: `Result<Vec<Warning>, Vec<TypeError>>`: `Ok` carries non-fatal lint warnings, `Err`
   fatal type errors. Warnings are dropped when errors are present. A `Warning`'s `WarningCode`
   names its lint, the one name it prints and `@allow(...)` accepts.
@@ -132,6 +135,10 @@ module per declaration kind beside it. `tests/` is split by subject.
   function that is not generic, takes no parameters and returns unit, read off the registered
   signature so `-> ()` counts as none. A method or a struct carrying it is refused too. Which
   functions are tests, and how they run, is the driver's.
+  `check_track_caller_attributes` (`type_checkers/track_caller.rs`) holds `@track_caller` to a
+  bare attribute on a free function that is not `@gpu`, `@kernel` or `@test` (`TrackCallerForm`
+  otherwise) and records the name in `track_caller_fns`, so the identifier path refuses one read
+  as a function value: its hidden location argument is supplied only by a call.
   `check_kernel_attributes` (`type_checkers/kernel.rs`) holds `@kernel` to its form (`KernelForm`
   throughout): a free function, not beside `@gpu` or `@grad`, with one `threads:` array of one to
   three positive integer literals whose product is at most 1024; a `void` return; parameters that
@@ -402,7 +409,8 @@ a wrong count):
   so a literal passes as it is, and the call-result walk makes a binding hold its borrow beside the
   receiver's. A block exit walks the receiver only, so `holds_separator` has `refuse_dying_borrows`
   walk a `Split`'s argument too;
-- the standard library's runtime intrinsics (`__read_text`, `__arg`, `__monotonic_nanos`, ...),
+- the standard library's runtime intrinsics (`__read_text`, `__arg`, `__monotonic_nanos`, ...,
+  and the byte copies `__extend_bytes`, `__extend_text` and `__utf8_text`),
   free functions typed by `os_intrinsic_signature` in `type_checkers/os_intrinsics.rs` and checked
   through `check_call_args`. They resolve only while `current_module` is one of
   `library_modules`, the prelude's id plus every module declaring a `std::` name (which no program
@@ -1850,8 +1858,11 @@ A struct field is private to its declaring module unless it carries `export`, an
 where that is enforced**: the rule needs the receiver's type, so module-resolution (which runs
 first) cannot state it. `register_struct` / `register_generic_struct` record each struct's `module`
 and its private field names, and `instantiate_generic_struct` copies both onto every monomorphized
-instance. `current_module` is set from the item being checked in pass 4, and `reject_private_field`
-compares the two at the four places a field is reached: a read (`check_field_access_expr`, which
+instance. `current_module` is set from the item being checked in pass 4 (for an impl method, the
+method's own `module` when it is a trait's default body copied in from another module, so the
+body is checked where it was written), and `reject_private_field` asks `sees_privates_of`, which
+accepts the struct's module and every module enclosing the current one (`module_parents`, from
+`type_check_program`), at the four places a field is reached: a read (`check_field_access_expr`, which
 also covers struct destructuring, since the parser desugars it into field reads), a write
 (`Stmt::FieldAssignment`), and a literal's listed fields (plain and generic).
 `reject_private_update` covers `..base`, which supplies every *unlisted* field and would otherwise
@@ -1919,6 +1930,15 @@ a tuple built only out of those) crosses unconditionally, which is why `total = 
 `pool_safe` reads an enum's payloads and a newtype's inner type out of `enum_defs` and
 `newtype_defs` rather than trusting the name: a payload may be non-`Copy`, so `Option<string>`
 holds a pointer exactly as a `string` does (BUG-041).
+A tensor implements `PoolAware` without an `impl` (`implements_without_impl`), and
+`check_supplied_trait_method` types its `register_with_pool(&PoolHandle)` and `bulk_release()`
+(the latter through `check_mut_self_receiver`); lowering makes both an empty block.
+A routed store (`check_pool_store`, `check_pool_ref_store`) also accepts a bare `val` the
+innermost pool, opened in the current body, recorded as routable at its declaration
+(`note_routable_local`, keyed by name and defining depth in `PoolContext::routable`): immutable,
+not `PoolAware`, and with an initializer that passed `carries_no_arena` as a routed value before
+the binding existed. Lowering builds such a `val` off the arena when a store in the block moves
+it (`HirExprKind::Pool::routed`), which is a superset of what this accepts.
 Everything else has to pass `carries_no_arena`, which returns true only where the source PROVES
 the value holds no arena memory:
 

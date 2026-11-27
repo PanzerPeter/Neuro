@@ -514,6 +514,18 @@ fn build_module<'ctx>(
                 (func_def.clone(), symbol.to_string()),
             );
         }
+        // One with a device body as well keeps its function, which the device branch of
+        // each call still calls, but its host branch is expanded in the same way.
+        if let HirItem::Function(func_def) = item
+            && func_def.target == HirTarget::FollowsOperands
+            && external_symbol(&func_def.name, BodyMemory::Device).is_some()
+            && let Some(symbol) = external_symbol(&func_def.name, BodyMemory::Host)
+        {
+            codegen_ctx.residency_calls.insert(
+                func_def.name.clone(),
+                (func_def.clone(), symbol.to_string()),
+            );
+        }
     }
 
     // Emit module-level constants as LLVM global constants before any function.

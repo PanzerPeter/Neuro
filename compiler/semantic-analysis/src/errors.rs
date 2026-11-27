@@ -1724,6 +1724,9 @@ pub enum TypeError {
     #[error("`@test` {problem}")]
     TestForm { problem: String, span: Span },
 
+    #[error("`@track_caller` {problem}")]
+    TrackCallerForm { problem: String, span: Span },
+
     #[error("`@grad` function '{function}' {problem}")]
     GradSignature {
         function: String,
@@ -2003,6 +2006,7 @@ impl TypeError {
             | Self::GpuForm { span, .. }
             | Self::KernelForm { span, .. }
             | Self::TestForm { span, .. }
+            | Self::TrackCallerForm { span, .. }
             | Self::GradSignature { span, .. }
             | Self::GradGeneratedNameTaken { span, .. }
             | Self::BackwardUnavailable { span, .. }

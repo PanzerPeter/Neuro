@@ -38,6 +38,13 @@ impl<'ctx> CodegenContext<'ctx> {
         args: &[HirExpr],
         span: shared_types::Span,
     ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        // In a `@track_caller` body the location is the one its caller passed in.
+        if self
+            .variables
+            .contains_key(neuro_hir::CALLER_LOCATION_PARAM)
+        {
+            return self.codegen_located_panic_builtin(name, args, span);
+        }
         let location = self.panic_location_suffix(span.start);
         match name {
             "panic" => {
@@ -72,6 +79,70 @@ impl<'ctx> CodegenContext<'ctx> {
         // Placeholder value; the unit result is unused. A constant emits no instruction,
         // so it is safe to produce even after the block has been terminated.
         Ok(self.context.i32_type().const_int(0, false).into())
+    }
+
+    /// [`Self::codegen_panic_builtin`] in a `@track_caller` body: each diagnostic names
+    /// the location the function's caller handed it.
+    fn codegen_located_panic_builtin(
+        &mut self,
+        name: &str,
+        args: &[HirExpr],
+        span: shared_types::Span,
+    ) -> CodegenResult<BasicValueEnum<'ctx>> {
+        let location = self.caller_location(span);
+        let location = self.codegen_expr(&location)?;
+        match name {
+            "panic" => {
+                let message = args.first().ok_or_else(|| {
+                    CodegenError::InternalError("panic() reached codegen without a message".into())
+                })?;
+                let message = self.codegen_expr(message)?;
+                self.emit_outlined_located_panic("panic: ", Some(message), location)?;
+            }
+            "unreachable" => {
+                self.emit_outlined_located_panic(
+                    "internal error: entered unreachable code",
+                    None,
+                    location,
+                )?;
+            }
+            _ => {
+                let condition = args.first().ok_or_else(|| {
+                    CodegenError::InternalError(
+                        "assert() reached codegen without a condition".into(),
+                    )
+                })?;
+                let cond_val = self.codegen_expr(condition)?.into_int_value();
+                let parent_fn = self.current_function.ok_or_else(|| {
+                    CodegenError::InternalError("assert outside function during codegen".into())
+                })?;
+                let fail_bb = self.context.append_basic_block(parent_fn, "assert.fail");
+                let cont_bb = self.context.append_basic_block(parent_fn, "assert.cont");
+                let branch = self
+                    .builder
+                    .build_conditional_branch(cond_val, cont_bb, fail_bb)?;
+                self.mark_cold_branch(branch)?;
+                self.builder.position_at_end(fail_bb);
+                self.emit_outlined_located_panic("assertion failed", None, location)?;
+                self.builder.position_at_end(cont_bb);
+            }
+        }
+        Ok(self.context.i32_type().const_int(0, false).into())
+    }
+
+    /// The location a call to a `@track_caller` function hands it: the one this function
+    /// was handed when it is itself `@track_caller`, else ` at file:line:col` of `span`.
+    pub(crate) fn caller_location(&mut self, span: shared_types::Span) -> HirExpr {
+        let kind = match self
+            .variables
+            .contains_key(neuro_hir::CALLER_LOCATION_PARAM)
+        {
+            true => neuro_hir::HirExprKind::Variable(neuro_hir::CALLER_LOCATION_PARAM.to_string()),
+            false => neuro_hir::HirExprKind::Literal(shared_types::Literal::String(
+                self.panic_location_suffix(span.start),
+            )),
+        };
+        HirExpr::new(kind, neuro_hir::HirType::String, span)
     }
 
     /// Emit a runtime guard: continue when `ok` (an `i1`) is true, otherwise print

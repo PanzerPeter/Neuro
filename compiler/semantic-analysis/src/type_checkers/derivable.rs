@@ -76,6 +76,9 @@ impl TypeChecker {
             // `NaN`.
             COMPARABLE_TRAIT => ty.is_integer() || ty.is_char() || matches!(ty, Type::String),
             family if is_numeric_family(family) => scalar_in_family(ty, family),
+            // A tensor's buffer is the arena's inside a `pool` and its own deleter's outside
+            // one, so there is no handle left for a sweep to release: both methods are no-ops.
+            super::pools::POOL_AWARE_TRAIT => matches!(ty, Type::Tensor { .. }),
             _ => false,
         }
     }
@@ -122,6 +125,17 @@ impl TypeChecker {
                 }],
                 Type::Void,
             ),
+            super::pools::REGISTER_WITH_POOL_METHOD => (
+                super::pools::POOL_AWARE_TRAIT,
+                vec![Type::Reference {
+                    inner: Box::new(Type::Struct(super::pools::POOL_HANDLE_STRUCT.to_string())),
+                    mutable: false,
+                }],
+                Type::Void,
+            ),
+            super::pools::BULK_RELEASE_METHOD => {
+                (super::pools::POOL_AWARE_TRAIT, Vec::new(), Type::Void)
+            }
             _ => {
                 let (trait_name, _) = comparison_method(method)?;
                 let rhs = Type::Reference {

@@ -211,7 +211,10 @@ impl TypeChecker {
                 (module, None)
             }
             Site::Method(def, method) => {
-                let module = std::mem::replace(&mut self.current_module, def.module);
+                let module = std::mem::replace(
+                    &mut self.current_module,
+                    method.module.unwrap_or(def.module),
+                );
                 let assoc = self.enter_impl_assoc(def);
                 let scope = self.enter_method_body(
                     &def.type_name.name,

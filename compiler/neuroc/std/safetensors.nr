@@ -43,6 +43,8 @@ export struct File {
     bytes: Vec<u8>,
     data_start: u64,
     tensors: Vec<Stored>,
+    // Each tensor's position in `tensors`, by name.
+    index: HashMap<string, u64>,
     meta: Vec<(string, string)>
 }
 
@@ -77,6 +79,7 @@ export func open(path: &string) -> Result<File, IoError> {
         bytes: bytes,
         data_start: header.data_start,
         tensors: header.tensors,
+        index: header.index,
         meta: header.metadata
     })
 }
@@ -85,6 +88,7 @@ export func open(path: &string) -> Result<File, IoError> {
 struct Header {
     data_start: u64,
     tensors: Vec<Stored>,
+    index: HashMap<string, u64>,
     metadata: Vec<(string, string)>
 }
 
@@ -117,8 +121,6 @@ func read_header(bytes: &Vec<u8>) -> Result<Header, string> {
 // Every tensor's range lies inside the data, and together they cover it with no gap and no
 // overlap. A zero-size tensor sits between two others, never inside one.
 //
-// ponytail: an insertion sort over the ranges, quadratic in the tensor count; a real sort if a
-// file with tens of thousands of tensors shows it.
 func check_layout(tensors: &Vec<Stored>, data_size: u64) -> Result<(), string> {
     mut order: Vec<u64> = Vec::with_capacity(tensors.len())
     for index in 0..tensors.len() {
@@ -126,13 +128,8 @@ func check_layout(tensors: &Vec<Stored>, data_size: u64) -> Result<(), string> {
             return Result::Err("the tensor `{tensors[index].name}` ends at byte {tensors[index].end} of {data_size} bytes of data")
         }
         order.push(index)
-        mut slot = order.len() - 1
-        while slot > 0 && before(&tensors[index], &tensors[order[slot - 1]]) {
-            order[slot] = order[slot - 1]
-            slot -= 1
-        }
-        order[slot] = index
     }
+    sort_ranges(tensors, &mut order)
     mut covered: u64 = 0
     for position in 0..order.len() {
         val stored = &tensors[order[position]]
@@ -148,6 +145,39 @@ func check_layout(tensors: &Vec<Stored>, data_size: u64) -> Result<(), string> {
         return Result::Err("no tensor covers bytes {covered} to {data_size} of the data")
     }
     Result::Ok(())
+}
+
+// `order`, positions in `tensors`, sorted by their ranges: a stable bottom-up merge sort.
+func sort_ranges(tensors: &Vec<Stored>, order: &mut Vec<u64>) {
+    val count = order.len()
+    mut merged: Vec<u64> = Vec::with_capacity(count)
+    for slot in 0..count {
+        merged.push(0)
+    }
+    mut width: u64 = 1
+    while width < count {
+        mut low: u64 = 0
+        while low < count {
+            val middle = if low + width < count { low + width } else { count }
+            val high = if middle + width < count { middle + width } else { count }
+            mut left = low
+            mut right = middle
+            for slot in low..high {
+                if right < high && (left >= middle || before(&tensors[order[right]], &tensors[order[left]])) {
+                    merged[slot] = order[right]
+                    right += 1
+                } else {
+                    merged[slot] = order[left]
+                    left += 1
+                }
+            }
+            low = high
+        }
+        for slot in 0..count {
+            order[slot] = merged[slot]
+        }
+        width = width * 2
+    }
 }
 
 func before(left: &Stored, right: &Stored) -> bool {
@@ -232,12 +262,13 @@ impl Reader {
 
     func header(&mut self, data_start: u64) -> Result<Header, string> {
         mut tensors: Vec<Stored> = Vec::new()
+        mut index: HashMap<string, u64> = HashMap::new()
         mut metadata: Vec<(string, string)> = Vec::new()
         mut seen_metadata = false
         self.expect('{' as u8, "the header's JSON object")?
         if self.peek()? == '}' as u8 {
             self.at += 1
-            return Result::Ok(Header { data_start: data_start, tensors: tensors, metadata: metadata })
+            return Result::Ok(Header { data_start: data_start, tensors: tensors, index: index, metadata: metadata })
         }
         loop {
             val name = self.text()?
@@ -249,18 +280,17 @@ impl Reader {
                 seen_metadata = true
                 metadata = self.metadata()?
             } else {
-                for index in 0..tensors.len() {
-                    if tensors[index].name == name {
-                        return Result::Err("the tensor `{name}` appears twice")
-                    }
+                if index.contains_key(name) {
+                    return Result::Err("the tensor `{name}` appears twice")
                 }
+                index.insert(name.clone(), tensors.len())
                 tensors.push(self.entry(name)?)
             }
             if self.closes('}' as u8)? {
                 break
             }
         }
-        Result::Ok(Header { data_start: data_start, tensors: tensors, metadata: metadata })
+        Result::Ok(Header { data_start: data_start, tensors: tensors, index: index, metadata: metadata })
     }
 
     func metadata(&mut self) -> Result<Vec<(string, string)>, string> {
@@ -387,31 +417,33 @@ impl Reader {
         Result::Ok(value)
     }
 
-    // A JSON string, its escapes decoded and its UTF-8 checked.
-    //
-    // ponytail: one interpolated push per scalar; a byte-range copy if headers with long names
-    // ever show up in a profile.
+    // A JSON string, its escapes decoded and its UTF-8 checked. Each run between escapes is
+    // checked a scalar at a time, then copied out as text whole.
     func text(&mut self) -> Result<string, string> {
         self.expect('"' as u8, "a string")?
         mut out = StringBuilder::new()
+        mut run = self.at
         loop {
             if self.at >= self.end {
                 return Result::Err("a string runs past the end of the header")
             }
             val byte = self.bytes[self.at]
             if byte == '"' as u8 {
+                out.push_str(__utf8_text(self.bytes.slice(run..self.at)))
                 self.at += 1
                 return Result::Ok(out.to_string())
             }
             if byte < 32 {
                 return Result::Err("a control byte inside a string at byte {self.at}")
             }
-            val scalar = if byte == '\\' as u8 {
-                self.escape()?
+            if byte == '\\' as u8 {
+                out.push_str(__utf8_text(self.bytes.slice(run..self.at)))
+                val scalar = self.escape()?
+                out.push_str("{scalar}")
+                run = self.at
             } else {
                 self.scalar()?
             }
-            out.push_str("{scalar}")
         }
     }
 
@@ -534,9 +566,9 @@ func is_digit(byte: u8) -> bool {
 // extent. Both are the canonical text, so they agree byte for byte everywhere else.
 func shape_fits(stored: &string, expected: &string) -> bool {
     mut have: Vec<u8> = Vec::new()
-    push_utf8(&mut have, stored)
+    __extend_text(&mut have, stored)
     mut want: Vec<u8> = Vec::new()
-    push_utf8(&mut want, expected)
+    __extend_text(&mut want, expected)
     mut at: u64 = 0
     for index in 0..want.len() {
         if want[index] == '?' as u8 {
@@ -559,29 +591,28 @@ func shape_fits(stored: &string, expected: &string) -> bool {
 // Called by `file.tensor(name)`: the stored bytes and extents of `name`, after checking its dtype
 // and shape against the ones the read was annotated with.
 func locate(file: &File, name: &string, dtype: &string, shape: &string) -> Result<(&[u8], &[u64]), IoError> {
-    for index in 0..file.tensors.len() {
+    if val Option::Some(found) = file.index.get(*name) {
+        val index = *found
         val stored = &file.tensors[index]
-        if &stored.name == name {
-            if &stored.dtype != dtype || !shape_fits(&stored.shape, shape) {
-                return Result::Err(IoError {
-                    kind: IoErrorKind::InvalidData,
-                    message: "cannot read the tensor `{name}` from {file.path}: it is {stored.dtype} {stored.shape}, and the read expects {dtype} {shape}"
-                })
-            }
-            val bytes = file.bytes.slice((file.data_start + stored.begin)..(file.data_start + stored.end))
-            if dtype == "BOOL" {
-                for at in 0..bytes.len() {
-                    if bytes[at] > 1 {
-                        return Result::Err(IoError {
-                            kind: IoErrorKind::InvalidData,
-                            message: "cannot read the tensor `{name}` from {file.path}: a BOOL element holds {bytes[at]}"
-                        })
-                    }
+        if &stored.dtype != dtype || !shape_fits(&stored.shape, shape) {
+            return Result::Err(IoError {
+                kind: IoErrorKind::InvalidData,
+                message: "cannot read the tensor `{name}` from {file.path}: it is {stored.dtype} {stored.shape}, and the read expects {dtype} {shape}"
+            })
+        }
+        val bytes = file.bytes.slice((file.data_start + stored.begin)..(file.data_start + stored.end))
+        if dtype == "BOOL" {
+            for at in 0..bytes.len() {
+                if bytes[at] > 1 {
+                    return Result::Err(IoError {
+                        kind: IoErrorKind::InvalidData,
+                        message: "cannot read the tensor `{name}` from {file.path}: a BOOL element holds {bytes[at]}"
+                    })
                 }
             }
-            val extents = file.tensors[index].extents.slice(0..stored.extents.len())
-            return Result::Ok((bytes, extents))
         }
+        val extents = file.tensors[index].extents.slice(0..stored.extents.len())
+        return Result::Ok((bytes, extents))
     }
     Result::Err(IoError {
         kind: IoErrorKind::NotFound,
@@ -599,12 +630,14 @@ struct Pending {
 // Tensors to be saved together. `add` copies a tensor's elements in, so a writer holds no borrow.
 export struct Writer {
     tensors: Vec<Pending>,
+    // Each tensor's position in `tensors`, by name.
+    positions: HashMap<string, u64>,
     metadata: Vec<(string, string)>
 }
 
 impl Writer {
     func new() -> Writer {
-        Writer { tensors: Vec::new(), metadata: Vec::new() }
+        Writer { tensors: Vec::new(), positions: HashMap::new(), metadata: Vec::new() }
     }
 
     // Sets the `__metadata__` entry `key`, replacing an earlier value.
@@ -622,9 +655,6 @@ impl Writer {
 
     // Writes every tensor added, in the order they were first added, creating `path` or
     // replacing what it held.
-    //
-    // ponytail: the file is assembled one byte push at a time; a byte-append intrinsic if
-    // checkpoints get large enough for it to show.
     func save(&self, path: &string) -> Result<(), IoError> {
         mut header = StringBuilder::new()
         header.push_str("\{")
@@ -666,7 +696,7 @@ impl Writer {
         for slot in 0..LENGTH_BYTES {
             bytes.push(0)
         }
-        push_utf8(&mut bytes, &text)
+        __extend_text(&mut bytes, &text)
         while bytes.len() % HEADER_ALIGN != 0 {
             bytes.push(' ' as u8)
         }
@@ -676,9 +706,7 @@ impl Writer {
         }
         for index in 0..self.tensors.len() {
             val data = &self.tensors[index].data
-            for at in 0..data.len() {
-                bytes.push(data[at])
-            }
+            __extend_bytes(&mut bytes, data.slice(0..data.len()))
         }
         std::fs::write_bytes(path, &bytes)
     }
@@ -687,17 +715,15 @@ impl Writer {
 // Called by `out.add(name, &tensor)` with the tensor's bytes and extents already copied out. A name
 // added again replaces the earlier tensor, as an entry of a Python dict would.
 func append(out: &mut Writer, name: &string, dtype: &string, parts: (Vec<u8>, Vec<u64>)) {
-    mut index: u64 = 0
-    while index < out.tensors.len() && &out.tensors[index].name != name {
-        index += 1
-    }
     val (data, extents) = parts
     val pending = Pending { name: name.clone(), dtype: dtype.clone(), shape: shape_text(&extents), data: data }
-    if index < out.tensors.len() {
+    if val Option::Some(found) = out.positions.get(*name) {
+        val index = *found
         out.tensors[index] = pending
-    } else {
-        out.tensors.push(pending)
+        return
     }
+    out.positions.insert(name.clone(), out.tensors.len())
+    out.tensors.push(pending)
 }
 
 // `text` as a JSON string literal.
@@ -726,25 +752,4 @@ func hex_digit(value: u32) -> char {
         return (48 + value) as char
     }
     (87 + value) as char
-}
-
-func push_utf8(bytes: &mut Vec<u8>, text: &string) {
-    for c in text.chars() {
-        val code = c as u32
-        if code < 128 {
-            bytes.push(code as u8)
-        } else if code < 2048 {
-            bytes.push((192 | code.shr(6)) as u8)
-            bytes.push((128 | (code & 63)) as u8)
-        } else if code < 65536 {
-            bytes.push((224 | code.shr(12)) as u8)
-            bytes.push((128 | (code.shr(6) & 63)) as u8)
-            bytes.push((128 | (code & 63)) as u8)
-        } else {
-            bytes.push((240 | code.shr(18)) as u8)
-            bytes.push((128 | (code.shr(12) & 63)) as u8)
-            bytes.push((128 | (code.shr(6) & 63)) as u8)
-            bytes.push((128 | (code & 63)) as u8)
-        }
-    }
 }

@@ -128,6 +128,10 @@ pub enum HirExprKind {
     Pool {
         label: Option<String>,
         stmts: Vec<HirStmt>,
+        /// The bindings a store in the body moves whole into a place (`out = name`). A
+        /// `val` of one of these names the block declares is built with the arena off, so
+        /// it may leave the block; the checker accepts that store only for such a `val`.
+        routed: Vec<String>,
     },
     /// Borrow `&place` / `&mut place`.
     Reference {

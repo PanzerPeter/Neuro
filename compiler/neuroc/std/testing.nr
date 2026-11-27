@@ -19,7 +19,8 @@ export func is_close<T: Float>(actual: T, expected: T, tolerance: T) -> bool {
 }
 
 // Panic, naming both values, unless `actual` is within `tolerance` of `expected` as
-// `is_close` measures it.
+// `is_close` measures it. The panic names the line that called `assert_close`.
+@track_caller
 export func assert_close<T: Float>(actual: T, expected: T, tolerance: T) {
     if !is_close(actual, expected, tolerance) {
         panic("assert_close: {actual} is not within {tolerance} of {expected}")

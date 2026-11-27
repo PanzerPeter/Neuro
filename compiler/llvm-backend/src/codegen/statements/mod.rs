@@ -23,7 +23,18 @@ impl<'ctx> CodegenContext<'ctx> {
         ty: &HirType,
         init: Option<&HirExpr>,
     ) -> CodegenResult<()> {
-        let init_val = init.map(|expr| self.codegen_expr(expr)).transpose()?;
+        // A binding a store moves out of the block is built off the arena. A `PoolAware`
+        // one stays registered with the block, which the checker holds to.
+        let routed = self.pool_depth > 0
+            && self.pool_routed.iter().any(|names| names.contains(name))
+            && self.pool_registered_type(&Type::from_hir(ty)).is_none();
+        let depth = match routed {
+            true => std::mem::replace(&mut self.pool_depth, 0),
+            false => self.pool_depth,
+        };
+        let init_val = init.map(|expr| self.codegen_expr(expr)).transpose();
+        self.pool_depth = depth;
+        let init_val = init_val?;
 
         if let Some(val) = init_val {
             let target_sem = Type::from_hir(ty);

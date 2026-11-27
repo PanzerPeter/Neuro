@@ -265,6 +265,75 @@ fn a_block_reaches_the_private_items_of_the_module_around_it() {
 }
 
 #[test]
+fn a_block_reaches_the_private_fields_of_every_module_around_it() {
+    let files = [(
+        "main.nr",
+        "struct Config { timeout: i32 }\n\
+         module inner {\n\
+             export func read(c: &Config) -> i32 { c.timeout }\n\
+             export func make() -> Config { Config { timeout: 7 } }\n\
+             export module deeper {\n\
+                 export func twice(c: &Config) -> i32 { c.timeout * 2 }\n\
+             }\n\
+         }\n\
+         func main() -> i32 {\n    val c = inner::make()\n    inner::read(&c) + inner::deeper::twice(&c)\n}\n",
+    )];
+    assert_eq!(run_program(&files, "main.nr"), Ok(21));
+}
+
+#[test]
+fn a_private_field_stays_closed_to_its_module_s_parent_and_siblings() {
+    let files = [(
+        "main.nr",
+        "module sealed {\n\
+             export struct Hidden { secret: i32 }\n\
+             export func make() -> Hidden { Hidden { secret: 3 } }\n\
+         }\n\
+         module other {\n    export func peek(h: &sealed::Hidden) -> i32 { h.secret }\n}\n\
+         func main() -> i32 { sealed::make().secret }\n",
+    )];
+    let error = run_program(&files, "main.nr").expect_err("a block's field is its own");
+    assert_eq!(error.matches("field 'secret'").count(), 2, "{error}");
+}
+
+#[test]
+fn a_default_body_is_checked_in_its_trait_s_module() {
+    let files = [
+        (
+            "shapes.nr",
+            "struct Tally { count: i32 }\n\
+             export struct Size { n: i32 }\n\
+             export func size(n: i32) -> Size { Size { n: n } }\n\
+             export trait Measured {\n\
+                 func base(&self) -> i32\n\
+                 func scored(&self) -> i32 {\n\
+                     val t = Tally { count: self.base() }\n\
+                     t.count * size(2).n\n\
+                 }\n\
+             }\n",
+        ),
+        (
+            "main.nr",
+            "import shapes::{Measured, size}\n\
+             struct Dot { r: i32 }\n\
+             impl Measured for Dot {\n    func base(&self) -> i32 { self.r }\n}\n\
+             func main() -> i32 { Dot { r: 5 }.scored() }\n",
+        ),
+    ];
+    assert_eq!(run_program(&files, "main.nr"), Ok(10));
+    let mut files = files;
+    files[1].1 = "import shapes::{Measured, size}\n\
+                  struct Dot { r: i32 }\n\
+                  impl Measured for Dot {\n    func base(&self) -> i32 { size(1).n }\n}\n\
+                  func main() -> i32 { 0 }\n";
+    let error = run_program(&files, "main.nr").expect_err("the impl's own body is its module's");
+    assert!(
+        error.contains("field 'n' of struct 'shapes::Size'"),
+        "{error}"
+    );
+}
+
+#[test]
 fn derived_debug_prints_the_declared_name() {
     let printed = stdout_of(
         "main.nr",

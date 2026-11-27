@@ -269,25 +269,35 @@ comparator gives the same order, so the algorithm is never observable. The eleme
 `Element::computed`, so a half-precision run sorts by merge sort, its keys compared with `cmpf`
 as they are (exact, nothing to widen).
 
-- *Merge sort, host and GPU.* Bottom-up, one all-parallel `linalg.generic` per doubling of the
+- *Host (`tensor_sort/host.rs`).* One `scf.for` over the runs, its count and each run's
+  coordinates computed from the run-time extents, so a dynamic axis anywhere is no different.
+  Each run is sorted into memref buffers, handed over as a tensor once at the end. An integer run
+  at least `RADIX_BUCKETS` (256) long takes LSD radix (`radix.rs`): one byte a pass (count,
+  prefix, place), the key's sign bit flipped when signed and every bit when descending, the passes
+  writing the output and a scratch buffer in turn so the last writes the output. Any other run
+  takes a sequential bottom-up merge: `ceil(log2(n))` passes (a constant for a static run, the bit
+  length of `n - 1` via `math.ctlz` for a dynamic one), each walking every pair of blocks in step,
+  positions and keys side by side, so O(n log n) comparisons and no out-of-order source reads.
+  The passes run two at a time between two buffer pairs named statically (pass `2p + 1` is an
+  `scf.if`), the first pair chosen by `arith.select` on the pass parity so the last pass writes
+  the output. An integer run of dynamic length makes the radix-or-merge choice in an `scf.if`.
+- *GPU merge sort.* Bottom-up, one all-parallel `linalg.generic` per doubling of the
   block width (`ceil(log2(extent))` of them, none for a run of one; a dynamic run runs them as a
   loop, below). Each point finds the run
   position it holds by a merge-path binary search over the pair of blocks it merges, a fixed-count
   `scf.for` inside the body, reading the previous order and the source with `tensor.extract`.
-  A right element goes first only if it strictly precedes (`precedes`, the LLVM backend's
-  comparator with NaN last, which the `.max()` / `.min()` fold also uses), which keeps it stable.
-  O(n log² n) comparisons a run.
-- *Dynamic runs.* A run whose length is dynamic has no static pass count. Its passes are an
-  `scf.for` over `ceil(log2(n))` (the bit length of `n - 1`, via `math.ctlz`), run two at a time
-  between two buffers that the loop names statically: pass `2p` reads the first and writes the
-  second, pass `2p + 1` is an `scf.if` back, and an odd count copies the answer into the first.
-  No value is carried through the loop: bufferization copies a swapped loop-carried buffer on each
-  iteration, and on a device those copies run on the host. The starting order is the identity.
-- *LSD radix, host integers only.* A run at least `RADIX_BUCKETS` (256) long on the host
-  (`Lowering::side`) sorts one byte a pass in `scf.for` loops over tensor values (count, prefix,
-  place), two order tensors written in turn. The key flips the sign bit when signed and every bit
-  when descending. A device body cannot take it: loops outside `linalg` would run on the host
-  against device memory, and a radix pass in `linalg` needs a scan and a scatter.
+  O(n log² n) comparisons a run, the price of a thread per position. A device body cannot take
+  the host's loops: loops outside `linalg` would run on the host against device memory.
+- *Dynamic GPU runs.* A run whose length is dynamic has no static pass count. Its passes are an
+  `scf.for` over `ceil(log2(n))`, run two at a time between two buffers that the loop names
+  statically: pass `2p` reads the first and writes the second, pass `2p + 1` is an `scf.if` back,
+  and an odd count copies the answer into the first. No value is carried through the loop:
+  bufferization copies a swapped loop-carried buffer on each iteration, and on a device those
+  copies run on the host. The starting order is the identity.
+
+Both merges put a right element first only if it strictly precedes (`precedes`, the LLVM
+backend's comparator with NaN last, which the `.max()` / `.min()` fold also uses), which keeps
+them stable.
 
 A `.topk` body returns two tensors, so a defined function's tuple of tensors
 is one MLIR result per tensor, each its own out-param after bufferization, and `linkable_result`

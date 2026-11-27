@@ -56,8 +56,20 @@ use type_checkers::TypeChecker;
 /// to provide comprehensive feedback to the user. All errors include source
 /// location information (spans) for precise error reporting.
 pub fn type_check(items: &[Item]) -> Result<Vec<Warning>, Vec<TypeError>> {
+    type_check_program(items, &[])
+}
+
+/// [`type_check`] for a program whose modules nest: `enclosing[id]` is the module an inline
+/// block with id `id` is written in, `None` (or no entry) for a file. A block may read and
+/// build the private fields of every module enclosing it, as it may name their private
+/// items.
+pub fn type_check_program(
+    items: &[Item],
+    enclosing: &[Option<ast_types::ModuleId>],
+) -> Result<Vec<Warning>, Vec<TypeError>> {
     types::set_template_params(Default::default());
     let mut checker = TypeChecker::new();
+    checker.set_module_parents(enclosing);
     let outcome = checker.check_program(items);
     types::set_template_params(checker.template_params());
     if outcome.is_err() {

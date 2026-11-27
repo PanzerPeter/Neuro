@@ -6,7 +6,7 @@ Expand a root `.nr` file into the single item list its program is built from: lo
 ## Entry Point
 - Type: Library function, `resolve_program`
 - Input: `root: &Path`, a `&ParseModule` (`dyn Fn(&str, &str) -> Result<Vec<Item>, String>`) parser supplied by the caller (called with a module's source and the path that names it in a diagnostic), and `library: StandardLibrary`: each `std::<name>` module already parsed (`StdModule`), the `std::prelude` variants every module may write bare (`PreludeVariant`), and the prelude traits a `@no_prelude` file keeps
-- Output: `Result<ResolvedProgram, ModuleError>`: `items: Vec<ast_types::Item>`, the standard library's first, each stamped with the module it came from and named canonically, and one `ResolvedModule` per module loaded from a file (its path and file)
+- Output: `Result<ResolvedProgram, ModuleError>`: `items: Vec<ast_types::Item>`, the standard library's first, each stamped with the module it came from and named canonically, and one `ResolvedModule` per module loaded from a file (its path, file and, for an inline block, the id of the module it is written in), indexed by module id
 
 ## Shared Kernel
 - ast-types: the `Item` / `Stmt` / `Expr` / `Type` tree this slice walks and rewrites
@@ -150,7 +150,8 @@ Reads `.nr` files from disk; writes nothing.
   within one file's top level; a trait and an impl in different modules, or inside blocks,
   meet only once names are canonical, so `defaults.rs` copies each default body into every
   `impl Trait for Type` that omits it after the rename. The body was resolved in the trait's
-  module, so the copy names what that module meant. A default whose own type parameters share a
+  module, so the copy names what that module meant, and the copy's `MethodDef.module` is the
+  trait's module id, so the checker measures field visibility in the body there too. A default whose own type parameters share a
   name with the impl's (`func f<T>` into `impl<T>`) reaches only this pass, and `rename.rs`
   renames those parameters in the copy, binders and uses alike, to a spelling no source can write
   (`T'`), so neither meaning captures the other.

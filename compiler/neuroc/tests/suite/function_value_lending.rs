@@ -179,3 +179,92 @@ func main() -> i32 { 0 }
     );
     assert!(err.contains("through a shared `&` borrow"), "{err}");
 }
+
+#[test]
+fn a_reference_to_a_function_value_is_called_by_name() {
+    let source = r#"
+func add1(x: i32) -> i32 { x + 1 }
+func twice(f: &(i32) -> i32, x: i32) -> i32 { f(f(x)) }
+func main() -> i32 {
+    mut v: Vec<(i32) -> i32> = Vec::new()
+    v.push(add1)
+    v.push(|x| x * 10)
+    mut total = 0
+    for f in &v { total += f(1) }
+    val g = |x: i32| x + 100
+    mut m: HashMap<i32, (i32) -> i32> = HashMap::new()
+    m.insert(1, g)
+    val from_map = match m.get(1) {
+        Some(h) => h(0),
+        None => 0,
+    }
+    mut n = 0
+    mut step = |d: i32| -> i32 {
+        n += d
+        n
+    }
+    val s = &mut step
+    s(2)
+    val stepped = (*s)(3)
+    total + twice(&g, 1) + from_map + stepped - 300
+}
+"#;
+    let tester = crate::compile_harness::CompileTest::new();
+    assert_eq!(
+        tester.run_leak_checked("ref_call.nr", source),
+        12 + 201 + 100 + 5 - 300
+    );
+}
+
+#[test]
+fn a_reference_does_not_lend_a_mut_value_shared_or_give_up_a_once_value() {
+    let err = rejected(
+        "ref_mut_call.nr",
+        r#"
+func main() -> i32 {
+    mut n = 0
+    val inc = |d: i32| -> i32 {
+        n += d
+        n
+    }
+    val r = &inc
+    r(1)
+}
+"#,
+    );
+    assert!(err.contains("through a shared `&` borrow"), "{err}");
+    for call in ["r()", "(*r)()"] {
+        let err = rejected(
+            "ref_once_call.nr",
+            &format!(
+                r#"
+func main() -> i32 {{
+    val s = "a" + "b"
+    val f = move || s
+    val r = &f
+    val t = {call}
+    0
+}}
+"#
+            ),
+        );
+        assert!(err.contains("cannot move out of 'r'"), "{call}: {err}");
+    }
+}
+
+#[test]
+fn a_parenthesized_once_call_uses_the_value_up() {
+    let err = rejected(
+        "paren_once.nr",
+        r#"
+func main() -> i32 {
+    val s = "a" + "b"
+    val f = move || s
+    val a = (f)()
+    val b = (f)()
+    0
+}
+"#,
+    );
+    assert!(err.contains("use of moved value 'f'"), "{err}");
+}

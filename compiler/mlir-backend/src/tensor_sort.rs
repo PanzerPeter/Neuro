@@ -6,26 +6,23 @@
 // its `k`. Every stable sort under one comparator gives the same order, so which algorithm
 // ran is never observable.
 //
-// The merge sort runs everywhere. It is bottom-up: the pass of width `w` (1, 2, 4, ...)
+// On the host, `host.rs` sorts each run in turn in buffers: a sequential merge, or LSD
+// radix (`radix.rs`) for an integer run at least `RADIX_BUCKETS` long.
+//
+// On a GPU the merge sort is bottom-up: the pass of width `w` (1, 2, 4, ...)
 // merges each pair of sorted blocks of `w` run positions into one of `2w`. A pass is one
 // all-parallel `linalg.generic` over the source's axes, so on a GPU every position of every
 // run is a thread, and each finds its own element by a merge-path binary search for how many
 // of the left block's elements come before it. A right element goes first only if it strictly
 // precedes, which keeps equal elements in their order. The search is an `scf.for` of a
 // count fixed by the pass, so the threads of a warp do not diverge.
-//
-// ponytail: O(n log^2 n) comparisons, a binary search per position per pass. A host merge
-// that walks both blocks in step is O(n log n), if a host float sort ever measures slow.
-//
-// An integer run on the host at least `RADIX_BUCKETS` long sorts by LSD radix instead
-// (`radix.rs`).
+// That is O(n log^2 n) comparisons, the price of a thread per position.
 //
 // A run whose length is dynamic has no static pass count, so its merge passes are a loop: the
 // `ceil(log2(n))` passes run two at a time over two buffers, which the loop names statically
 // (no buffer is carried through the loop, since bufferization would copy the swapped ones on
 // every iteration). The width of pass `k` is `2^k` and its search takes `k + 1` steps. An odd
-// count copies the answer back into the first buffer. Radix needs static extents and so is not
-// taken for a dynamic run, which is no change to the order: every stable sort gives the same one.
+// count copies the answer back into the first buffer.
 
 use crate::{
     errors::MlirError,
@@ -55,10 +52,12 @@ use melior::{
 };
 use neuro_hir::{HirExpr, HirExprKind, HirSortKind, HirType};
 
+mod host;
 mod radix;
 
 /// The digits a radix pass counts. A host integer run at least this long sorts by radix,
-/// so a pass never spends more on its buckets than on its elements.
+/// so a pass never spends more on its buckets than on its elements; a dynamic run makes
+/// that choice at run time.
 const RADIX_BUCKETS: usize = 256;
 
 /// What one output of a sort takes from the position its order holds.
@@ -146,16 +145,11 @@ pub(crate) fn build_sort<'c, 'a>(
         dims,
         axis: *axis,
     };
-    // The radix sort's loops need every extent static. The merge sort takes any run.
-    let static_extents = shape.iter().copied().collect::<Option<Vec<usize>>>();
-    let order = match (compared, static_extents) {
-        (Element::Signed(bits) | Element::Unsigned(bits), Some(extents))
-            if lowering.side == Side::Host && extents[*axis] >= RADIX_BUCKETS =>
-        {
-            Some(radix::radix_order(
-                context, location, block, &runs, &extents, bits,
-            )?)
+    let order = match (lowering.side, compared) {
+        (Side::Host, Element::Signed(bits) | Element::Unsigned(bits)) => {
+            host::host_order(context, location, block, &runs, Some(bits))?
         }
+        (Side::Host, _) => host::host_order(context, location, block, &runs, None)?,
         _ => merge_order(context, location, block, &runs)?,
     };
     let mut results = Vec::with_capacity(outputs.len());
@@ -968,14 +962,27 @@ mod tests {
             "val m: Tensor<i16, [300, 3]> = Tensor::ones()",
             "    val s = g.sort()",
         ));
+        // A sequential merge in loops, and the gather.
         assert!(!short.contains("memref<256xindex>"), "{short}");
-        assert_eq!(short.matches("linalg.generic").count(), 2 + 1, "{short}");
+        assert_eq!(short.matches("linalg.generic").count(), 1, "{short}");
 
         let float = host_module(&program(
             "val m: Tensor<f32, [300]> = Tensor::ones()",
             "    val s = g.sort()",
         ));
         assert!(!float.contains("memref<256xindex>"), "{float}");
+    }
+
+    /// A host integer run of dynamic length chooses between radix and merge at run time.
+    #[test]
+    fn a_dynamic_host_integer_run_chooses_radix_or_merge_at_run_time() {
+        let program = selection(HirType::I32, vec![None], HirSortKind::Values, 0);
+        let mlir = mlir_of(&program);
+        assert!(
+            mlir.contains("memref<256xindex>") && mlir.contains("scf.if"),
+            "{mlir}"
+        );
+        assert_lowered(&program);
     }
 
     #[test]

@@ -40,7 +40,8 @@ Both `check_file` and `compile_file` run the same front half, so neither can ski
    A call names a callee that may be declared in any file, so the table cannot be built until
    every module is merged; and the arguments must already sit in declaration order when the
    type checker pairs them with parameter types.
-3. `semantic_analysis::type_check`.
+3. `semantic_analysis::type_check_program`, handed each inline block's enclosing module from
+   `ResolvedModule.parent`.
 4. `hir_lowering::lower_program`: the typed HIR. `check` reports the lowered item count;
    `compile` hands the HIR to `llvm_backend::compile_executable`, which lowers native object
    code from it (the backend does not consume the AST), or to `llvm_backend::compile` under

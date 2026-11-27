@@ -679,10 +679,19 @@ impl Lowerer {
             // A `pool` yields unit whatever its body ends with, so the body is
             // lowered against no expected type and the block's own type is Void.
             Expr::Pool { label, stmts, span } => {
-                let (stmts, _) = self.lower_block_value(stmts, None)?;
+                self.pool_moves.push(Vec::new());
+                let lowered = self.lower_block_value(stmts, None);
+                let mut routed = self.pool_moves.pop().unwrap_or_default();
+                let (stmts, _) = lowered?;
+                routed.sort_unstable();
+                routed.dedup();
                 let label = label.as_ref().map(|id| id.name.clone());
                 Ok(HirExpr::new(
-                    HirExprKind::Pool { label, stmts },
+                    HirExprKind::Pool {
+                        label,
+                        stmts,
+                        routed,
+                    },
                     HirType::Void,
                     *span,
                 ))

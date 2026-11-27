@@ -70,6 +70,8 @@ impl TypeChecker {
         }
         let name = match place {
             Expr::Identifier(ident) => ident.name.clone(),
+            // `(*r)(x)`: the call goes through `r`, whose own mutability decides a `mut` call.
+            Expr::Deref { .. } => Self::place_root_name(place)?,
             _ if self.is_borrowable_sub_place(place) => Self::place_root_name(place)?,
             _ => return None,
         };

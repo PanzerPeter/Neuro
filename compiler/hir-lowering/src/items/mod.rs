@@ -66,6 +66,24 @@ fn kernel_param_reference(ty: &ast_types::Type) -> Option<ast_types::Type> {
     })
 }
 
+/// The attribute that makes a function's panics report its caller's location.
+const TRACK_CALLER_ATTRIBUTE: &str = "track_caller";
+
+/// The hidden parameter a `@track_caller` function takes its caller's location in.
+pub(crate) fn caller_location_param(
+    attributes: &[Attribute],
+    span: shared_types::Span,
+) -> Option<HirParam> {
+    attributes
+        .iter()
+        .any(|attr| attr.name.name == TRACK_CALLER_ATTRIBUTE)
+        .then(|| HirParam {
+            name: neuro_hir::CALLER_LOCATION_PARAM.to_string(),
+            ty: HirType::String,
+            span,
+        })
+}
+
 fn target_of(attributes: &[Attribute]) -> HirTarget {
     if let Some(kernel) = attributes
         .iter()
@@ -485,6 +503,7 @@ impl Lowerer {
             target,
         )?);
         self.pop_scope();
+        params.extend(caller_location_param(&func.attributes, func.span));
 
         Ok(HirFunction {
             result_extents: Vec::new(),

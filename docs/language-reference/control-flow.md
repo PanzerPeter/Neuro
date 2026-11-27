@@ -834,7 +834,7 @@ Runnable programs: [`examples/control_flow/if_val.nr`](../../examples/control_fl
 
 ## Pool Blocks
 
-A `pool` block is a scope whose allocations come from one contiguous bump arena instead of the heap. Leaving the block moves the bump pointer back, releasing everything the body allocated in a single step, whatever it allocated and however much of it there was.
+A `pool` block is a scope whose allocations come from a bump arena instead of the heap. Leaving the block moves the bump pointer back, releasing everything the body allocated in a single step, whatever it allocated and however much of it there was. The arena is a chain of chunks that grows as a block needs it, so a large block keeps the bump path, and a `Vec` or `StringBuilder` the block owns grows its buffer there too.
 
 ```neuro
 pool {
@@ -870,10 +870,10 @@ Three rules keep arena memory from outliving the block, all checked at compile t
 mut total: i32 = 0
 mut name: string = ""
 pool {
-    val joined = "a" + "b"   // the block's own: allocated in the arena
+    mut scratch = "a" + "b"  // the block's own: allocated in the arena
     total = total + 1        // fine: a scalar carries no arena address
     name = "c" + "d"         // fine: routed off the arena, because `name` outlives it
-    name = joined            // error: `joined` was already taken from the arena
+    name = scratch           // error: `scratch` was already taken from the arena
 }
 ```
 
@@ -881,7 +881,9 @@ pool {
 
 The compiler decides where an allocation comes from by asking who ends up owning it. Where the owner is a place that outlives the block (a binding declared before it, a field or element reached through one, or the referent of a reference) the allocation is routed to the ordinary heap and the arena never sees it. That is why `name = "c" + "d"` above compiles: the whole statement is emitted with the arena switched off, so the text it builds survives the release and reads correctly afterwards.
 
-Routing applies to the value the statement builds, never to one built earlier. By the time `name = joined` runs, `joined`'s buffer is already in the bump region and no choice of allocator can move it, so that store is refused.
+Routing applies to the value the statement builds, and to a `val` the block moves out whole. By the time `name = scratch` runs, `scratch`'s buffer is already in the bump region and no choice of allocator can move it, so that store is refused.
+
+A `val` is different, because nothing can change it after its declaration. When the block stores one whole into such a place (`val joined = "a" + "b"` and later `name = joined`), and its initializer passes the proof below as a routed value would, the compiler builds it off the arena at its declaration, and the store compiles. If the block never reaches the store, the value is released by its own drop like any heap value. A `mut` binding could take arena memory after it is declared, and a `val` built from another of the block's bindings (`val copy = joined`) holds that binding's buffer, so storing either is refused. The store must be written in the block itself, not in a nested `pool`, a closure, or a call that stores its argument.
 
 The compiler has to *prove* a routed value holds nothing the block built earlier, and it proves it through a struct or tuple literal, an array literal, and an `if` / `match` whose every arm is a single expression (a `match` also needs its scrutinee proven). So `entry = Entry { label: "a" + "b", n: 1 }` and `name = if c { "x" } else { "y" }` cross the boundary. An arm that declares a binding of its own is not looked into, and is refused.
 
@@ -988,6 +990,7 @@ A type with no destructor at all needs neither method: its memory goes back with
 | No `Drop` | yes, reclaimed by the bulk arena free |
 | `PoolAware` (with or without `Drop`) | yes, `bulk_release` in reverse construction order at the block's exit |
 | `Drop` only | no, a compile error naming the pool |
+| `Tensor` | yes: a tensor is `PoolAware` without an `impl`, so it meets a `T: PoolAware` bound. Its buffer is the arena's inside the block, so its `register_with_pool` and `bulk_release` do nothing |
 
 See [`examples/ownership/pool_arena.nr`](../../examples/ownership/pool_arena.nr) for a runnable program, and [`examples/integration/ownership/batch_arena.nr`](../../examples/integration/ownership/batch_arena.nr) for a batched forward pass built inside one.
 

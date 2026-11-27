@@ -54,6 +54,7 @@ const IMPLEMENTED_ATTRIBUTES: &[&str] = &[
     "gpu",
     "kernel",
     "test",
+    "track_caller",
     ALLOW,
 ];
 

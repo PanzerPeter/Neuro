@@ -427,6 +427,8 @@ struct LoadedProgram {
     /// Every parsed file, the standard library's included, in the one offset space their
     /// spans share.
     sources: SourceMap,
+    /// The module each inline block is written in, by module id (`None` for a file).
+    module_parents: Vec<Option<ast_types::ModuleId>>,
 }
 
 /// Expand `input`, every module it reaches and the standard library into one program.
@@ -466,6 +468,7 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
 
     let module_count = program.modules.len();
     let files = program.modules.iter().map(|m| m.file.clone()).collect();
+    let module_parents = program.modules.iter().map(|m| m.parent).collect();
     let mut items = program.items;
     // Each file settled the `impl` headers naming its own types; with every name now
     // canonical, an `impl` of a type from another module learns its extents too.
@@ -491,6 +494,7 @@ fn load_program(input: &Path) -> Result<LoadedProgram> {
         module_count,
         files,
         sources,
+        module_parents,
     })
 }
 
@@ -665,10 +669,11 @@ fn check_file(path: &PathBuf) -> anyhow::Result<()> {
         items: ast,
         module_count,
         sources,
+        module_parents,
         ..
     } = load_program(path)?;
 
-    match semantic_analysis::type_check(&ast) {
+    match semantic_analysis::type_check_program(&ast, &module_parents) {
         Ok(warnings) => {
             print_warnings(&sources, &warnings);
             // Lower the type-checked AST to typed HIR (Phase 1.8). The result is the
@@ -744,6 +749,7 @@ fn compile_file(
         module_count,
         files,
         sources,
+        module_parents,
     } = load_program(input)?;
     log::debug!("Resolved {} module(s)", module_count);
 
@@ -763,7 +769,7 @@ fn compile_file(
     }
 
     log::debug!("Type checking...");
-    let warnings = semantic_analysis::type_check(&ast)
+    let warnings = semantic_analysis::type_check_program(&ast, &module_parents)
         .map_err(|errors| report_type_errors(input, &sources, &errors))
         .context("Type checking failed")?;
     print_warnings(&sources, &warnings);

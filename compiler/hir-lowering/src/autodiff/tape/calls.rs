@@ -68,7 +68,7 @@ impl<'f> Linearizer<'f> {
         if function.return_type == HirType::Void {
             return Err(self.refuse("a call to a function that returns nothing", span));
         }
-        if function.params.len() != args.len() {
+        if super::visible_params(function).len() != args.len() {
             return Err(self.malformed("a call whose argument count is not its callee's"));
         }
         let mut operands = Vec::with_capacity(args.len());

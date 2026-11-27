@@ -346,6 +346,9 @@ struct Lowerer {
     /// assigned to. A tensor constructor there reads a bound `?B` from it, the names
     /// `current_return` and the other `HirType`s erase.
     written_types: HashMap<Span, ast_types::Type>,
+    /// One frame per `pool` body being lowered, innermost last: the names a store in it
+    /// moves whole into a place, which become the block's `HirExprKind::Pool::routed`.
+    pool_moves: Vec<Vec<String>>,
     /// Each annotated binding's annotation, with the depth of the scope that binds it,
     /// innermost last, kept as `grid_aliases` is.
     written_bindings: Vec<(usize, String, ast_types::Type)>,
@@ -609,6 +612,7 @@ impl Lowerer {
             current_return: HirType::Void,
             written_return: None,
             written_types: HashMap::new(),
+            pool_moves: Vec::new(),
             written_bindings: Vec::new(),
             in_kernel: false,
             grid_aliases: Vec::new(),

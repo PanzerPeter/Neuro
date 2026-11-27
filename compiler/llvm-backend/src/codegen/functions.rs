@@ -91,12 +91,70 @@ impl<'ctx> CodegenContext<'ctx> {
             }
             return Ok(result);
         }
+        // A call handed a function value keeps the plain call, whose callee owns what it
+        // is handed, where an expanded body only reads it.
+        if let Some((callee, symbol)) = self.residency_calls.get(func_name).cloned()
+            && !args
+                .iter()
+                .any(|arg| self.holds_function(&Type::from_hir(&arg.ty)))
+        {
+            return self.codegen_residency_call(function, &callee, &symbol, &passed, &arg_values);
+        }
         let call_result = self
             .builder
             .build_call(function, &arg_values, "calltmp")
             .map_err(|e| CodegenError::LlvmError(format!("failed to build call: {}", e)))?;
 
         Ok(call_result.try_as_basic_value().basic())
+    }
+
+    /// A call to `function`, a `FollowsOperands` operation with a device and a host body,
+    /// as a branch on where its operands live: the device branch calls `function`, and
+    /// the host branch expands `symbol`'s body in place, so its result is allocated where
+    /// the caller allocates, the arena of a `pool` body included.
+    fn codegen_residency_call(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        callee: &neuro_hir::HirFunction,
+        symbol: &str,
+        passed: &[BasicValueEnum<'ctx>],
+        arg_values: &[BasicMetadataValueEnum<'ctx>],
+    ) -> CodegenResult<Option<BasicValueEnum<'ctx>>> {
+        let current = self.current_function.ok_or_else(|| {
+            CodegenError::InternalError("a call outside any function".to_string())
+        })?;
+        let on_device = self.any_operand_on_device(callee, passed)?;
+        let device_block = self.context.append_basic_block(current, "resident.device");
+        let host_block = self.context.append_basic_block(current, "resident.host");
+        let join = self.context.append_basic_block(current, "resident.join");
+        self.builder
+            .build_conditional_branch(on_device, device_block, host_block)?;
+
+        self.builder.position_at_end(device_block);
+        let device = self
+            .builder
+            .build_call(function, arg_values, "calltmp")?
+            .try_as_basic_value()
+            .basic();
+        let device_end = self.builder.get_insert_block().unwrap_or(device_block);
+        self.builder.build_unconditional_branch(join)?;
+
+        self.builder.position_at_end(host_block);
+        let host = self.emit_external_call(callee, symbol, crate::BodyMemory::Host, passed)?;
+        let host_end = self.builder.get_insert_block().unwrap_or(host_block);
+        self.builder.build_unconditional_branch(join)?;
+
+        self.builder.position_at_end(join);
+        match (device, host) {
+            (Some(device), Some(host)) => {
+                let phi = self
+                    .builder
+                    .build_phi(device.get_type(), "resident.result")?;
+                phi.add_incoming(&[(&device, device_end), (&host, host_end)]);
+                Ok(Some(phi.as_basic_value()))
+            }
+            _ => Ok(None),
+        }
     }
 
     /// Lower a method call, prepending the receiver to the argument list. Returns
@@ -484,6 +542,13 @@ impl<'ctx> CodegenContext<'ctx> {
             self.module
                 .add_function(&program_symbol(&func_def.name), llvm_ret_type, None);
         self.functions.insert(func_def.name.clone(), function);
+        if func_def
+            .params
+            .last()
+            .is_some_and(|param| param.name == neuro_hir::CALLER_LOCATION_PARAM)
+        {
+            self.tracks_caller.insert(func_def.name.clone());
+        }
         Ok(())
     }
 

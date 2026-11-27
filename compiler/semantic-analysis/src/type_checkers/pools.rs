@@ -37,7 +37,12 @@ use super::{PoolContext, TraitMethodSig, TypeChecker};
 /// The trait a type implements to say its external resource can be released by the
 /// arena's single sweep instead of by a per-object destructor. Declared in the
 /// prelude and matched here by name, the way `Drop` is.
-const POOL_AWARE_TRAIT: &str = "PoolAware";
+pub(crate) const POOL_AWARE_TRAIT: &str = "PoolAware";
+/// `PoolAware`'s two methods, which a tensor answers without an `impl`.
+pub(crate) const REGISTER_WITH_POOL_METHOD: &str = "register_with_pool";
+pub(crate) const BULK_RELEASE_METHOD: &str = "bulk_release";
+/// The prelude struct `register_with_pool` takes, the arena's handle.
+pub(crate) const POOL_HANDLE_STRUCT: &str = "PoolHandle";
 
 /// The builtin methods that copy their receiver's bytes into a fresh allocation:
 /// `.clone()`, and `StringBuilder::to_string`, which the language defines as a copy.
@@ -71,6 +76,7 @@ impl TypeChecker {
             pool,
             scope_floor: self.symbols.depth().saturating_sub(1),
             loop_floor: self.loop_stack.len(),
+            routable: HashSet::new(),
         });
     }
 
@@ -113,7 +119,9 @@ impl TypeChecker {
         } else {
             return;
         };
-        if self.carries_no_arena(value, emission) {
+        if self.carries_no_arena(value, emission)
+            || (emission == Emission::Routed && self.moves_routable_local(value))
+        {
             return;
         }
         let pool = pool.pool.clone();
@@ -133,7 +141,10 @@ impl TypeChecker {
         let Some(pool) = self.pool_stack.last() else {
             return;
         };
-        if self.pool_safe(referent) || self.carries_no_arena(value, Emission::Routed) {
+        if self.pool_safe(referent)
+            || self.carries_no_arena(value, Emission::Routed)
+            || self.moves_routable_local(value)
+        {
             return;
         }
         let pool = pool.pool.clone();
@@ -143,6 +154,55 @@ impl TypeChecker {
             pool,
             span,
         });
+    }
+
+    /// Record whether the binding `name` the innermost pool's body just declared is one a
+    /// store may move out of the block: a `val` declared in this body (not a closure's
+    /// inside it), of a type the block does not register, whose initializer carries no
+    /// arena memory when emitted routed. `init_routable` is that last test, taken before
+    /// the binding was defined, while its initializer's names still meant what they read.
+    pub(super) fn note_routable_local(&mut self, name: &str, mutable: bool, init_routable: bool) {
+        let Some(depth) = self.symbols.defining_depth(name) else {
+            return;
+        };
+        let registered = self.symbols.lookup(name).is_some_and(|symbol| {
+            matches!(&symbol.ty, Type::Struct(owner)
+                if self.trait_impls.contains(&(POOL_AWARE_TRAIT.to_string(), owner.clone())))
+        });
+        let in_body = self.pool_stack.len() > self.jump_pool_floor;
+        let Some(pool) = self.pool_stack.last_mut() else {
+            return;
+        };
+        let key = (name.to_string(), depth);
+        if !mutable && init_routable && in_body && !registered && depth >= pool.scope_floor {
+            let _ = pool.routable.insert(key);
+        } else {
+            let _ = pool.routable.remove(&key);
+        }
+    }
+
+    /// Whether `init` carries no arena memory when built with the arena off: the test a
+    /// `val` must pass for [`Self::note_routable_local`]. False outside a pool.
+    pub(super) fn routable_initializer(&self, init: &Expr) -> bool {
+        !self.pool_stack.is_empty() && self.carries_no_arena(init, Emission::Routed)
+    }
+
+    /// Whether `value` moves whole a `val` the innermost pool, opened in this body, built
+    /// off the arena for the purpose (`note_routable_local`).
+    fn moves_routable_local(&self, value: &Expr) -> bool {
+        let name = match value {
+            Expr::Identifier(id) => &id.name,
+            Expr::Paren(inner, _) => return self.moves_routable_local(inner),
+            _ => return false,
+        };
+        if self.pool_stack.len() <= self.jump_pool_floor {
+            return false;
+        }
+        let (Some(pool), Some(depth)) = (self.pool_stack.last(), self.symbols.defining_depth(name))
+        else {
+            return false;
+        };
+        pool.routable.contains(&(name.to_string(), depth))
     }
 
     /// Whether the source proves `value` holds no memory from any open pool's arena,

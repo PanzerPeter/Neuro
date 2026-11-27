@@ -605,21 +605,23 @@ func main() -> i32 {
 }
 
 /// A file that parses with escapes and padding opens: `\u` escapes and a surrogate pair decode,
-/// whitespace and trailing spaces are allowed, and a zero-size tensor sits between two others.
+/// a name mixes plain bytes, an escape and UTF-8, whitespace and trailing spaces are allowed,
+/// the header may list the ranges out of order, and a zero-size tensor sits between two others.
 #[test]
 fn escapes_padding_and_empty_tensors_open() {
-    let header = "{ \"\\u00e9\\ud83d\\ude00\" : {\"dtype\":\"U8\", \"shape\":[1], \"data_offsets\":[0,1]},\n\"z\":{\"dtype\":\"F32\",\"shape\":[0,4],\"data_offsets\":[1,1]}}   ";
+    let header = "{ \"x\\ty-é\":{\"dtype\":\"U8\",\"shape\":[1],\"data_offsets\":[1,2]}, \"\\u00e9\\ud83d\\ude00\" : {\"dtype\":\"U8\", \"shape\":[1], \"data_offsets\":[0,1]},\n\"z\":{\"dtype\":\"F32\",\"shape\":[0,4],\"data_offsets\":[1,1]}}   ";
     let source = r#"
 func main() -> i32 {
     val file = std::safetensors::open("e.safetensors") ?? panic("cannot open")
     val name: Tensor<u8, [1]> = file.tensor("é😀") ?? panic("no escaped name")
+    val mixed: Tensor<u8, [1]> = file.tensor("x\ty-é") ?? panic("no mixed name")
     val z: Tensor<f32, [0, 4]> = file.tensor("z") ?? panic("no z")
-    name[0] as i32
+    (name[0] + mixed[0] * 10) as i32
 }
 "#;
     let (code, stdout, _test, _dir) =
-        run_with(source, &[("e.safetensors", safetensors(header, &[9]))]);
-    assert_eq!(code, 9, "{stdout}");
+        run_with(source, &[("e.safetensors", safetensors(header, &[9, 5]))]);
+    assert_eq!(code, 59, "{stdout}");
 }
 
 /// A writer's file, byte for byte: metadata first, tensors in the order first added with a

@@ -108,6 +108,7 @@ fn method(name: &str, self_param: Option<SelfParam>, params: Vec<Parameter>) -> 
         return_lifetimes: 0,
         body: Vec::new(),
         attributes: Vec::new(),
+        module: None,
         span: span(),
     }
 }

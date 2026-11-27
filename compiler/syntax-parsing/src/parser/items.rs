@@ -452,6 +452,7 @@ fn apply_trait_defaults(
                 return_lifetimes: 0,
                 body: body.clone(),
                 attributes: Vec::new(),
+                module: None,
                 span: method.span,
             });
         }

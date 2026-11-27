@@ -262,6 +262,10 @@ alias is expanded at parse time, so nothing of it survives to be reached. Each i
 message that says so. An inline `module` block takes `export` like an item (below), and an `import`
 takes it as the re-export form.
 
+An inline `module` block counts as part of every module around it: it reads, writes and builds their
+private fields as it calls their private functions. A trait's default method body belongs to the
+trait's module, so it may build the trait module's private structs in every impl that receives it.
+
 Item visibility is settled while modules are resolved, so it is reported before type checking. Field
 visibility needs the receiver's type and is reported by the type checker.
 

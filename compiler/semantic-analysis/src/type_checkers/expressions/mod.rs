@@ -241,6 +241,9 @@ impl TypeChecker {
                     if self.kernel_params.contains_key(&ident.name) {
                         self.refuse_kernel_value(ident);
                     }
+                    if self.track_caller_fns.contains(&ident.name) {
+                        self.refuse_track_caller_value(ident);
+                    }
                     Some(function_ty)
                 } else if self.generic_funcs.contains_key(&ident.name) {
                     // A generic function has no one type to be a value of until its type

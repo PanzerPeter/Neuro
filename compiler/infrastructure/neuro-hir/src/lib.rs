@@ -37,6 +37,12 @@ pub use items::{
     HirTrait,
 };
 pub use statements::{HirPlace, HirStmt, MapView};
+
+/// The hidden trailing `string` parameter of a `@track_caller` function. Every direct call
+/// fills it with the location of the call (or, from inside another such function, passes its
+/// own on), and a `panic`, `assert` or `unreachable` in the function's own body reports it in
+/// place of where it is written.
+pub const CALLER_LOCATION_PARAM: &str = "__caller_location";
 pub use types::{AxisNames, HirCollectionKind, HirType, extent_display, static_shape};
 
 #[cfg(test)]

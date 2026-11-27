@@ -765,6 +765,10 @@ impl Lowerer {
             target,
         )?);
         self.pop_scope();
+        params.extend(super::caller_location_param(
+            &template.attributes,
+            template.span,
+        ));
 
         self.type_subst = saved_ty;
         self.const_subst = saved_c;

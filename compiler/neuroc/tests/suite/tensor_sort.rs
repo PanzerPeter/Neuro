@@ -540,3 +540,67 @@ func main() -> i32 {
     );
     assert_eq!(run("tensor_sort_long_f64.nr", &source), 0);
 }
+
+/// A run of dynamic length chooses its algorithm at run time: an integer run of 700 by radix
+/// and one of 100 by merging, both giving the static sort's order, as a float run does.
+#[test]
+fn dynamic_runs_sort_like_static_ones() {
+    let source = format!(
+        "{LONG_RUN_CHECKS}{}",
+        r#"
+func main() -> i32 {
+    mut v: Tensor<i32, [2, 700]> = Tensor::zeros()
+    mut w: Tensor<i32, [3, 100]> = Tensor::zeros()
+    mut f: Tensor<f32, [2, 500]> = Tensor::zeros()
+    mut seed: i64 = 11
+    for r in 0..2 {
+        for i in 0..700 {
+            seed = next(seed)
+            v[r, i] = (((seed / 65536) % 41) as i32 - 20) * 104729
+        }
+        for i in 0..500 {
+            seed = next(seed)
+            f[r, i] = ((seed / 65536) % 37) as f32 * 0.25 - 4.0
+        }
+    }
+    for r in 0..3 {
+        for i in 0..100 {
+            seed = next(seed)
+            w[r, i] = ((seed / 65536) % 9) as i32 - 4
+        }
+    }
+    val dv: Tensor<i32, [?, ?]> = v.clone()
+    val dw: Tensor<i32, [3, ?]> = w.clone()
+    val df: Tensor<f32, [?, ?]> = f.clone()
+    val up = dv.sort()
+    val order = dv.argsort(descending: true)
+    val short = dw.argsort()
+    val floats = df.argsort()
+    val up_s: Tensor<i32, [2, 700]> = v.sort()
+    val order_s: Tensor<i32, [2, 700]> = v.argsort(descending: true)
+    val short_s: Tensor<i32, [3, 100]> = w.argsort()
+    val floats_s: Tensor<i32, [2, 500]> = f.argsort()
+    for r in 0..2 {
+        for i in 0..700 {
+            if up[r, i] != up_s[r, i] { return 1 }
+            if order[r, i] != order_s[r, i] { return 2 }
+        }
+        for i in 0..500 {
+            if floats[r, i] != floats_s[r, i] { return 4 }
+        }
+    }
+    for r in 0..3 {
+        for i in 0..100 {
+            if short[r, i] != short_s[r, i] { return 3 }
+        }
+    }
+    val down_cols = dv.sort(axis: 0, descending: true)
+    for i in 0..700 {
+        if down_cols[0, i] < down_cols[1, i] { return 5 }
+    }
+    return 0
+}
+"#
+    );
+    assert_eq!(run("tensor_sort_dynamic_runs.nr", &source), 0);
+}

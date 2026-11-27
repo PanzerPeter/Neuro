@@ -111,6 +111,11 @@ run its body on the host, which `@gpu` forbids.
 `@gpu` sets `HirFunction::target` to `HirTarget::Gpu` (`target_of`), or to `GpuOrHost` for
 `@gpu(fallback: true)`, on a concrete function and on every instance of a generic template
 alike. A call to a fallback function is refused in a `@grad` body like a bare one. Every function the transform generates is `Host`.
+`@track_caller` appends one `HirParam` named `neuro_hir::CALLER_LOCATION_PARAM`, a `string`, to the
+function and to every instance of a template (`caller_location_param`), after its body is
+lowered, so nothing in the body names it. Calls are lowered with the visible arguments only; the
+backend appends the location. The differentiation transform reads a callee's parameters without
+it (`visible_params`), so an inlined body's panic names its own line.
 `@kernel(threads: [...])` sets `HirTarget::Kernel { threads }` (`block_shape` pads the literals
 to three axes with 1s), on instances as well. Before registration, `lower_program` passes the
 items through `kernel_signatures`, which rewrites each kernel's `Tensor` input to `&Tensor` and
@@ -261,7 +266,10 @@ arm happened to be written first.
 ### Nodes with a deliberately chosen type
 An `Expr::Pool` lowers to `HirType::Void` whatever its body ends with, and its body is lowered
 against no expected type: a `pool` is not an expression, so a trailing value has nowhere to go
-and must not drag a contextual type into the block.
+and must not drag a contextual type into the block. Its `routed` lists every name a plain
+assignment in the body (at any depth, nested pools and closures included) moves whole,
+collected through the `pool_moves` stack as the body is lowered, so the backend can build a
+`val` of that name off the arena.
 
 Three have no first-class source form: a `loop` value-expression takes its `break v` type (or
 `void`); a method-name callee `FieldAccess` carries the *call's* result type, since there is no

@@ -29,6 +29,8 @@ pub(crate) struct TypeChecker {
     /// between this and the struct's own module, and nothing else in the checker
     /// depends on it.
     current_module: ModuleId,
+    /// The module each inline block is written in, by id; see [`crate::type_check_program`].
+    module_parents: Vec<Option<ModuleId>>,
     /// The standard library's modules, whose bodies alone may call the runtime intrinsics.
     library_modules: HashSet<ModuleId>,
     /// Enum definitions: name → ordered list of variants. The order is the
@@ -232,6 +234,8 @@ pub(crate) struct TypeChecker {
     /// For each `@kernel` function, its parameter types as written. A bare `Tensor` is an
     /// input, which a call borrows rather than moves.
     kernel_params: HashMap<String, Vec<ast_types::Type>>,
+    /// The `@track_caller` functions, which are called by name only.
+    track_caller_fns: HashSet<String>,
     /// Names of bindings in the current function whose storage outlives the call:
     /// reference-typed parameters and the `self` receiver of an instance method.
     /// A returned reference is only safe when it ultimately borrows one of these:
@@ -495,6 +499,10 @@ struct PoolContext {
     /// `loop_stack` depth at the opening brace. A `break` / `continue` resolving to
     /// a loop below it jumps out of the block.
     loop_floor: usize,
+    /// The `val`s this body declares, by name and defining depth, whose initializer
+    /// carries no arena memory when built with the arena off. Lowering builds one that a
+    /// store moves out of the block that way, so the store may carry it past the brace.
+    routable: HashSet<(String, usize)>,
 }
 
 mod backward;
@@ -533,6 +541,7 @@ mod tensor_shape;
 mod tensor_sort;
 mod tensors;
 mod test_functions;
+mod track_caller;
 mod val_else;
 
 #[cfg(test)]
@@ -547,6 +556,7 @@ impl TypeChecker {
             struct_modules: HashMap::new(),
             private_fields: HashMap::new(),
             current_module: 0,
+            module_parents: Vec::new(),
             library_modules: HashSet::new(),
             enum_defs: HashMap::new(),
             generic_enums: HashMap::new(),
@@ -604,6 +614,7 @@ impl TypeChecker {
             indexed_kernel_out: None,
             unsafe_depth: 0,
             kernel_params: HashMap::new(),
+            track_caller_fns: HashSet::new(),
             current_fn_outliving: HashSet::new(),
             lifetime_flows: HashMap::new(),
             current_flow: None,
@@ -630,6 +641,26 @@ impl TypeChecker {
         }
     }
 
+    pub(crate) fn set_module_parents(&mut self, parents: &[Option<ModuleId>]) {
+        self.module_parents = parents.to_vec();
+    }
+
+    /// Whether the body being checked sees `struct_name`'s private fields: it is written
+    /// in the struct's module or in a block that module encloses.
+    fn sees_privates_of(&self, struct_name: &str) -> bool {
+        let Some(owner) = self.struct_modules.get(struct_name).copied() else {
+            return false;
+        };
+        let mut module = Some(self.current_module);
+        while let Some(id) = module {
+            if id == owner {
+                return true;
+            }
+            module = self.module_parents.get(id as usize).copied().flatten();
+        }
+        false
+    }
+
     /// Reject reading, writing, or initializing a field the declaring module keeps to
     /// itself.
     ///
@@ -641,7 +672,7 @@ impl TypeChecker {
         field_name: &str,
         span: shared_types::Span,
     ) -> bool {
-        if self.struct_modules.get(struct_name).copied() == Some(self.current_module) {
+        if self.sees_privates_of(struct_name) {
             return false;
         }
         let private = self
@@ -669,7 +700,7 @@ impl TypeChecker {
         listed: &HashMap<String, shared_types::Span>,
         span: shared_types::Span,
     ) {
-        if self.struct_modules.get(struct_name).copied() == Some(self.current_module) {
+        if self.sees_privates_of(struct_name) {
             return;
         }
         let mut hidden: Vec<String> = match self.private_fields.get(struct_name) {
@@ -1333,6 +1364,7 @@ impl TypeChecker {
         self.check_gpu_attributes(items);
         self.check_kernel_attributes(items);
         self.check_test_attributes(items);
+        self.check_track_caller_attributes(items);
 
         // Pass 4: check function, method, and const bodies. Each body is checked as the
         // module it was written in, which is what a private field is measured against.

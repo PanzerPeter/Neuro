@@ -213,14 +213,16 @@ func main() -> i32 {
 
 #[test]
 fn storing_the_blocks_own_allocation_into_an_outer_binding_is_rejected() {
-    // The limit of the routing: a store can be emitted off the arena, but it cannot
-    // move a buffer the block already took from it.
+    // The limit of the routing: a store can be emitted off the arena, and so can a `val`
+    // the store moves out, but not a buffer a `mut` binding took from the arena after
+    // its declaration.
     let test = CompileTest::new();
     let source = r#"
 func main() -> i32 {
     mut out: string = ""
     pool {
-        val local = "a" + "b"
+        mut local = "a" + "b"
+        local = local + "c"
         out = local
     }
     0
@@ -1075,11 +1077,10 @@ func main() -> i32 {{
     assert_eq!(code, 7);
 }
 
-/// `Vec` growth reallocates its buffer with libc, so a `Vec` whose buffer came from the
-/// arena would hand `realloc` a pointer libc never gave out. `keys()` once built such a
-/// `Vec`; the keys now fill one inside the pool.
+/// A `Vec` whose buffer came from the arena once reached libc's `realloc`, a pointer libc
+/// never gave out. `keys()` built such a `Vec`; growth now takes a buffer of either kind.
 /// The second pool writes past the arena's first page, which is where the damage that
-/// `realloc` did to the chunk becomes a fault.
+/// `realloc` did to the chunk became a fault.
 #[test]
 fn regression_bug_046_a_key_vec_built_inside_a_pool_can_grow() {
     let test = CompileTest::new();
@@ -1998,4 +1999,196 @@ func main() -> i32 {{
         "{out}"
     );
     assert!(!out.contains("drop"), "{out}");
+}
+
+/// A `Vec` and a `StringBuilder` the block owns grow on the arena, and keep their values
+/// when handed on: pushed to from an inner block, which copies the buffer to the heap, and
+/// moved into a callee that grows it there.
+#[test]
+fn a_collection_the_block_owns_grows_on_the_arena() {
+    let source = r#"
+func extend(v: Vec<i32>) -> i32 {
+    mut w = v
+    for i in 0..1000 { w.push(i) }
+    w[1000]
+}
+func main() -> i32 {
+    mut outer: Vec<i32> = Vec::new()
+    mut total: i64 = 0
+    mut round = 0
+    while round < 3 {
+        pool {
+            mut v: Vec<i32> = Vec::new()
+            for i in 0..10000 { v.push(i) }
+            outer.push(v[9999])
+            mut text = StringBuilder::new()
+            for i in 0..500 { text.push_str("ab") }
+            total += text.to_string().len() as i64
+            mut sized: Vec<i64> = Vec::with_capacity(4)
+            for i in 0..5000 { sized.push(i as i64) }
+            total += sized[4999]
+            pool {
+                mut inner: Vec<i32> = Vec::new()
+                for i in 0..50 { inner.push(i) }
+                v.push(inner[49])
+            }
+            v.push(7)
+            total += (v[10000] + v[10001]) as i64
+            mut handed: Vec<i32> = Vec::new()
+            handed.push(1)
+            total += extend(handed) as i64
+        }
+        round += 1
+    }
+    if outer.len() != 3 || outer[2] != 9999 { return 1 }
+    // Per round: 1000 + 4999 + 56 + 999.
+    if total != 3 * 7054 { return 2 }
+    0
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("pool_growth.nr", source), 0);
+}
+
+/// A block whose allocations pass the first chunk moves on to the next, a nested block
+/// that does so gives the chunk back at its brace, and the enclosing block goes on where
+/// its own allocations were.
+#[test]
+fn a_block_outgrowing_the_first_chunk_moves_on_to_the_next() {
+    let source = r#"
+func main() -> i32 {
+    mut total: f64 = 0.0
+    mut round = 0
+    while round < 2 {
+        pool {
+            val before = "kept " + "across"
+            pool {
+                // 64 MiB of `f32`, past what the first chunk holds beside anything else.
+                val big = Tensor::<f32, [4096, 4096]>::ones()
+                val more = Tensor::<f32, [2048, 2048]>::ones()
+                total += (big.sum() + more.sum()) as f64
+            }
+            val after = Tensor::<f32, [1024, 1024]>::ones()
+            total += after.sum() as f64
+            if before.len() != 11 { return 1 }
+        }
+        round += 1
+    }
+    if total != 2.0 * (16777216.0 + 4194304.0 + 1048576.0) { return 2 }
+    0
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("pool_chunks.nr", source), 0);
+}
+
+/// A map the block owns rehashes into the arena, and one declared before it keeps its
+/// table on the heap while the block inserts into it.
+#[test]
+fn a_map_the_block_owns_rehashes_on_the_arena() {
+    let source = r#"
+func main() -> i32 {
+    mut kept: HashMap<i32, i32> = HashMap::new()
+    mut total: i64 = 0
+    pool {
+        mut own: HashMap<i32, i32> = HashMap::new()
+        for i in 0..2000 {
+            own.insert(i, i * 2)
+            kept.insert(i, i)
+        }
+        val found = match own.get(1999) {
+            Some(v) => *v,
+            None => 0,
+        }
+        total += found as i64 + own.len() as i64
+    }
+    val back = match kept.get(1500) {
+        Some(v) => *v,
+        None => 0,
+    }
+    if total != 3998 + 2000 || back != 1500 || kept.len() != 2000 { return 1 }
+    0
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("pool_map_growth.nr", source), 0);
+}
+
+/// LIM-111: a `val` the block builds from nothing of the arena's and then stores into a
+/// place outliving the block is built off the arena, so the store compiles and the value
+/// survives the brace. A `mut` binding, one built from another block binding, one handed
+/// to a callee, and one stored from a nested block stay refused.
+#[test]
+fn a_val_the_block_moves_out_is_built_off_the_arena() {
+    let source = r#"
+struct Pair { a: string, b: i32 }
+func main() -> i32 {
+    mut out = ""
+    mut keep = Pair { a: "", b: 0 }
+    mut round = 0
+    while round < 4 {
+        pool {
+            val local = "a" + "b"
+            val tagged = "r{round}"
+            val pair = Pair { a: "k" + "!", b: round }
+            out = local
+            if round == 2 {
+                keep = pair
+            }
+            out = tagged
+        }
+        round += 1
+    }
+    if out != "r3" || keep.a != "k!" || keep.b != 2 { return 1 }
+    0
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("pool_move_out.nr", source), 0);
+
+    for body in [
+        "mut local = \"a\" + \"b\"\n        out = local",
+        "val first = \"a\" + \"b\"\n        val local = first\n        out = local",
+        "val local = \"a\" + \"b\"\n        put(&mut out, local)",
+        "val local = \"a\" + \"b\"\n        pool {\n            out = local\n        }",
+    ] {
+        let source = format!(
+            "func put(dst: &mut string, s: string) {{ *dst = s }}\nfunc main() -> i32 {{\n    mut out = \"\"\n    pool {{\n        {body}\n    }}\n    0\n}}\n"
+        );
+        let error = crate::compile_harness::rejected("pool_move_out_refused.nr", &source);
+        assert!(
+            error.contains("outlives this 'pool' block"),
+            "{body}: {error}"
+        );
+    }
+}
+
+/// A tensor is `PoolAware` without an `impl`: it meets a `T: PoolAware` bound, and its
+/// `register_with_pool` and `bulk_release` do nothing, since the arena or its own deleter
+/// already releases the buffer. `bulk_release` still takes `&mut self`.
+#[test]
+fn a_tensor_meets_a_pool_aware_bound() {
+    let source = r#"
+func release_all<T: PoolAware>(item: &mut T) { item.bulk_release() }
+func counted<T: PoolAware>(item: &T) -> i32 { 1 }
+func main() -> i32 {
+    mut t = Tensor::<f32, [4]>::ones()
+    release_all(&mut t)
+    t.bulk_release()
+    mut total = t.sum() as i32
+    pool {
+        mut u = Tensor::<f32, [8]>::ones()
+        release_all(&mut u)
+        total += u.sum() as i32 + counted(&u)
+    }
+    total
+}
+"#;
+    let test = CompileTest::new();
+    assert_eq!(test.run_leak_checked("pool_aware_tensor.nr", source), 13);
+    let error = crate::compile_harness::rejected(
+        "pool_aware_tensor_val.nr",
+        "func main() -> i32 {\n    val t = Tensor::<f32, [4]>::ones()\n    t.bulk_release()\n    0\n}\n",
+    );
+    assert!(error.contains("requires a `mut` binding"), "{error}");
 }

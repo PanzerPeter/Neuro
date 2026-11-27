@@ -73,6 +73,16 @@ impl TypeChecker {
             self.end_lends(lend.into_iter().collect());
             return Some(*ret);
         }
+        // A binding borrowing a function value is called through one dereference,
+        // `f(x)` as `(*f)(x)`, under the referent's lend rules.
+        if self.lookup_newtype_inner(func_name).is_none()
+            && let Some(Type::Reference { inner, .. }) =
+                self.symbols.lookup(func_name).map(|info| &info.ty)
+            && matches!(**inner, Type::Function { .. })
+        {
+            let deref = deref_of_binding(func_name, span);
+            return self.check_callee_and_arguments(&deref, type_args, args, &span, None);
+        }
 
         // A call to a generic function: unify its parameters against the call
         // arguments (and any explicit turbofish), then yield the substituted return type.
@@ -1417,6 +1427,10 @@ impl TypeChecker {
                         if let Some(ret) =
                             self.check_supplied_trait_method(&obj_ty, &field.name, args, *span)
                         {
+                            // `PoolAware::bulk_release` takes `&mut self`, a tensor's too.
+                            if field.name == crate::type_checkers::pools::BULK_RELEASE_METHOD {
+                                self.check_mut_self_receiver(object, &raw_ty, *span);
+                            }
                             return Some(ret);
                         }
                         self.record_error(missing_method(
@@ -1634,8 +1648,13 @@ impl TypeChecker {
                 // place included: the value is the same one a binding would hold.
                 if let Type::Function { params, ret, mode } = expr_ty {
                     let found = self.check_call_args(args, &params, *span);
+                    // A `once` call uses the value up, which a place behind a borrow
+                    // cannot give.
                     let lend = match mode {
-                        FunctionMode::Once => None,
+                        FunctionMode::Once => {
+                            self.record_move(func);
+                            None
+                        }
                         _ => self.lend_function_value(func, mode == FunctionMode::Mut),
                     };
                     self.end_lends(lend.into_iter().collect());
@@ -1796,5 +1815,16 @@ fn is_string_literal(expr: &ast_types::Expr) -> bool {
         ast_types::Expr::Paren(inner, _) => is_string_literal(inner),
         ast_types::Expr::Literal(shared_types::Literal::String(_), _) => true,
         _ => false,
+    }
+}
+
+/// `*name`, the callee a call of a binding that borrows a function value stands for.
+fn deref_of_binding(name: &str, span: Span) -> Expr {
+    Expr::Deref {
+        operand: Box::new(Expr::Identifier(Identifier {
+            name: name.to_string(),
+            span,
+        })),
+        span,
     }
 }

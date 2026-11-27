@@ -87,12 +87,16 @@ impl<'ctx> CodegenContext<'ctx> {
         let bytes = self.builder.build_int_mul(new_cap, stride, "cap.bytes")?;
 
         // The table belongs to the map, not to the expression growing it, and the map may
-        // outlive an enclosing `pool`. Like `Vec` growth, it therefore never comes from the
-        // arena.
-        let malloc = self.get_or_declare_malloc();
+        // outlive an enclosing `pool`. Like `Vec` growth, it comes from the arena only for a
+        // map the innermost `pool` body owns. The old table goes back through the release
+        // wrapper, which leaves an arena one alone.
+        let alloc = match self.grows_in_arena(header) {
+            true => self.alloc_fn()?,
+            false => self.get_or_declare_malloc(),
+        };
         let fresh = self
             .builder
-            .build_call(malloc, &[bytes.into()], "table.new")?
+            .build_call(alloc, &[bytes.into()], "table.new")?
             .try_as_basic_value()
             .basic()
             .ok_or_else(|| CodegenError::InternalError("malloc returned void".into()))?
@@ -252,7 +256,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let stride = self.size_of_type(slot_ty.into())?;
         // The ordered map's growth is the same doubling `realloc` a `Vec` uses, since its
         // slots are a dense array too; only the stride differs, and that is a parameter.
-        let reserve = self.build_reserve_helper()?;
+        let reserve = self.build_reserve_helper(self.grows_in_arena(header))?;
         self.builder
             .build_call(reserve, &[header.into(), stride.into()], "")?;
         Ok(())

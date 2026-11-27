@@ -19,6 +19,8 @@ use crate::types::Type;
 
 /// The shared byte-capacity helper: `__neuro_string_reserve(header, extra_bytes)`.
 const RESERVE_HELPER: &str = "__neuro_string_reserve";
+/// The same helper for a builder a `pool` body owns, growing on the arena.
+const ARENA_RESERVE_HELPER: &str = "__neuro_string_reserve.arena";
 
 impl<'ctx> CodegenContext<'ctx> {
     /// `s.push_str(text)`, which reserves room for the argument's bytes, copy them in after the
@@ -39,7 +41,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let text = self.codegen_expr(text_expr)?;
         let (src, extra) = self.split_string_fatptr(text)?;
 
-        let reserve = self.build_string_reserve_helper()?;
+        let reserve = self.build_string_reserve_helper(self.grows_in_arena(header))?;
         self.builder
             .build_call(reserve, &[header.into(), extra.into()], "")?;
 
@@ -133,15 +135,23 @@ impl<'ctx> CodegenContext<'ctx> {
     ///
     /// Taking the max of the two keeps a single large append from becoming a chain of
     /// doublings while leaving repeated small appends amortized O(1).
-    fn build_string_reserve_helper(&mut self) -> CodegenResult<FunctionValue<'ctx>> {
+    fn build_string_reserve_helper(
+        &mut self,
+        in_arena: bool,
+    ) -> CodegenResult<FunctionValue<'ctx>> {
         let ptr_ty = self.context.ptr_type(inkwell::AddressSpace::default());
         let i64_ty = self.context.i64_type();
         let fn_type = self
             .context
             .void_type()
             .fn_type(&[ptr_ty.into(), i64_ty.into()], false);
+        let realloc = self.growth_realloc_fn(in_arena)?;
+        let name = match in_arena {
+            true => ARENA_RESERVE_HELPER,
+            false => RESERVE_HELPER,
+        };
 
-        self.get_or_build_helper(RESERVE_HELPER, fn_type, |ctx, func| {
+        self.get_or_build_helper(name, fn_type, |ctx, func| {
             let entry = ctx.context.append_basic_block(func, "entry");
             let grow_bb = ctx.context.append_basic_block(func, "grow");
             let done_bb = ctx.context.append_basic_block(func, "done");
@@ -192,10 +202,9 @@ impl<'ctx> CodegenContext<'ctx> {
                 .into_int_value();
 
             let old = ctx.load_header_buffer(header)?;
-            let realloc = ctx.get_or_declare_realloc();
             let grown = ctx
                 .builder
-                .build_call(realloc, &[old.into(), new_cap.into()], "grown")?
+                .build_call(realloc, &[old.into(), cap.into(), new_cap.into()], "grown")?
                 .try_as_basic_value()
                 .basic()
                 .ok_or_else(|| CodegenError::InternalError("realloc returned void".into()))?

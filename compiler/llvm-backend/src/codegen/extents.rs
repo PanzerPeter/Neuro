@@ -729,6 +729,7 @@ mod tests {
         let pool = expr(
             HirExprKind::Pool {
                 label: None,
+                routed: Vec::new(),
                 stmts: vec![HirStmt::VarDecl {
                     name: "t".to_string(),
                     ty: tensor(&shape),

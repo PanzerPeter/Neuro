@@ -193,9 +193,20 @@ impl<'ctx> CodegenContext<'ctx> {
         let i64_type = self.context.i64_type();
         let alloc = self.extern_fn(
             DEVICE_TENSOR_ALLOC_FN,
-            self.ptr().fn_type(&[i64_type.into()], false),
+            self.ptr()
+                .fn_type(&[i64_type.into(), self.context.i32_type().into()], false),
         );
-        self.pointer_call(alloc, &[bytes.into()], "device.tensor")
+        let pooled = self.device_pooled();
+        self.pointer_call(alloc, &[bytes.into(), pooled.into()], "device.tensor")
+    }
+
+    /// The `pooled` flag a device allocation takes: set where the code being emitted
+    /// stands in a `pool` body whose exit restores the device arena, so the buffer is a
+    /// piece of that arena rather than an allocation of its own.
+    fn device_pooled(&self) -> IntValue<'ctx> {
+        let pooled =
+            self.allocating_in_pool_body() && matches!(self.body_memory, crate::BodyMemory::Device);
+        self.context.i32_type().const_int(u64::from(pooled), false)
     }
 
     /// Copy `bytes` bytes at `host` to a new device buffer on GPU `index`, and return it. The
@@ -216,13 +227,15 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.ptr().into(),
                     i64_type.into(),
                     self.context.i32_type().into(),
+                    self.context.i32_type().into(),
                 ],
                 false,
             ),
         );
+        let pooled = self.device_pooled();
         self.pointer_call(
             upload,
-            &[host.into(), bytes.into(), index.into()],
+            &[host.into(), bytes.into(), index.into(), pooled.into()],
             "device.upload",
         )
     }
@@ -286,13 +299,15 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.ptr().into(),
                     self.context.i64_type().into(),
                     self.context.i32_type().into(),
+                    self.context.i32_type().into(),
                 ],
                 false,
             ),
         );
+        let pooled = self.device_pooled();
         self.pointer_call(
             clone,
-            &[buffer.into(), bytes.into(), index.into()],
+            &[buffer.into(), bytes.into(), index.into(), pooled.into()],
             "device.clone",
         )
     }
@@ -317,13 +332,21 @@ impl<'ctx> CodegenContext<'ctx> {
                     self.context.i64_type().into(),
                     i32_type.into(),
                     i32_type.into(),
+                    i32_type.into(),
                 ],
                 false,
             ),
         );
+        let pooled = self.device_pooled();
         self.pointer_call(
             move_fn,
-            &[buffer.into(), bytes.into(), from.into(), to.into()],
+            &[
+                buffer.into(),
+                bytes.into(),
+                from.into(),
+                to.into(),
+                pooled.into(),
+            ],
             "device.moved",
         )
     }

@@ -99,7 +99,7 @@ A scalar operand, a literal included, reaches an outlined body as a parameter. F
 Every one of these lowers for the host and for a GPU alike, except where noted.
 
 - **Reductions** (`.sum()`, `.mean()`, `.max()`, `.min()`): a seed and a fold, one result element per parallel point folding its run in order. Runs longer than the language's 4096 reduction lanes are folded lane by lane first, as [GPU kernels](#gpu-kernels) describes. A half-precision run is widened to `f32`, folded there, and rounded back once.
-- **Sorts** (`.sort()`, `.argsort()`, `.topk()`): a stable bottom-up merge sort, one parallel `linalg.generic` per doubling of the block width, each point placed by a binary search. On the host, an integer run of 256 or more sorts by LSD radix, a byte a pass, instead. Any stable sort under one comparator gives the same order, so the algorithm is never observable.
+- **Sorts** (`.sort()`, `.argsort()`, `.topk()`): on the host, each run in turn, by LSD radix (a byte a pass) for an integer run of 256 or more and by a sequential bottom-up merge otherwise; a run of dynamic length makes that choice at run time. On a GPU, a stable bottom-up merge sort, one parallel `linalg.generic` per doubling of the block width, each point placed by a binary search. Any stable sort under one comparator gives the same order, so the algorithm is never observable.
 - **Elementwise math**: the `math` dialect op of each function's name, which the CPU pipeline turns into the same LLVM intrinsics the LLVM backend calls on a scalar.
 - **Slices and permutations**: a gather reading the source at each result position, and an input map.
 - **`einsum`**: the matrix product's contracting shape, adding in its letters' order.

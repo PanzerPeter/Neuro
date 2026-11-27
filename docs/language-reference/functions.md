@@ -344,6 +344,24 @@ A user-defined function named `panic`, `assert` or `unreachable` shadows the bui
 
 `return`, `break` and `continue` diverge the same way, so an `if` or `match` arm that uses one takes its type from its siblings, see [expressions.md](expressions.md#if-expressions).
 
+### Reporting the caller's line
+
+A checking helper is more useful when its failure names the line that called it. `@track_caller` on a free function does that: a `panic`, `assert` or `unreachable` written in its body reports the location of the call that reached it. When that call is itself in a `@track_caller` function, the location passes on, so the line named is the first caller outside the chain:
+
+```neuro
+@track_caller
+func expect_positive(x: i32) -> i32 {
+    assert(x > 0)
+    x
+}
+
+func main() -> i32 {
+    expect_positive(-1)   // prints "assertion failed at main.nr:8:5"
+}
+```
+
+A closure written inside the function reports its own lines, since the closure is what calls. A `@track_caller` function is called by name only. It is not a function value, so wrap the call in a closure (`|x| expect_positive(x)`) where a value is needed. The attribute takes no arguments and is refused on a method and on a `@gpu`, `@kernel` or `@test` function.
+
 ## Tests
 
 `@test` marks a function as a test. A test takes no parameters, returns nothing and is not generic, and it passes unless it panics:
@@ -374,7 +392,7 @@ func tenths_add_up() {
 | Function | Behaviour |
 |---|---|
 | `is_close<T: Float>(actual: T, expected: T, tolerance: T) -> bool` | `true` when the two differ by at most `tolerance` while `expected` is at most 1 in magnitude, and by at most `tolerance * \|expected\|` above that. Equal values are close, infinities included. `NaN` is close to nothing. |
-| `assert_close<T: Float>(actual: T, expected: T, tolerance: T)` | Panics with `assert_close: <actual> is not within <tolerance> of <expected>` unless `is_close` holds. |
+| `assert_close<T: Float>(actual: T, expected: T, tolerance: T)` | Panics with `assert_close: <actual> is not within <tolerance> of <expected>` unless `is_close` holds. It is `@track_caller`, so the panic names the test's line. |
 
 All three arguments share one float type, `f16` through `f64`. A tensor is compared element by element in a loop.
 

@@ -80,7 +80,8 @@ func main() -> i32 {
 }
 
 #[test]
-fn storing_the_blocks_own_allocation_into_an_outer_binding_is_rejected() {
+fn storing_a_val_the_block_moves_out_whole_is_allowed() {
+    // The `val` is built off the arena, since the store takes it whole.
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
@@ -94,15 +95,35 @@ func main() -> i32 {
 "#,
     );
     assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
-        "routing cannot move a buffer the block already took from the arena; got {errors:?}"
+        errors.is_empty(),
+        "the moved `val` is routed; got {errors:?}"
     );
 }
 
-/// `string` `+` copies both operands into a buffer of its own, so a routed store keeps
-/// none of the block's arena memory even when an operand is the block's (BUG-104).
+#[test]
+fn a_val_moved_out_through_another_binding_is_rejected() {
+    // Routing follows one binding only: `b` holds what `a` took from the arena.
+    let errors = semantic_errors(
+        r#"
+func main() -> i32 {
+    mut out: string = ""
+    pool {
+        val a = "a" + "b"
+        val b = a
+        out = b
+    }
+    0
+}
+"#,
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
+        "a second binding is not routed; got {errors:?}"
+    );
+}
+
 #[test]
 fn concatenating_the_blocks_own_allocation_into_an_outer_binding_is_allowed() {
     let errors = semantic_errors(
@@ -340,7 +361,7 @@ func main() -> i32 {
 }
 
 #[test]
-fn assigning_an_arena_value_through_a_reference_is_rejected() {
+fn moving_a_val_out_through_a_reference_is_allowed() {
     let errors = semantic_errors(
         r#"
 func main() -> i32 {
@@ -355,10 +376,8 @@ func main() -> i32 {
 "#,
     );
     assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e, TypeError::PoolStoreEscapes { .. })),
-        "the referent may outlive the block and the value is the arena's; got {errors:?}"
+        errors.is_empty(),
+        "the moved `val` is routed; got {errors:?}"
     );
 }
 
