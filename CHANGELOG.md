@@ -10,6 +10,14 @@ and PATCH is a fix, a test or a docs change. A breaking change can land in any M
 
 ## [Unreleased]
 
+## [5.58.7] - 2026-11-27
+
+### Documentation
+
+- Filed BUG-173: a `.map` / `.zip` / `.reduce` on a device tensor whose function comes through a
+  local panics at run time, where the language reference has it copy the operand to the host and
+  warn.
+
 ## [5.58.6] - 2026-11-26
 
 ### Added

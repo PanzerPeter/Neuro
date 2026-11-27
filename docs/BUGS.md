@@ -5,6 +5,41 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-173: a device traversal whose function comes through a local panics
+
+- **Status**: open, confirmed
+- **Area**: `mlir-backend` (device traversals, `kernel/body/traversal.rs`)
+- **Severity**: moderate. Valid source compiles, then panics at run time where the spec gives an
+  answer
+
+**Minimal repro**
+
+```neuro
+func main() -> i32 {
+    val h: Tensor<f32, [4]> = [1.0, 2.0, 3.0, 4.0]
+    val g = h.to(Device::GPU(0))
+    val f = |x: f32| x * 2.0
+    val r = g.map(f)
+    val back = r.to(Device::CPU)
+    println("{back[3]}")
+    0
+}
+```
+
+Expected: `8.0`, with a compile warning that the traversal runs on the host. The language
+reference says a function passed through a local is a value only the run time knows, so its
+traversal copies the operand to the host, runs there, and the compiler warns. Observed: no warning, and the run panics at the `.map`
+with "this tensor lives on a GPU, where host code cannot read it".
+
+**Root cause**: the outlined traversal has its host body alone, and nothing copies a device operand
+to the host before calling it.
+
+**Workaround**: pass the closure literal directly (`g.map(|x: f32| x * 2.0)`), or move the tensor to
+the host first.
+
+**Fix sketch**: copy a device operand to the host before the outlined traversal's host body runs, and
+emit the warning the language reference names at compile time.
+
 ## BUG-171: a binding named like a size parameter is accepted and reads the parameter
 
 - **Status**: open, confirmed
