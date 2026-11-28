@@ -236,20 +236,20 @@ vectorizes.
 
 | Benchmark | What it stresses | Neuro `-O 3` | `clang++ -O3` | `rustc -O3` | Python 3.14 | NumPy |
 |---|---|---|---|---|---|---|
-| `mandelbrot` | scalar `f64` in a tight loop | 175 ms | 173 ms | 173 ms | 6999 ms | 1447 ms |
-| `vector_sum` | `Vec` push, sweep by reference | 25 ms | 28 ms | 26 ms | 6626 ms | 154 ms |
-| `call_overhead` | recursion, call and inline cost | 53 ms | 54 ms | 51 ms | 1436 ms | |
-| `print_lines` | integer holes to standard output | 14 ms | 21 ms | 13 ms | 117 ms | |
-| `format_floats` | `f64` holes at a fixed precision | 21 ms | 112 ms | 37 ms | 224 ms | |
-| `int_divide` | guarded `/` and `%`, opaque divisor | 99 ms | 92 ms | 93 ms | 1574 ms | |
-| `matmul` | `@` on `[256, 256]` `f32` tensors | 3.6 ms | 4.1 ms | 4.2 ms | 830 ms | 67 ms |
+| `mandelbrot` | scalar `f64` in a tight loop | 167 ms | 166 ms | 166 ms | 6903 ms | 1328 ms |
+| `vector_sum` | `Vec` push, sweep by reference | 25 ms | 26 ms | 25 ms | 5906 ms | 152 ms |
+| `call_overhead` | recursion, call and inline cost | 51 ms | 52 ms | 52 ms | 1416 ms | |
+| `print_lines` | integer holes to standard output | 14 ms | 20 ms | 14 ms | 113 ms | |
+| `format_floats` | `f64` holes at a fixed precision | 19 ms | 107 ms | 36 ms | 219 ms | |
+| `int_divide` | guarded `/` and `%`, opaque divisor | 96 ms | 88 ms | 89 ms | 1537 ms | |
+| `matmul` | `@` on `[256, 256]` `f32` tensors | 3.5 ms | 3.9 ms | 3.7 ms | 786 ms | 73 ms |
 
 Absolute times belong to the machine. Four rows are worth a word. `print_lines` beats C because
 an integer hole renders through a digit loop instead of `snprintf`, as Rust's does.
 `format_floats` beats both for the same reason: a float hole renders through Neuro's own exact
-renderer instead of the C library conversion C++ calls, five times faster with the same text.
+renderer instead of the C library conversion C++ calls, more than five times faster with the same text.
 `int_divide` is the one place the compiler spends: `/` and `%` guard the operand pairs the
-hardware leaves undefined, and Rust guards the same pairs for 6% less. `matmul` runs each `@` as a register-blocked, vectorized loop nest, level with the
+hardware leaves undefined, and Rust guards the same pairs for 8% less. `matmul` runs each `@` as a register-blocked, vectorized loop nest, level with the
 i-k-j loops the C++ and Rust versions vectorize, and with the same bits as a plain loop.
 
 The GPU benchmarks run their Neuro side as `@gpu` kernels, against PyTorch on the same GPU and
@@ -257,10 +257,10 @@ NumPy on the CPU. Each moves the same data between host and device:
 
 | Benchmark | What it stresses | Neuro `@gpu` | PyTorch (CUDA) | NumPy (CPU) |
 |---|---|---|---|---|
-| `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 259 ms | 1157 ms | 675 ms |
-| `gpu_reduce` | 1000 rounds of a whole and a row `.sum()` on `[2048, 2048]` | 840 ms | 1179 ms | 1249 ms |
-| `gpu_matmul` | five `[2048, 2048]` `f32` products | 287 ms | 1262 ms | 277 ms |
-| `gpu_mlp` | twenty batches through a two-layer perceptron | 258 ms | 1313 ms | 203 ms |
+| `gpu_relax` | 200 fused element-wise steps on `[2048, 2048]` | 255 ms | 1097 ms | 652 ms |
+| `gpu_reduce` | 1000 rounds of a whole and a row `.sum()` on `[2048, 2048]` | 676 ms | 1088 ms | 1090 ms |
+| `gpu_matmul` | five `[2048, 2048]` `f32` products | 300 ms | 1206 ms | 302 ms |
+| `gpu_mlp` | twenty batches through a two-layer perceptron | 256 ms | 1218 ms | 159 ms |
 
 These are whole-program times, and both GPU columns start with a fixed cost: about 220 ms for a
 Neuro program, most of it the CUDA driver starting up, and about 1100 ms for PyTorch's import and
