@@ -11,6 +11,15 @@ means.
 
 ## [Unreleased]
 
+## [5.58.13] - 2026-11-28
+
+### Changed
+
+- `AGENTS.md` and `VSA.md` are shorter. Generic cargo usage, restated rules and explanatory
+  padding are gone; every rule and rule ID that other files cite is kept, and section numbers
+  are unchanged. Four `VSA.md` rows that only repeated another rule (AC-003, AC-007, AC-013,
+  AC-014) are removed in favour of the rules they pointed to (CM-002, CM-001, CQ-001, CM-004).
+
 ## [5.58.12] - 2026-11-27
 
 ### Fixed

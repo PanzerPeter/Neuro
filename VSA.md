@@ -1,11 +1,7 @@
 # Vertical Slice Architecture: Neuro Compiler Rules v5.0
 
-> **Priority: highest.** Every rule here is a build rule. Violations of a BLOCKER rule
-> must be refused: state the rule ID and propose a compliant alternative.
-> **Context:** 1 human + 1 AI agent. Rust compiler workspace. No backward compatibility.
-> **Scope:** this file owns architecture only. Versioning, roadmap, and execution
-> protocol live elsewhere and are not restated here.
-> Supersedes: the generic v4.4 base ruleset.
+> Architecture rules only. A BLOCKER violation is refused: name the rule ID and propose a
+> compliant alternative. No backward compatibility is kept.
 
 ---
 
@@ -17,12 +13,11 @@
 | **Shared Kernel** | The crates under `compiler/infrastructure/`. Contract types and adapters only: no compilation logic. |
 | **Driver** | `neuroc`. The only crate permitted to depend on every Slice. Owns pipeline orchestration. |
 | **Contract Type** | A type crossing a Slice boundary: AST nodes, HIR nodes, `Span`, diagnostics. Lives in the Shared Kernel, never in a Slice. |
-| **CONTEXT.md** | Contract file at each crate root. The agent's cross-session memory for that Slice. Not documentation. |
+| **CONTEXT.md** | Contract file at each crate root: the Slice's cross-session memory. |
 | **Hard Gate** | A point where the agent must pause for explicit written confirmation. |
 
-A Slice here is a **pipeline stage**, not a business transaction. Stages are ordered and
-each consumes the previous stage's output type. Independence means no stage imports
-another; it does not mean stages are unordered.
+A Slice is a **pipeline stage**: stages are ordered, each consumes the previous stage's
+output, and none imports another.
 
 ---
 
@@ -55,11 +50,9 @@ Silence, absence of objection, or topic continuation is not approval.
 |----|------|
 | `AC-001` | Create a Slice for a technical layer (`compiler/caching`, `compiler/logging`, `compiler/traversal`). Slices are named for compiler capabilities. Technical concerns belong in the Shared Kernel or inside the one Slice that needs them. |
 | `AC-002` | **[BLOCKER]** Import, call, or re-export another Slice's items. Slices depend on Shared Kernel crates only. Enforced by `test_no_cross_slice_dependencies`. |
-| `AC-003` | Commit commented-out code or dead code blocks. → CM-002 |
 | `AC-004` | Leave `todo!()`, `unimplemented!()`, or a function returning an empty result as a placeholder. A stub Slice is worse than a missing one. → CTX-003 |
 | `AC-005` | Name a crate or module `utils`, `helpers`, `common`, `misc`, `manager`, `processor`, or `base`. |
 | `AC-006` | Generate backward-compatible constructs: versioned traits, deprecation attributes, wrapper shims, migration TODOs. → CTX-001 |
-| `AC-007` | Write comments describing WHAT the code does. Comments explain WHY. → CM-001 |
 | `AC-008` | Put logic in `lib.rs` beyond the entry function's own body. A Slice's `lib.rs` declares its public surface and holds that body; everything else lives in a module. Internal `mod.rs` files are required by Rust and are exempt. |
 | `AC-009` | Put compilation logic in a Shared Kernel crate. Shared Kernel crates define types and pure operations on them. |
 
@@ -69,8 +62,6 @@ Silence, absence of objection, or topic continuation is not approval.
 | `AC-010` | A Slice exposes one public entry function per driver use, each named in its CONTEXT.md. An entry only the Slice's own tests call is `pub(crate)`. Its input and output types are named and owned by the Shared Kernel or by the Slice itself, never borrowed from a sibling Slice. |
 | `AC-011` | Return `Result<T, E>` from the entry point. Errors are values. Panics are reserved for compiler bugs that cannot be expressed as a diagnostic. |
 | `AC-012` | **[BLOCKER]** Update the affected Slice's CONTEXT.md in the same commit as any change to its entry point, public surface, or Shared Kernel dependency. → Section 12 |
-| `AC-013` | Guard clauses and early returns at the top of every function. Nested conditional depth beyond 2 must be refactored before delivery. → CQ-001 |
-| `AC-014` | Named constants for every magic number and magic string. → CM-004 |
 
 ---
 
@@ -190,14 +181,9 @@ governed by SB-001 rather than by convenience.
 
 ## 10. Diagnostics
 
-No Slice logs. A compiler's user-visible output is its diagnostics, and a Slice returns
-those to the Driver as values (DG-001) rather than emitting them. A Slice must not depend on
-`log`, `tracing`, or any logging crate, and must not write to stdout or stderr.
-
-The Driver is the one exception and is already using it: `neuroc` carries `log` + `env_logger`
-so `RUST_LOG=debug` traces the pipeline stages, the linker invocation, and the driver that was
-chosen. That is a developer facility on the orchestration layer, off unless asked for, and
-separate from diagnostics. Extending it is fine; pushing it down into a Slice is not.
+No Slice logs or writes to stdout/stderr, and none depends on `log`, `tracing` or another
+logging crate: diagnostics are returned to the Driver as values (DG-001). Only `neuroc`
+logs (`log` + `env_logger`, `RUST_LOG=debug` traces stages and the linker call).
 
 | ID | Severity | Rule |
 |----|----------|------|
@@ -280,7 +266,6 @@ public surface, a Shared Kernel dependency, or the Slice's name.
 
 ## 14. Enforcement
 
-These rules are machine-checked. A rule with a test is not a guideline.
 
 | Check | Enforces |
 |-------|----------|
@@ -290,5 +275,4 @@ These rules are machine-checked. A rule with a test is not a guideline.
 | `tools/check_docs_hygiene.py` | TS-006, plus the ban on written-down versions and private paths in tracked files |
 | `compiler/lexical-analysis/tests/tmlanguage_sync.rs` | The editor grammar tracks the lexer's token set |
 
-Everything else in this file is enforced by the agent reading it. That is the reason it is
-short: a rule nobody can check and nobody rereads is not a rule.
+Everything else is enforced by review.

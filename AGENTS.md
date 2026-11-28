@@ -35,25 +35,22 @@ Workspace layout (`compiler/`):
 | `mlir-backend` | MLIR/melior codegen for tensor bodies and GPU kernels |
 | `neuroc` | CLI driver; the only crate allowed to depend on every slice |
 
-**Architecture: Vertical Slice Architecture (VSA).** Crates are organized by
-language feature, not by technical layer. The rules an agent must not break:
+**Architecture: Vertical Slice Architecture (VSA)**, rules in [VSA.md](VSA.md). The
+ones an agent must not break:
 
 - A feature slice depends only on `infrastructure/` crates. Never on another
   feature slice.
-- One exception is allowlisted, and only one: `syntax-parsing` depends on
-  `lexical-analysis`, so `parse()` calls `tokenize()` internally instead of
-  making `neuroc` orchestrate the pair. It is named in
-  `compiler/syntax-parsing/CONTEXT.md` and enforced by
-  `compiler/neuroc/tests/architecture_tests.rs`. A second exception requires
-  changing that test first. Do not add one casually.
+- One allowlisted exception: `syntax-parsing` depends on `lexical-analysis`
+  (`parse()` calls `tokenize()`), enforced by
+  `compiler/neuroc/tests/architecture_tests.rs`. A second one needs that test
+  changed first.
 - Feature slices in each other's `[dev-dependencies]` are fine; the
   architecture test reads `[dependencies]` only.
 - No business logic in infrastructure crates.
 - Duplication across slices is preferred over coupling.
 
-Status (current phase, per-feature progress) lives in the
-[Quick Roadmap](README.md#quick-roadmap) and [CHANGELOG.md](CHANGELOG.md).
-Never restate it elsewhere. It goes stale.
+Status lives in the [Quick Roadmap](README.md#quick-roadmap) and
+[CHANGELOG.md](CHANGELOG.md) only.
 
 ## Build and Test Commands
 
@@ -76,9 +73,6 @@ cargo build --profile dev-optimized    # faster iteration (opt-level 1)
 cargo build --release                  # release build
 
 cargo test --workspace                 # full test suite
-cargo test -p lexical-analysis         # one crate
-cargo test <test_name>                 # one test by name
-cargo test -- --nocapture              # show test output
 
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
@@ -94,9 +88,8 @@ cargo run -p neuroc -- compile examples/basics/hello.nr   # compile to a binary
 cargo run -p neuroc -- compile examples/basics/hello.nr -O2 -o hello
 ```
 
-**Quality gates.** Every change must leave these green before it is called
-done. Run them; do not assume. `tools/gates.sh` runs all five and exits
-non-zero if any fails (`--full` adds the release build and rustdoc, `--asan`
+**Quality gates.** Every change leaves these green. `tools/gates.sh` runs all
+five with one exit code (`--full` adds the release build and rustdoc, `--asan`
 runs every example under AddressSanitizer):
 
 ```bash
@@ -120,11 +113,9 @@ never hand-format around it.
   `usize` for domain values.
 - **Borrow rather than clone.** A `.clone()` in a hot compiler path needs a
   reason.
-- **Document every `unsafe` block** with a safety rationale comment. The
-  backend is where these concentrate.
-- **Suppress a lint with `#[expect(...)]`, never `#[allow(...)]`.** An
-  expectation that stops firing warns, so a stale suppression cannot linger.
-  The workspace `allow_attributes` lint enforces it.
+- **Document every `unsafe` block** with a safety rationale comment.
+- **Suppress a lint with `#[expect(...)]`, never `#[allow(...)]`** (enforced by
+  the workspace `allow_attributes` lint).
 - **Doc comments (`///`) on public APIs.** Describe the contract, not the
   implementation.
 - Match the surrounding code's naming and comment density. New code should be
@@ -139,10 +130,8 @@ authoritative version):
 - `semantic-analysis` is not a production dependency of the backend; `neuroc`
   owns the pipeline ordering.
 
-**`CONTEXT.md` is a blocker, not a nicety.** Every slice has one, documenting
-its purpose, entry point, data ownership, and shared-kernel dependencies.
-Update the affected slice's `CONTEXT.md` in the *same commit* as any change to
-its entry point, public surface, or dependencies.
+**`CONTEXT.md` is a blocker** (VSA AC-012): update the slice's file in the same
+commit as any change to its entry point, public surface, or dependencies.
 
 **Commits.** Format: `scope: short summary` (50 chars or less), with an
 optional body explaining what and why. Valid scopes: `lexer`, `parser`,
@@ -170,14 +159,11 @@ Where tests go:
 - **Slice integration tests**: the crate's `tests/` directory, exercising the
   slice's public entry point.
 - **End-to-end tests**: `compiler/neuroc/tests/suite/`, one file per language
-  feature, each a module of the single `suite` test target (declare it in
-  `suite/main.rs`; a new file at `tests/` root would link a whole extra
-  binary). These compile real `.nr` source with the built `neuroc` binary and
-  run it. Use the `CompileTest` helper in
-  `compiler/neuroc/tests/suite/compile_harness/mod.rs`; it writes sources to a
-  temp dir and resolves the binary through `CARGO_BIN_EXE_neuroc`. That module
-  also holds the free functions tests share (`run`, `rejected`, `stdout_of`,
-  `compile_tagged` and others). Reach for them before writing a local helper.
+  feature, each a module of the single `suite` target (declare it in
+  `suite/main.rs`, never a new file at `tests/` root). They compile and run real
+  `.nr` source through the `CompileTest` helper and the shared functions in
+  `compiler/neuroc/tests/suite/compile_harness/mod.rs` (`run`, `rejected`,
+  `stdout_of`, `compile_tagged`, ...): use those before writing a local helper.
 - **Example programs**: `examples/`, grouped by topic. Each program is pinned
   two ways: its `main` return value is its process exit code, registered in
   `examples/expected.txt`, and its stdout is fixed byte for byte in a sibling
@@ -193,9 +179,8 @@ Cover error paths and boundary conditions, not just the happy path. Known
 open defects are registered in [docs/BUGS.md](docs/BUGS.md) as `BUG-NNN`;
 check there before reporting a new one, and remove the entry when it is fixed.
 
-Never write a test count into any document. The CI badge is the only honest
-source, and `tools/check_docs_hygiene.py` fails the build on hard-coded
-counts, on prose copies of the workspace version, and on references to
+Never write a test count or the version into a document:
+`tools/check_docs_hygiene.py` fails the build on both, and on references to
 local-only paths.
 
 CI additionally runs the suite on Linux/macOS/Windows against stable, plus a
@@ -207,13 +192,11 @@ container with only `cc`.
 
 ## Security Considerations
 
-Neuro is an alpha-stage compiler. Security-relevant work concentrates in three
-places, and agent changes should be read with them in mind:
+Security-relevant work concentrates in three places:
 
 - **Compiler integrity**: malformed or adversarial `.nr` input must not
-  panic, crash, read out of bounds, or hang the compiler. Parser and analysis
-  code must handle untrusted input defensively; this is the main reason the
-  no-`unwrap()` rule exists.
+  panic, crash, read out of bounds, or hang the compiler (the reason for the
+  no-`unwrap()` rule).
 - **Generated code safety**: a backend bug that emits incorrect IR is a
   security bug (uninitialized reads, bad pointer arithmetic, missing overflow
   or bounds guards). Codegen changes need runtime tests that execute the
@@ -224,11 +207,8 @@ places, and agent changes should be read with them in mind:
 
 Rules for agents:
 
-- Never commit secrets, tokens, or credentials. Check `.gitignore` before
-  referencing any path; if a file you are about to link, `include`, `mod`, or
-  cite matches an ignored pattern, remove the reference rather than committing
-  it. Build output, local assistant configuration, generated caches, and
-  private working notes are all ignored and must not appear in tracked files.
+- Never reference a gitignored path (link, `include`, `mod`, or prose) from a
+  tracked file; remove the reference instead.
 - Do not weaken or delete a runtime guard (overflow check, bounds check,
   division guard, null check) to make a test pass.
 - Do not disable, `#[ignore]`, or loosen a failing test, lint, or architecture
