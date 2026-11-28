@@ -216,7 +216,16 @@ impl Lowerer {
                 .contains_key(&format!("{}__{}", type_name.name, member.name)) =>
             {
                 let key = format!("{}__{}", type_name.name, member.name);
-                let lowered_args = self.lower_generic_method_args(&key, type_args, args)?;
+                // `V::pair(v, 5)`: the receiver is typed on its own, ahead of the arguments
+                // the method's parameters type.
+                let lowered_args = match args.split_first() {
+                    Some((receiver, rest)) if self.generic_method_takes_self(&key) => {
+                        let receiver = self.lower_expr(receiver, None)?;
+                        let rest = self.lower_generic_method_args(&key, type_args, rest)?;
+                        std::iter::once(receiver).chain(rest).collect()
+                    }
+                    _ => self.lower_generic_method_args(&key, type_args, args)?,
+                };
                 self.generic_assoc_instance_call(
                     &type_name.name,
                     &member.name,
@@ -799,17 +808,20 @@ impl Lowerer {
         hint
     }
 
-    /// The associated function `member` a generic `impl` of the template `base` declares.
+    /// The associated function or method `member` a generic `impl` of the template `base`
+    /// declares.
     fn generic_assoc_fn(&self, base: &str, member: &str) -> Option<&ast_types::MethodDef> {
         self.generic_impls
             .get(base)?
             .iter()
             .flat_map(|imp| &imp.methods)
-            .find(|m| m.name.name == member && m.self_param.is_none())
+            .find(|m| m.name.name == member)
     }
 
-    /// Lower `Cell::new(42)` on a generic type: the arguments (and any turbofish) infer the
-    /// instance, mirroring the checker, and the call goes to that instance's function.
+    /// Lower `Cell::new(42)` or `Cell::get(c)` on a generic type: the arguments (and any
+    /// turbofish) infer the instance, mirroring the checker, and the call goes to that
+    /// instance's function. A method's receiver is its first argument, taken as `base`
+    /// applied to its own parameters, as the checker types a method called by path.
     fn lower_generic_assoc_call(
         &mut self,
         base: &str,
@@ -822,7 +834,21 @@ impl Lowerer {
         let (params, own_generics): (Vec<ast_types::Type>, Vec<ast_types::GenericParam>) = self
             .generic_assoc_fn(base, member)
             .map(|m| {
-                let params = m.params.iter().map(|p| p.ty.clone()).collect();
+                let receiver = m.self_param.as_ref().map(|_| ast_types::Type::Generic {
+                    name: shared_types::Identifier::new(base.to_string(), span),
+                    args: generics
+                        .iter()
+                        .map(|g| {
+                            ast_types::GenericArg::Type(ast_types::Type::Named(g.name.clone()))
+                        })
+                        .collect(),
+                    lifetimes: Vec::new(),
+                    span,
+                });
+                let params = receiver
+                    .into_iter()
+                    .chain(m.params.iter().map(|p| p.ty.clone()))
+                    .collect();
                 (params, m.generics.clone())
             })
             .unwrap_or_default();
@@ -952,8 +978,10 @@ impl Lowerer {
         Ok(self.assoc_signature(&instance, member)?.0)
     }
 
-    /// A call to the generic associated function `member` of `type_name`, a concrete type
-    /// or an instance, at the instance its own parameters select.
+    /// A call to the generic associated function or method `member` of `type_name`, a
+    /// concrete type or an instance, at the instance its own parameters select. A method's
+    /// receiver leads `lowered_args`; only the arguments after it bind the method's own
+    /// parameters.
     fn generic_assoc_instance_call(
         &mut self,
         type_name: &str,
@@ -963,8 +991,10 @@ impl Lowerer {
         span: shared_types::Span,
     ) -> Result<HirExpr, LoweringError> {
         let key = format!("{}__{}", type_name, member);
-        let (name, params, ret) =
-            self.instantiate_generic_method(&key, type_args, &lowered_args, span)?;
+        let own = lowered_args
+            .get(usize::from(self.generic_method_takes_self(&key))..)
+            .unwrap_or_default();
+        let (name, params, ret) = self.instantiate_generic_method(&key, type_args, own, span)?;
         let lowered_args = coerce_to_params(lowered_args, &params);
         let callee = HirExpr::new(
             HirExprKind::Path {
@@ -1004,6 +1034,13 @@ impl Lowerer {
             .ok_or_else(|| LoweringError::UnresolvedCall {
                 target: format!("dyn {trait_name}.{method}"),
             })
+    }
+
+    /// Whether the generic method template `key` takes a `self` receiver.
+    fn generic_method_takes_self(&self, key: &str) -> bool {
+        self.generic_methods
+            .get(key)
+            .is_some_and(|t| t.def.self_param.is_some())
     }
 
     /// The key of `method` on `receiver` when that method is generic.

@@ -466,9 +466,11 @@ worklist drains after the ordinary items. The backend pre-declares all functions
 order is irrelevant. `unify_ast_hir` also binds through an instance: `Option<U>` against
 `Opt$g_i32` reads the instance's arguments (`instance_args`, from `struct_instances` /
 `enum_instance_args`) and unifies them pairwise, and through a function type position by
-position. An associated function of a generic type (`Cell::new(42)`, `generic_assoc_fn`) infers
-the type's instance the same way, plus any turbofish, and calls that instance's function
-(`lower_generic_assoc_call`). `lower_generic_args`, shared by all three, lowers a closure literal
+position. An associated function or method of a generic type called by path (`Cell::new(42)`,
+`Cell::get(c)`, `generic_assoc_fn`) infers the type's instance the same way, plus any turbofish,
+and calls that instance's function (`lower_generic_assoc_call`). A method's receiver is its first
+argument, unified against the type applied to its own parameters (`Cell<T>`), as the checker types
+a method called by path. `lower_generic_args`, shared by all three, lowers a closure literal
 for a function-typed parameter after the other arguments, as the checker types it, with a hint of
 what they bound (`generic_closure_hint`; `mentions_any` leaves a position naming an unbound
 parameter open), and keeps the arguments in their own order. An argument is lowered against its
@@ -568,6 +570,8 @@ nothing of its own: a call through a bound re-lowers on the concrete receiver, a
 route there: `lower_method_call` (receiver), the plain `Type::f` arm of `lower_call` (ahead of
 the enum-variant arm, since a template registers no `Type__f`), and `lower_generic_assoc_call`,
 where the turbofish lists the type's parameters first and the function's own after them.
+A method called by path (`V::pair(v, 5)`) carries its receiver as the first argument, lowered on
+its own; only the arguments after it bind the method's parameters (`generic_method_takes_self`).
 The instance's method name is the one generated name with a second `__`: the backend takes the
 receiver from the symbol's first segment only, and no user method name contains `__`, so
 `pick__g_i64` collides with nothing.

@@ -431,3 +431,95 @@ func main() -> i32 {
 "#;
     assert_eq!(crate::compile_harness::run("slice_field.nr", source), 21);
 }
+
+/// BUG-174: a generic type's method called by path, `W::get(w)`, infers the instance from
+/// its receiver argument, and agrees with the method-call form in every position.
+#[test]
+fn regression_bug_174_a_generic_method_called_by_path_compiles() {
+    let source = r#"
+struct W<I> { inner: I }
+
+impl<I> W<I> {
+    func get(self) -> I { self.inner }
+    func rank(&self) -> i32 { 3 }
+    func pair<U>(self, other: U) -> (I, U) { (self.inner, other) }
+}
+
+struct V { inner: i32 }
+
+impl V {
+    func pair<U>(self, other: U) -> (i32, U) { (self.inner, other) }
+}
+
+struct Ring<T, N> { items: [T; N] }
+
+impl<T, N> Ring<T, N> {
+    func size(self) -> u64 { N }
+}
+
+func id(x: i32) -> i32 { x }
+
+func main() -> i32 {
+    val (p, q) = V::pair(V { inner: 1 }, 2)
+    val (r, u) = W::pair::<i32, i64>(W { inner: 1 }, 1)
+    if p + q != 3 || r + u as i32 != 2 || Ring::size(Ring { items: [1, 2, 3] }) != 3 {
+        return 101
+    }
+    val probe = W { inner: 6 }
+    if W::get(W { inner: 6 }) != probe.get() {
+        return 100
+    }
+    val a = W::get(W { inner: 6 })
+    val b = W::get::<i32>(W { inner: 7 })
+    val w = W { inner: 3 }
+    val c = W::rank(w)
+    val (x, y) = W::pair(W { inner: 2 }, 5)
+    val t = if a > 0 { W::get(W { inner: 4 }) } else { 0 }
+    val f = |v: W<i32>| W::get(v)
+    a + b + c + x + y + t + f(W { inner: 8 }) + id(W::get(W { inner: 10 }))
+}
+"#;
+    // 6 + 7 + 3 + 2 + 5 + 4 + 8 + 10
+    assert_eq!(
+        crate::compile_harness::run("bug174_path_method.nr", source),
+        45
+    );
+}
+
+/// BUG-174: the same on a generic enum, and with an owned `string` payload that moves
+/// through the call and is dropped once.
+#[test]
+fn regression_bug_174_a_generic_enum_method_by_path_moves_its_receiver() {
+    let source = r#"
+enum Maybe<T> { Just(T), Nothing }
+
+impl<T> Maybe<T> {
+    func or(self, d: T) -> T {
+        match self {
+            Maybe::Just(v) => v,
+            Maybe::Nothing => d,
+        }
+    }
+}
+
+struct Box1<S> { s: S }
+
+impl<S> Box1<S> {
+    func take(self) -> S { self.s }
+}
+
+func main() -> i32 {
+    mut n = 0
+    for _ in 0..50 {
+        val h: string = "hello"
+        val s = Box1::take(Box1 { s: h.clone() })
+        n = s.len() as i32
+    }
+    val none: Maybe<i32> = Maybe::Nothing
+    Maybe::or(Maybe::Just(11), 0) + Maybe::or(none, 3) + n
+}
+"#;
+    let test = crate::compile_harness::CompileTest::new();
+    // 11 + 3 + 5
+    assert_eq!(test.run_leak_checked("bug174_enum_path.nr", source), 19);
+}

@@ -5,6 +5,43 @@ Open defects only, newest first. Every confirmed bug that is not yet fixed has a
 `CHANGELOG.md`, in the affected slice's `CONTEXT.md`, and in its regression test. IDs are
 never reused, so numbering stays stable as entries are removed.
 
+## BUG-176: a borrowing method called by path takes its receiver by value
+
+- **Status**: open, confirmed
+- **Area**: `semantic-analysis` (path-call signature of a method); `hir-lowering` (`lower_assoc_call`,
+  `lower_generic_assoc_call`)
+- **Severity**: major. A well-typed program fails to compile
+
+**Minimal repro**
+
+```neuro
+struct V { inner: i32 }
+
+impl V {
+    func peek(&self) -> i32 { self.inner }
+    func put(&mut self, v: i32) { self.inner = v }
+}
+
+func main() -> i32 {
+    val w = V { inner: 3 }
+    mut m = V { inner: 1 }
+    V::put(&mut m, 9)
+    V::peek(&w) + m.inner
+}
+```
+
+Expected: exit code 12, since `&self` is `self: &Self` and `&mut self` is `self: &mut Self`, so
+the path form takes `&V` and `&mut V` as its first argument. Observed: `type mismatch: expected V,
+found &mut V` and `expected V, found &V`. The checker types the receiver of every method called
+by path as `Self`, so `V::put(m, 9)` is accepted instead: it moves `m` and the write is lost.
+Generic types (`W::peek(w)`) behave the same.
+
+**Workaround**: call it as a method, `w.peek()` and `m.put(9)`.
+
+**Fix sketch**: give the path form's first parameter the `self` kind's type in the checker, and
+pass the borrow through in lowering (the backend already takes `&self` by value and `&mut self`
+by pointer). `V::peek(w)` is then refused, as the spec's desugaring says.
+
 ## BUG-175: a trait method returning its own type nested in itself does not compile
 
 - **Status**: open, confirmed
@@ -42,38 +79,6 @@ methods on `Iterator`.
 
 **Fix sketch**: defer a nested level's trait impls too, and register them from each implicit use
 in lowering (drop glue, operator and protocol lowering, `dyn` coercion) as well as from calls.
-
-## BUG-174: calling a generic type's method by path does not compile
-
-- **Status**: open, confirmed
-- **Area**: `hir-lowering` (`lower_generic_assoc_call`, `generic_assoc_fn`)
-- **Severity**: major. A well-typed program fails to compile
-
-**Minimal repro**
-
-```neuro
-struct W<I> { inner: I }
-
-impl<I> W<I> {
-    func get(self) -> I { self.inner }
-}
-
-func main() -> i32 {
-    W::get(W { inner: 6 })
-}
-```
-
-Expected: exit code 6, as `V::get(v)` gives on a non-generic `V`. Observed: the checker accepts it,
-then lowering fails with `unresolved call target 'W__get'`. A turbofish (`W::get::<i32>(...)`) fails
-the same way.
-
-**Root cause**: `generic_assoc_fn` finds only functions without `self`, so a method falls through to
-`lower_assoc_call`, which looks the template's own name up. Only instances have methods.
-
-**Workaround**: call it as a method, `W { inner: 6 }.get()`.
-
-**Fix sketch**: let `lower_generic_assoc_call` take a method too, inferring the instance from the
-receiver argument against the impl's target type.
 
 ## BUG-173: a device traversal whose function comes through a local panics
 

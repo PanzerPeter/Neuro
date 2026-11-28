@@ -11,6 +11,16 @@ means.
 
 ## [Unreleased]
 
+## [5.58.14] - 2026-11-28
+
+### Fixed
+
+- A generic type's method called by path, such as `W::get(w)` on `impl<I> W<I>`, compiles and
+  runs (BUG-174). The receiver argument infers the instance, with or without a turbofish
+  (`W::get::<i32>(w)`). A generic method called by path, such as `V::pair(v, 5)` on
+  `func pair<U>(self, other: U)`, infers its own parameters from the arguments after the
+  receiver.
+
 ## [5.58.13] - 2026-11-28
 
 ### Changed
